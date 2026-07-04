@@ -1,11 +1,15 @@
-# Data and model artifacts
+# --- Data and model artifacts (bootstrap documented in README / .ai/session_handoff.md)
 /data/
 /models/
 
-# Environment
+# --- MLflow local tracking store
+mlruns/
+mlflow.db
+
+# --- Environment / secrets
 .env
 
-# Python
+# --- Python build & cache
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -13,11 +17,17 @@ __pycache__/
 build/
 dist/
 
-# Jupyter
+# --- Test & tooling caches
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+
+# --- Jupyter
 .ipynb_checkpoints/
 
-# MLflow
-mlruns/
-mlflow.db
-
+# --- AI agent operational memory (machine-local; durable knowledge lives in context/)
 .ai/
+.claude/
+.agents/
