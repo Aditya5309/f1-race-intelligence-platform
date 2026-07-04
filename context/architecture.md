@@ -67,13 +67,36 @@ the master history table but are prohibited from the feature matrix.
   same-race teammate leakage.
 - Circuit features use prior visits only.
 - Standings use the previous calendar race; season-opening rows use prior-season final.
-- Train/validation/test windows are explicit; rows after 2024 enter none of them.
+- Train/validation/test windows are explicit per split strategy (Decision 018);
+  the default `historical` strategy keeps rows after 2024 out of every split, and
+  only strategies with an explicit forward-holdout opt-in may reach 2025+.
 
 ## Model architecture and MLflow
 
 `src/models/registry.py` defines five candidates: pole baseline, logistic regression,
 random forest, XGBoost, and LightGBM. Every fitted pipeline starts with `ColumnGuard`,
 which records names/order/dtypes and validates again at prediction time.
+
+`src/models/eras.py` (Decision 019) is the code-level single source of truth for
+F1 regulation-era boundaries (v8 2010–2013, hybrid 2014–2021, ground_effect
+2022–2025, future_engine 2026–ongoing), with import-time contiguity asserts. It
+exists because regulation rewrites cause concept drift — relationships learned
+under one ruleset weaken across a reset — so split windows are a domain choice.
+
+`src/models/splits.py` owns temporal selection through the `SplitStrategy`
+abstraction (Decisions 018/019). Each strategy carries an `EvaluationObjective`:
+
+| Preset | Windows | Objective |
+|---|---|---|
+| `historical` (default) | 2010–2021 / 2022–2023 / 2024 (literal Decision-008 contract) | cross-era generalization |
+| `hybrid_era` | 2014–2019 / 2020 / 2021, derived from `eras.HYBRID` | within-era validation |
+| `ground_effect` | 2022–2023 / 2024 / 2025, derived from `eras.GROUND_EFFECT`; forward-holdout opt-in | within-era validation |
+| `rolling_window_strategy(...)` | last N seasons, era-agnostic by design | production forecasting (Phase 8 shape) |
+
+`within_era_strategy(era)` derives within-era presets from the era table, so a
+future era needs only an `eras.py` edit. `temporal_split` and `season_folds`
+default to `historical`, so training, calibration, and analysis behavior is
+unchanged; no production code currently selects another strategy.
 
 `src/models/train.py` owns season-fold CV, tuning, validation/final-test controls,
 artifact/metric logging, and registry registration. MLflow uses the project-root

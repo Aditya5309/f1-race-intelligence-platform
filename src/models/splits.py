@@ -1,20 +1,71 @@
 """
 src/models/splits.py
 
-Temporal data splitting for model development (Decisions 008 and 012;
+Temporal data splitting for model development (Decisions 008, 012, 018, 019;
 reports/model_development_design.md Sections 2 and 4).
 
-Two responsibilities, both purely row selection — no fitting, no metrics:
+WHY SPLITS ARE REGULATION-AWARE (concept drift)
+-----------------------------------------------
+F1 regulation rewrites reset the competitive order (see src/models/eras.py
+and context/domain_knowledge.md Section 1): constructor form, dominance
+concentration, and qualifying-to-race relationships learned under one
+ruleset weaken or break under the next. A temporal split therefore does not
+just prevent leakage — it CHOOSES which drift question the evaluation
+answers. Each predefined strategy answers exactly one (Decision 019):
 
-1. `temporal_split(df)` — the fixed outer split (Decision 008):
-       train 2010-2021 / validation 2022-2023 / test 2024.
-   Year ranges are EXPLICIT constants, never derived from the data's max
-   year: features.parquet contains 2025-2026 rows (the forward holdout,
-   Decision 012 Section 13.1) that must never enter any split. Design doc
-   Section 14.4 mandates this guard.
+  EvaluationObjective.CROSS_ERA_GENERALIZATION
+      "Can a model trained before a regulation change generalize to a new
+       era?"  -> `historical` (the Decision-008 default; the research
+      setting behind every registered artifact).
 
-2. `season_folds(train_df)` — season-grouped expanding-window CV folds
-   within the training split (design doc Section 4):
+  EvaluationObjective.WITHIN_ERA_VALIDATION
+      "How well does the model perform when trained and evaluated under the
+       same technical regulations?"  -> `hybrid_era`, `ground_effect`
+      (built from the era table by `within_era_strategy`).
+
+  EvaluationObjective.PRODUCTION_FORECASTING
+      "What training window would a real F1 analytics team use to predict
+       the next season?"  -> `rolling_window_strategy(...)` (recent seasons
+      regardless of era labels — the Phase 8 retraining shape; windows that
+      span a reset carry weakened constructor signal, a documented caveat,
+      not an error).
+
+Preset summary (`STRATEGIES`):
+
+    historical    train 2010-2021 / val 2022-2023 / test 2024
+                  (LITERAL Decision-008 years — never era-derived, so era-
+                  table edits can never move the baseline contract)
+    hybrid_era    train 2014-2019 / val 2020 / test 2021
+                  (entirely inside the hybrid era; Decision 019 corrected
+                  the earlier definition that tested on 2022)
+    ground_effect train 2022-2023 / val 2024 / test 2025
+                  (entirely inside the ground-effect era; touches the
+                  forward holdout — see the guard note below)
+
+MECHANICS
+---------
+1. `SplitStrategy` — a frozen, validated definition of train/validation/test
+   year windows (Decision 018), tagged with its `EvaluationObjective`.
+   `within_era_strategy(era)` carves a CLOSED regulation era's final seasons
+   into val/test; adding a future era (e.g. 2026) to src/models/eras.py makes
+   its within-era preset a one-liner with no changes to splitting logic.
+
+2. `temporal_split(df, strategy=...)` — the outer split for the selected
+   strategy. Year ranges are EXPLICIT per-strategy constants, never derived
+   from the data's max year: features.parquet contains 2025-2026 rows (the
+   forward holdout, Decision 012 Section 13.1) that must never enter a
+   split silently. Design doc Section 14.4 mandates this guard.
+
+   Forward-holdout policy (Decision 018): a strategy may only include
+   years >= FORWARD_HOLDOUT_MIN_YEAR if it declares
+   `allow_forward_holdout=True` at construction — and actually running such
+   a strategy on real data additionally requires the 2025-2026 provenance
+   resolution (domain_knowledge.md Section 8). The default remains a hard
+   rejection, so no existing caller can leak the holdout by accident.
+
+3. `season_folds(train_df, ...)` — season-grouped expanding-window CV folds
+   within the selected strategy's training window (design doc Section 4),
+   e.g. for the historical default:
        fold 1: train 2010-2015 -> validate 2016
        ...
        fold 6: train 2010-2020 -> validate 2021
@@ -31,30 +82,299 @@ never features (design doc Section 11.1).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import pandas as pd
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
-
-# Decision 008 — fixed outer split, inclusive year ranges.
-TRAIN_YEARS: tuple[int, int] = (2010, 2021)
-VAL_YEARS: tuple[int, int] = (2022, 2023)
-TEST_YEARS: tuple[int, int] = (2024, 2024)
+from src.models import eras
 
 # Decision 012 Section 13.1 — 2025+ is the forward holdout, reserved for the
-# Phase 8 retraining/monitoring rehearsal. No Phase 4 code may consume it.
+# Phase 8 retraining/monitoring rehearsal. Only strategies that explicitly
+# declare `allow_forward_holdout=True` may reach it (Decision 018), and
+# running such a strategy on real data is additionally gated on resolving
+# 2025-2026 data provenance (domain_knowledge.md Section 8).
 FORWARD_HOLDOUT_MIN_YEAR: int = 2025
 
-# Design doc Section 4 — six expanding-window folds validating 2016..2021.
+# Design doc Section 4 — six expanding-window folds for the historical
+# strategy, validating 2016..2021. Other strategies carry their own default.
 DEFAULT_N_FOLDS: int = 6
+
+
+class EvaluationObjective(str, Enum):
+    """The drift question a split strategy answers (Decision 019).
+
+    str-valued so it logs cleanly to MLflow tags and reports.
+    """
+
+    CROSS_ERA_GENERALIZATION = "cross_era_generalization"
+    WITHIN_ERA_VALIDATION = "within_era_validation"
+    PRODUCTION_FORECASTING = "production_forecasting"
+    CUSTOM = "custom"
+
+
+@dataclass(frozen=True)
+class SplitStrategy:
+    """
+    A validated train/validation/test year-window definition (Decision 018).
+
+    All windows are inclusive `(lo, hi)` year ranges and must be strictly
+    ordered without overlap: train < val < test. Gaps between windows are
+    permitted (none of the shipped presets have any).
+
+    Attributes
+    ----------
+    name : registry key and MLflow-loggable identifier.
+    train_years, val_years, test_years : inclusive year windows.
+    default_n_folds : `season_folds` fold count when the caller passes none;
+        sized so every fold keeps at least one full training season.
+    allow_forward_holdout : opt-in required for any window that reaches
+        FORWARD_HOLDOUT_MIN_YEAR. Never set this on a new strategy without
+        checking Decision 012 Section 13.1 and the provenance gate.
+    description : one-line purpose, for reports and logs.
+    objective : which drift question this strategy answers (Decision 019);
+        directly constructed ad-hoc strategies default to CUSTOM.
+    """
+
+    name: str
+    train_years: tuple[int, int]
+    val_years: tuple[int, int]
+    test_years: tuple[int, int]
+    default_n_folds: int = 1
+    allow_forward_holdout: bool = False
+    description: str = ""
+    objective: EvaluationObjective = EvaluationObjective.CUSTOM
+
+    def __post_init__(self) -> None:
+        windows = {
+            "train": self.train_years,
+            "val": self.val_years,
+            "test": self.test_years,
+        }
+        for label, (lo, hi) in windows.items():
+            if lo > hi:
+                raise ValueError(
+                    f"Strategy '{self.name}': {label} window ({lo}, {hi}) is "
+                    "inverted — expected (lo, hi) with lo <= hi."
+                )
+        if not (self.train_years[1] < self.val_years[0]
+                and self.val_years[1] < self.test_years[0]):
+            raise ValueError(
+                f"Strategy '{self.name}': windows must be strictly ordered "
+                f"train < val < test without overlap; got train={self.train_years}, "
+                f"val={self.val_years}, test={self.test_years}."
+            )
+        if not self.allow_forward_holdout and self.test_years[1] >= FORWARD_HOLDOUT_MIN_YEAR:
+            raise ValueError(
+                f"Strategy '{self.name}' reaches forward-holdout year(s) "
+                f">= {FORWARD_HOLDOUT_MIN_YEAR} without allow_forward_holdout=True "
+                "— Decision 012 Section 13.1 requires an explicit opt-in."
+            )
+        if self.default_n_folds < 1:
+            raise ValueError(
+                f"Strategy '{self.name}': default_n_folds must be >= 1."
+            )
+
+
+def within_era_strategy(
+    era: eras.RegulationEra | str,
+    *,
+    val_seasons: int = 1,
+    test_seasons: int = 1,
+    default_n_folds: int | None = None,
+    allow_forward_holdout: bool = False,
+    name: str | None = None,
+) -> SplitStrategy:
+    """
+    Build a WITHIN_ERA_VALIDATION strategy from a closed regulation era
+    (Decision 019): the era's final `test_seasons` seasons form the test
+    window, the `val_seasons` before them the validation window, and every
+    earlier era season the training window. All windows share one ruleset,
+    so the evaluation measures skill under stable regulations rather than
+    cross-era generalization.
+
+    This is the future-proofing hook: when a new era is closed in
+    src/models/eras.py, its within-era preset is one call — no changes to
+    splitting logic.
+
+    Raises
+    ------
+    ValueError
+        If the era is ongoing (no closed year range to carve — via
+        RegulationEra.year_range), if the era is too short to leave at
+        least two training seasons (season_folds needs one full season per
+        fold side), or — via SplitStrategy validation — if the era reaches
+        the forward holdout without `allow_forward_holdout=True`.
+    KeyError
+        If `era` names no known regulation era.
+    """
+    era = eras.get_era(era)
+    if val_seasons < 1 or test_seasons < 1:
+        raise ValueError(
+            "within_era_strategy requires val_seasons >= 1 and test_seasons >= 1."
+        )
+    start, end = era.year_range   # loud for ongoing eras
+    train_hi = end - val_seasons - test_seasons
+    train_seasons = train_hi - start + 1
+    if train_seasons < 2:
+        raise ValueError(
+            f"Era '{era.name}' ({start}-{end}) is too short for "
+            f"val_seasons={val_seasons} + test_seasons={test_seasons}: only "
+            f"{max(train_seasons, 0)} training season(s) would remain, and "
+            "season_folds needs at least two."
+        )
+    return SplitStrategy(
+        name=name or f"{era.name}_within_era",
+        train_years=(start, train_hi),
+        val_years=(train_hi + 1, train_hi + val_seasons),
+        test_years=(end - test_seasons + 1, end),
+        default_n_folds=(default_n_folds if default_n_folds is not None
+                         else min(DEFAULT_N_FOLDS, train_seasons - 1)),
+        allow_forward_holdout=allow_forward_holdout,
+        description=(
+            f"Within-era validation inside the {era.label} "
+            f"({start}-{end}): same technical regulations for train, "
+            "validation, and test."
+        ),
+        objective=EvaluationObjective.WITHIN_ERA_VALIDATION,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Preset strategies (Decisions 018/019). Era boundaries live in
+# src/models/eras.py; the ONLY literal years below are the Decision-008
+# baseline, which is a frozen contract and must never move with era edits.
+# ---------------------------------------------------------------------------
+
+HISTORICAL = SplitStrategy(
+    name="historical",
+    train_years=(2010, 2021),   # Decision 008 — literal on purpose
+    val_years=(2022, 2023),
+    test_years=(2024, 2024),
+    default_n_folds=DEFAULT_N_FOLDS,
+    description=(
+        "Decision-008 baseline (CROSS-ERA GENERALIZATION): trains on the "
+        "pooled V8 + hybrid eras (2010-2021) and evaluates entirely across "
+        "the 2022 ground-effect reset — the research setting behind every "
+        "registered artifact. Measured consequence (Decision 014): the "
+        "model's top-1 edge concentrates in dominance seasons."
+    ),
+    objective=EvaluationObjective.CROSS_ERA_GENERALIZATION,
+)
+
+# Decision 019 corrected this preset: it previously tested on 2022 (the
+# first ground-effect season), which made it a second cross-era experiment
+# mislabeled as within-era. It now stays entirely inside the hybrid
+# regulations. Caveat: its validation season (2020) ran a COVID-shortened
+# calendar (same ruleset, fewer races).
+HYBRID_ERA = within_era_strategy(
+    eras.HYBRID,
+    default_n_folds=3,
+    name="hybrid_era",
+)
+
+GROUND_EFFECT = within_era_strategy(
+    eras.GROUND_EFFECT,
+    allow_forward_holdout=True,   # test window is 2025 — Decision 018 opt-in;
+    name="ground_effect",         # real-data use gated on provenance (S8)
+)
+
+STRATEGIES: dict[str, SplitStrategy] = {
+    s.name: s for s in (HISTORICAL, HYBRID_ERA, GROUND_EFFECT)
+}
+
+DEFAULT_STRATEGY: SplitStrategy = HISTORICAL
+
+# Decision 008 backward-compatibility aliases — the historical preset IS the
+# fixed outer split every existing caller relies on. Do not remove.
+TRAIN_YEARS: tuple[int, int] = HISTORICAL.train_years
+VAL_YEARS: tuple[int, int] = HISTORICAL.val_years
+TEST_YEARS: tuple[int, int] = HISTORICAL.test_years
+
+
+def rolling_window_strategy(
+    test_start_year: int,
+    *,
+    train_seasons: int = 5,
+    val_seasons: int = 1,
+    test_seasons: int = 1,
+    allow_forward_holdout: bool = False,
+    name: str | None = None,
+) -> SplitStrategy:
+    """
+    Build a PRODUCTION_FORECASTING strategy anchored on the test season
+    (Decisions 018/019 — the Phase 8 automated-retraining shape): train on
+    the most recent completed seasons to predict the next one, the window a
+    real analytics team would use.
+
+    Windows are contiguous and counted backwards from `test_start_year`:
+    validation covers the `val_seasons` seasons immediately before the test
+    window, training the `train_seasons` seasons before that. Example:
+    `rolling_window_strategy(2024)` -> train 2018-2022, val 2023, test 2024.
+
+    Era caveat (deliberate): rolling windows ignore era boundaries. A window
+    spanning a regulation reset carries weakened constructor-form signal for
+    post-reset seasons (domain_knowledge.md Section 1) — expected domain
+    behavior to report, not an error to prevent. Use `eras.era_of()` if a
+    caller wants to flag boundary-spanning windows.
+
+    Raises
+    ------
+    ValueError
+        If any window length is < 1, if `train_seasons` < 2 (season_folds
+        needs at least one train season per fold), or — via SplitStrategy
+        validation — if the test window reaches the forward holdout without
+        `allow_forward_holdout=True`.
+    """
+    if train_seasons < 2:
+        raise ValueError(
+            "rolling_window_strategy requires train_seasons >= 2 so that "
+            "season_folds keeps at least one full training season per fold."
+        )
+    if val_seasons < 1 or test_seasons < 1:
+        raise ValueError(
+            "rolling_window_strategy requires val_seasons >= 1 and test_seasons >= 1."
+        )
+
+    val_start = test_start_year - val_seasons
+    train_start = val_start - train_seasons
+    return SplitStrategy(
+        name=name or f"rolling_{train_seasons}_{val_seasons}_{test_seasons}_test{test_start_year}",
+        train_years=(train_start, val_start - 1),
+        val_years=(val_start, test_start_year - 1),
+        test_years=(test_start_year, test_start_year + test_seasons - 1),
+        default_n_folds=min(DEFAULT_N_FOLDS, train_seasons - 1),
+        allow_forward_holdout=allow_forward_holdout,
+        description=(
+            f"Production forecasting: {train_seasons} train / {val_seasons} "
+            f"val / {test_seasons} test most-recent seasons, testing from "
+            f"{test_start_year}."
+        ),
+        objective=EvaluationObjective.PRODUCTION_FORECASTING,
+    )
+
+
+def get_strategy(strategy: SplitStrategy | str) -> SplitStrategy:
+    """Resolve a strategy object or preset name; loud on unknown names."""
+    if isinstance(strategy, SplitStrategy):
+        return strategy
+    try:
+        return STRATEGIES[strategy]
+    except KeyError:
+        raise KeyError(
+            f"Unknown split strategy '{strategy}'. Available presets: "
+            f"{sorted(STRATEGIES)}; or pass a SplitStrategy (e.g. from "
+            "within_era_strategy() or rolling_window_strategy())."
+        ) from None
 
 
 @dataclass(frozen=True)
 class TemporalSplit:
-    """The Decision-008 outer split. Frames are copies; mutate freely."""
+    """An outer split. Frames are copies; mutate freely."""
     train: pd.DataFrame
     val: pd.DataFrame
     test: pd.DataFrame
+    strategy: SplitStrategy = DEFAULT_STRATEGY
 
 
 @dataclass(frozen=True)
@@ -72,40 +392,55 @@ def _select_years(df: pd.DataFrame, years: tuple[int, int]) -> pd.DataFrame:
     return df.loc[df["year"].between(lo, hi)].copy()
 
 
-def temporal_split(df: pd.DataFrame) -> TemporalSplit:
+def temporal_split(
+    df: pd.DataFrame, strategy: SplitStrategy | str = DEFAULT_STRATEGY,
+) -> TemporalSplit:
     """
-    Split a feature frame into the fixed Decision-008 train/val/test windows.
+    Split a feature frame into a strategy's train/val/test windows.
+
+    Defaults to the `historical` preset — the fixed Decision-008 split —
+    so existing callers are unchanged.
 
     Raises
     ------
     KeyError
-        If `df` has no 'year' column.
+        If `df` has no 'year' column, or `strategy` names no known preset.
     ValueError
-        If any split comes back empty (wrong input frame — e.g. an already
-        year-filtered subset), or if any split contains forward-holdout
-        years or overlapping raceIds (both indicate a bug in this module or
-        corrupted input, and must be loud).
+        If any split comes back empty (wrong input frame, or — for
+        forward-era strategies like `ground_effect` — a season whose data
+        is not available yet), or if any split contains forward-holdout
+        years without the strategy's opt-in, or overlapping raceIds (both
+        indicate a bug in this module or corrupted input, and must be loud).
     """
+    strategy = get_strategy(strategy)
     if "year" not in df.columns:
         raise KeyError("temporal_split requires a 'year' column.")
 
     split = TemporalSplit(
-        train=_select_years(df, TRAIN_YEARS),
-        val=_select_years(df, VAL_YEARS),
-        test=_select_years(df, TEST_YEARS),
+        train=_select_years(df, strategy.train_years),
+        val=_select_years(df, strategy.val_years),
+        test=_select_years(df, strategy.test_years),
+        strategy=strategy,
     )
 
-    parts = {"train": split.train, "val": split.val, "test": split.test}
-    for name, part in parts.items():
+    windows = {
+        "train": (split.train, strategy.train_years),
+        "val": (split.val, strategy.val_years),
+        "test": (split.test, strategy.test_years),
+    }
+    for name, (part, (lo, hi)) in windows.items():
         if part.empty:
             raise ValueError(
-                f"Temporal split produced an empty '{name}' set — the input "
-                "frame does not cover the Decision-008 year windows."
+                f"Split strategy '{strategy.name}' produced an empty '{name}' "
+                f"set for years {lo}-{hi} — the input frame has no rows in "
+                "that window (wrong input frame, or the season's data is not "
+                "available yet)."
             )
         # Defense in depth: explicit ranges make this structurally
         # impossible, but the forward holdout must never leak silently
-        # (design doc Section 14.4).
-        if int(part["year"].max()) >= FORWARD_HOLDOUT_MIN_YEAR:
+        # (design doc Section 14.4; Decision 018 opt-in).
+        if (not strategy.allow_forward_holdout
+                and int(part["year"].max()) >= FORWARD_HOLDOUT_MIN_YEAR):
             raise ValueError(
                 f"'{name}' split contains forward-holdout year(s) "
                 f">= {FORWARD_HOLDOUT_MIN_YEAR} — Decision 012 Section 13.1 violation."
@@ -123,33 +458,44 @@ def temporal_split(df: pd.DataFrame) -> TemporalSplit:
 
 
 def season_folds(
-    train_df: pd.DataFrame, n_folds: int = DEFAULT_N_FOLDS,
+    train_df: pd.DataFrame,
+    n_folds: int | None = None,
+    strategy: SplitStrategy | str = DEFAULT_STRATEGY,
 ) -> list[SeasonFold]:
     """
-    Expanding-window CV folds over the seasons of the training split.
+    Expanding-window CV folds over the seasons of a strategy's training split.
 
     The last `n_folds` seasons each serve once as a validation season; each
     fold trains on every season strictly before its validation season. All
     rows of a race land on one side of every boundary (year-based selection —
-    a race belongs to exactly one season).
+    a race belongs to exactly one season). `n_folds=None` uses the strategy's
+    `default_n_folds` (6 for the historical preset — unchanged behavior).
+
+    Pass the same `strategy` used for `temporal_split`: the training-window
+    guard below is what keeps out-of-split data (and therefore the OOF
+    calibrator, Decision 015) from ever seeing validation/test seasons.
 
     Raises
     ------
     ValueError
-        If `train_df` contains years outside TRAIN_YEARS (this function must
-        only ever see the training split — passing val/test data here would
-        leak it into model selection), or if `n_folds` leaves no training
-        seasons for the first fold.
+        If `train_df` contains years outside the strategy's training window
+        (this function must only ever see the training split — passing
+        val/test data here would leak it into model selection), or if
+        `n_folds` leaves no training seasons for the first fold.
     """
+    strategy = get_strategy(strategy)
     if "year" not in train_df.columns:
         raise KeyError("season_folds requires a 'year' column.")
 
-    lo, hi = TRAIN_YEARS
+    lo, hi = strategy.train_years
     if not train_df["year"].between(lo, hi).all():
         raise ValueError(
-            f"season_folds expects the training split only ({lo}-{hi}); "
+            f"season_folds expects the '{strategy.name}' training split only ({lo}-{hi}); "
             f"got years {sorted(train_df.loc[~train_df['year'].between(lo, hi), 'year'].unique())}."
         )
+
+    if n_folds is None:
+        n_folds = strategy.default_n_folds
 
     seasons = sorted(int(y) for y in train_df["year"].unique())
     if n_folds < 1 or n_folds >= len(seasons):

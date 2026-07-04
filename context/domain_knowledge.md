@@ -118,6 +118,15 @@ competitive seasons the model still adds top-3 recall (75–82% vs pole's
 pattern — or worse — on the 2025–2026 forward holdout (convergence + 2026
 reset); this is domain behavior, not pipeline failure.
 
+### Era boundaries materialized in code (2026-07-04, Decision 019)
+The era segmentation of this section is now a code-level table:
+`src/models/eras.py` (`REGULATION_ERAS`: v8 2010–2013, hybrid 2014–2021,
+ground_effect 2022–2025, future_engine 2026–ongoing), consumed by the split
+strategies in `src/models/splits.py` (within-era vs cross-era vs production-
+forecasting objectives). Keep this section and that table in sync — the
+Maintenance Protocol applies to both. NOTE: this materializes eras for SPLIT
+definitions only; regulation-era *model features* remain excluded (§11).
+
 ### Candidate Features (none implemented — see §11)
 - `regulation_era` categorical (2010–2013, 2014–2021, 2022–2025, 2026–) [High value for era-aware analysis; Medium for direct model gain].
 - `races_since_regulation_reset` (constructor-level counter) [Medium].
