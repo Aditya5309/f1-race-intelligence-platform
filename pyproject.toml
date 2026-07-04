@@ -1,0 +1,59 @@
+# Packaging (PEP 621) — single source of truth for version, Python floor,
+# and dependencies (Decision 020). requirements.txt is a thin installer shim.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "f1-race-winner-prediction"
+version = "1.1.0"
+description = "Production-style ML platform predicting F1 race winners from pre-race information"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Aditya Joshi", email = "adityajoshi334@gmail.com" }]
+# Floor set by the pinned scientific stack (numpy 2.x, pandas 2.3);
+# developed and tested on 3.14. setup.py's old ">=3.9" claim was wrong.
+requires-python = ">=3.11"
+
+# Runtime: data pipeline, training/analysis, serving, dashboard.
+# Compatible-release pins (~=) hold minor versions, allow patches
+# (Decision 012 point 5 pinning policy carried over from requirements.txt).
+dependencies = [
+    "pandas~=2.3.3",
+    "numpy~=2.5.0",
+    "scikit-learn~=1.8.0",
+    "scipy~=1.17.1",
+    "xgboost~=3.2.0",
+    "lightgbm~=4.6.0",
+    "shap~=0.52.0",
+    "mlflow~=3.12.0",
+    "fastapi~=0.136.3",
+    "uvicorn~=0.48.0",
+    "streamlit~=1.57.0",
+    "httpx~=0.28.1",
+    "pydantic-settings~=2.14.2",
+    "matplotlib~=3.10.9",
+    "pyarrow~=23.0.1",
+    "plotly~=6.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest~=9.0.3",
+    "pytest-cov~=7.0",
+    "ruff~=0.14",
+    "notebook~=7.5.6",
+]
+
+[project.urls]
+Repository = "https://github.com/Aditya5309/f1-race-intelligence-platform"
+
+[tool.setuptools]
+# Parity with the retired setup.py: only src/ is an installed package.
+# app/ is a serving-entry directory run from the project root
+# (uvicorn app.api:app / streamlit run app/dashboard.py), not a library.
+packages = { find = { include = ["src", "src.*"] } }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

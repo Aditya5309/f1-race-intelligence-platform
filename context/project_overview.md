@@ -79,7 +79,7 @@ Layer boundaries:
 | API | FastAPI, uvicorn, pydantic |
 | Dashboard | Streamlit, Plotly, httpx |
 | Configuration | pydantic-settings, `F1_` environment prefix |
-| Tests | pytest, 285 tests at baseline |
+| Tests | pytest, 314 tests (285 at the Phase-5 milestone baseline) |
 
 ## Repository structure
 
@@ -99,8 +99,8 @@ src/models/             splits, registry, evaluation, training, analysis,
                         calibration, prediction
 tests/                  unit/integration tests mirroring implemented layers
 mlflow.db               local MLflow tracking/registry database
-requirements.txt        runtime/development dependencies
-setup.py                editable package metadata
+pyproject.toml          PEP 621 packaging: version, Python floor, dependencies
+requirements.txt        installer shim (`-e .[dev]`) — pins live in pyproject.toml
 ```
 
 ## Operational baseline

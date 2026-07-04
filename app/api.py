@@ -34,6 +34,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as _package_version
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -45,7 +46,13 @@ from src.models.registry import training_schema
 
 logger = logging.getLogger("f1.api")
 
-API_VERSION = "1.0.0"
+# Single-source version (Decision 020): pyproject.toml is the only place the
+# version is defined; the fallback covers running from a checkout that was
+# never `pip install -e .`-ed (unsupported, but should not crash /health).
+try:
+    API_VERSION = _package_version("f1-race-winner-prediction")
+except PackageNotFoundError:                                    # pragma: no cover
+    API_VERSION = "0.0.0+uninstalled"
 
 
 # ---------------------------------------------------------------------------

@@ -796,3 +796,48 @@ production forecasting) existed only as prose.
 - Era boundaries are public years in advance — era metadata is not leakage
   (`domain_knowledge.md` §1); the §11 exclusion of regulation-era *model
   features* still stands (eras inform SPLITS here, not the feature matrix).
+
+---
+
+## Decision 020 — Packaging on pyproject.toml; single-source version; repo hygiene baseline
+
+**Date:** 2026-07-05
+**Status:** Accepted
+
+**Context:** The Phase-A engineering audit found: `setup.py` declared
+`python_requires>=3.9` while the pinned stack (numpy 2.x) requires ≥3.11 and the
+dev environment runs 3.14; three disagreeing version sources (`setup.py` 0.1.0,
+git tag v1.0.0, hardcoded `API_VERSION` 1.0.0); dev tools (pytest, notebook)
+shipped as runtime dependencies; no LICENSE on a public GitHub repo; no
+line-ending normalization (Windows dev, future Linux CI); and gitignore gaps.
+
+**Decision:**
+- **Packaging is PEP 621 `pyproject.toml`; `setup.py` is deleted.** Distribution
+  name stays `f1-race-winner-prediction`; only `src/` is packaged (parity with
+  the old setup.py — `app/` remains a serving-entry directory run from the
+  project root, not a library). `requires-python = ">=3.11"`.
+- **Version 1.1.0, defined once** in pyproject.toml. `app/api.py` reads it via
+  `importlib.metadata` (fallback `0.0.0+uninstalled`). Release tags must match
+  the pyproject version going forward (v1.0.0 tag = the pre-migration release).
+- **Dependency split:** runtime deps (pipeline, training/analysis incl.
+  shap/matplotlib, serving, dashboard) in `[project.dependencies]` with the
+  Decision-012 `~=` pinning policy; `[project.optional-dependencies].dev` holds
+  pytest, pytest-cov, ruff, notebook (Phase B/C consumers — declared, not yet
+  wired into CI). `requirements.txt` becomes a `-e .[dev]` shim so every
+  documented install command keeps working.
+- **Repo hygiene:** MIT LICENSE (owner-approved); `.gitattributes` normalizes
+  all text to LF with binary exemptions (png/parquet/zip/db/pkl); `.gitignore`
+  adds tooling caches and AI working dirs. **Memory-versioning policy:**
+  `context/` (decisions, architecture, domain knowledge, overview) is tracked —
+  durable knowledge; `.ai/` (status, handoff, backlog, agent manual) is
+  machine-local operational memory and stays untracked.
+
+**Consequences:**
+- Docker base images and CI matrices can read a truthful Python floor; one
+  version string governs releases, the API, and the package.
+- `pip install -e .` gives a runtime-only environment (future serving images);
+  `pip install -r requirements.txt` gives the full dev environment.
+- Contributors on any OS produce byte-identical text files.
+- `.ai/` files do not travel with the repo — a fresh clone bootstraps agent
+  context from `context/` + README; if collaboration later needs shared
+  operational state, that reversal needs a new decision.

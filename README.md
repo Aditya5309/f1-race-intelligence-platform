@@ -2,7 +2,8 @@
 
 **A production-style Machine Learning, MLOps, and Data Engineering platform that predicts Formula 1 race winners from pre-race information.**
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-1.8-orange)
 ![MLflow](https://img.shields.io/badge/MLflow-3.12-0194E2)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688)
@@ -119,7 +120,7 @@ tests/               285 pytest tests mirroring every implemented layer
 
 ## 6. Quick Start
 
-**Prerequisites:** Python ≥ 3.9 and the Ergast-format CSV files in `data/` (data is not committed to git).
+**Prerequisites:** Python ≥ 3.11 and the Ergast-format CSV files in `data/` (data is not committed to git).
 
 ```bash
 # 1. Install
@@ -230,7 +231,7 @@ Beyond the roadmap milestones, measured candidates for the next model iteration 
 
 ## 12. License
 
-No license has been granted yet — all rights reserved. The underlying historical data follows the Ergast schema and is not distributed with this repository; obtain it separately and note its own terms of use.
+This project is licensed under the [MIT License](LICENSE). The underlying historical data follows the Ergast schema and is not distributed with this repository; obtain it separately and note its own terms of use.
 
 ---
 
