@@ -1,0 +1,17 @@
+# Deterministic line endings across Windows/Linux/macOS and CI.
+# Text files are stored and checked out with LF; binaries are left untouched.
+* text=auto eol=lf
+
+# Binary assets — never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.parquet binary
+*.db binary
+*.pkl binary
+
+# Notebooks are JSON text but large diffs; keep LF like other text.
+*.ipynb text eol=lf
