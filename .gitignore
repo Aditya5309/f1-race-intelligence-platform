@@ -1,0 +1,23 @@
+# Data and model artifacts
+/data/
+/models/
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MLflow
+mlruns/
+mlflow.db
+
+.ai/
