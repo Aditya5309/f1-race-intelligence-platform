@@ -32,8 +32,8 @@ Design rules enforced here:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -86,7 +86,7 @@ class ColumnGuard(BaseEstimator, TransformerMixin):
                 f"unexpected: {[c for c in X.columns if c not in expected]}."
             )
 
-    def fit(self, X: pd.DataFrame, y=None) -> "ColumnGuard":
+    def fit(self, X: pd.DataFrame, y=None) -> ColumnGuard:
         self._check(X, list(FEATURE_COLUMNS), "FEATURE_COLUMNS")
         self.feature_names_in_ = list(X.columns)
         self.feature_dtypes_in_ = {col: str(dtype) for col, dtype in X.dtypes.items()}
@@ -138,7 +138,7 @@ class PoleSitterBaseline(BaseEstimator, ClassifierMixin):
     remapped to field_size + 1 upstream, so 1 is unambiguous).
     """
 
-    def fit(self, X: pd.DataFrame, y) -> "PoleSitterBaseline":
+    def fit(self, X: pd.DataFrame, y) -> PoleSitterBaseline:
         self.classes_ = np.array([0, 1])
         return self
 

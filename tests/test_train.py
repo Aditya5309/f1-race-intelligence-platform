@@ -17,16 +17,15 @@ Plus: feature-importance frame with Decision-013 classes and missing-
 indicator mapping; tune_candidate selection; model registration + alias.
 """
 
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
 
-import mlflow
-
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
+from src.models.evaluate import top1_accuracy
 from src.models.registry import get_model
 from src.models.splits import temporal_split, to_xy
-from src.models.evaluate import top1_accuracy
 from src.models.train import (
     check_tripwire,
     feature_importance_frame,
@@ -37,7 +36,6 @@ from src.models.train import (
     train_candidate,
     tune_candidate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Synthetic feature frame: driver on pole (grid_adjusted == 1) always wins —
@@ -330,3 +328,52 @@ def test_data_fingerprint_format():
     fp = data_fingerprint()
     rows, digest = fp.split("rows-")
     assert rows.isdigit() and len(digest) == 12
+
+
+# ---------------------------------------------------------------------------
+# CLI happy paths (python -m src.models.train)
+# ---------------------------------------------------------------------------
+
+def _patch_features(monkeypatch, tmp_path) -> None:
+    """Point the CLI at a tmp synthetic features.parquet — never data/."""
+    path = tmp_path / "features.parquet"
+    _full_frame().to_parquet(path, index=False)
+    monkeypatch.setattr("src.models.train.FEATURES_PATH", path)
+    monkeypatch.setattr("src.models.train.data_fingerprint", lambda: "test-fp")
+
+
+def test_cli_missing_features_parquet_returns_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        "src.models.train.FEATURES_PATH", tmp_path / "missing.parquet"
+    )
+    assert main(["--model", "pole_baseline"]) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_cli_single_model_run(tmp_mlflow, monkeypatch, tmp_path, capsys):
+    _patch_features(monkeypatch, tmp_path)
+    rc = main(["--model", "pole_baseline", "--n-folds", "2",
+               "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
+               "--experiment", "cli-test"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pole_baseline" in out
+    assert "val_top1=" in out
+
+
+def test_cli_final_test_run(tmp_mlflow, monkeypatch, tmp_path, capsys):
+    _patch_features(monkeypatch, tmp_path)
+    rc = main(["--model", "pole_baseline", "--final-test",
+               "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
+               "--experiment", "cli-test"])
+    assert rc == 0
+    assert "FINAL TEST pole_baseline" in capsys.readouterr().out
+
+
+def test_cli_register_run(tmp_mlflow, monkeypatch, tmp_path, capsys):
+    _patch_features(monkeypatch, tmp_path)
+    rc = main(["--model", "logreg", "--register", "Staging",
+               "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
+               "--experiment", "cli-test"])
+    assert rc == 0
+    assert "Registered f1-winner v1 as @Staging" in capsys.readouterr().out

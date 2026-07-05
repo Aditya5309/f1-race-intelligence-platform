@@ -57,3 +57,39 @@ packages = { find = { include = ["src", "src.*"] } }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint only (Phase B quality tooling). The ruff FORMATTER is
+# deliberately not adopted: it would churn a reviewed, working codebase.
+# Whitespace/alignment (E1/E2) and line length (E5) are likewise off —
+# the code uses intentional column alignment and long documented lines.
+# Run:  python -m ruff check .
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py311"   # match requires-python, not the 3.14 dev machine
+
+[tool.ruff.lint]
+# Practical baseline: pyflakes (F), pycodestyle errors/warnings (E4/E7/E9, W),
+# import sorting (I), bugbear (B), pyupgrade (UP).
+select = ["E4", "E7", "E9", "F", "W", "I", "B", "UP"]
+ignore = [
+    # zip(strict=...): strict=True changes runtime behavior (raises on length
+    # mismatch), strict=False is pure churn. Every zip in this codebase pairs
+    # equal-length-by-construction sequences.
+    "B905",
+    # EvaluationObjective(str, Enum) is deliberate (Decision 019): the str
+    # mixin keeps MLflow-logged values as plain strings; converting to
+    # StrEnum would change str(member) semantics.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert against pandas/NumPy boolean scalars: `is True` fails for
+# np.bool_, and bare truthiness would accept any non-empty value —
+# explicit `== True` / `== False` is the intended, precise assertion.
+"tests/*" = ["E712"]
+# test_fan_out_from_duplicate_dimension_key_raises intentionally accepts ANY
+# exception: the contract is "raise rather than corrupt the grain"; the
+# exact exception type is a pandas implementation detail.
+"tests/test_build_master_dataset.py" = ["B017"]

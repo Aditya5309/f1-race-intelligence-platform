@@ -20,7 +20,6 @@ from src.models.eras import (
     MODELING_WINDOW_START,
     REGULATION_ERAS,
     V8,
-    RegulationEra,
     era_of,
     get_era,
 )

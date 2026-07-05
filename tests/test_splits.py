@@ -52,7 +52,6 @@ from src.models.splits import (
     within_era_strategy,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture builder — minimal feature-frame rows (2 drivers per race).
 # ---------------------------------------------------------------------------

@@ -31,3 +31,5 @@ htmlcov/
 .ai/
 .claude/
 .agents/
+context/
+reports/

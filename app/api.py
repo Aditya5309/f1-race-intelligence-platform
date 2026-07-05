@@ -33,8 +33,9 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version as _package_version
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _package_version
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -286,7 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 race_id=race_id,
                 year=int(rows["year"].iloc[0]),
                 round=int(rows["round"].iloc[0]),
-                generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
                 model=_model_schema(),
                 predictions=[
                     DriverPrediction(

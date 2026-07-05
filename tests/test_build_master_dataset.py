@@ -29,7 +29,6 @@ from src.integration.build_master_dataset import (
     validate_output,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture builders — minimal synthetic tables matching the real Ergast schema
 # subset this module actually reads.

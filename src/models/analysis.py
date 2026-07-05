@@ -36,12 +36,12 @@ import time
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import mlflow
 import numpy as np
 import pandas as pd
-
-import mlflow
 
 from src.features.metadata import FEATURE_CLASSIFICATION
 from src.features.pipeline import FEATURES_PATH

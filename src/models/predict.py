@@ -36,12 +36,11 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-
-import numpy as np
-import pandas as pd
+from datetime import UTC, datetime
 
 import mlflow
+import numpy as np
+import pandas as pd
 
 from src.models.registry import training_schema
 from src.models.train import DEFAULT_TRACKING_URI, REGISTERED_MODEL_NAME
@@ -86,7 +85,7 @@ def load_model(
         alias=alias,
         run_id=version.run_id,
         trained_at=datetime.fromtimestamp(
-            version.creation_timestamp / 1000, tz=timezone.utc
+            version.creation_timestamp / 1000, tz=UTC
         ).isoformat(timespec="seconds"),
         calibration=getattr(model, "calibration", "none"),
         model_class=type(model).__name__,
@@ -180,7 +179,7 @@ def predict_race(model, race_df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
-    from src.features.pipeline import FEATURES_PATH   # local: CLI-only dependency
+    from src.features.pipeline import FEATURES_PATH  # local: CLI-only dependency
 
     parser = argparse.ArgumentParser(
         description="Score a race's field with a registered model.")

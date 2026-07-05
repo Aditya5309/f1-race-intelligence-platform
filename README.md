@@ -8,7 +8,8 @@
 ![MLflow](https://img.shields.io/badge/MLflow-3.12-0194E2)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.57-FF4B4B)
-![Tests](https://img.shields.io/badge/tests-285%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-390%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/src%20coverage-95%25-brightgreen)
 ![Status](https://img.shields.io/badge/status-Core%20ML%20Platform%20complete-success)
 
 ---
@@ -24,7 +25,7 @@
 - Reproducible batch pipeline from raw Ergast-format CSVs to a 27,279-row feature store (31 leakage-controlled features).
 - Five-candidate model zoo compared under season-grouped temporal cross-validation; final model calibrated and registered in MLflow.
 - Historical race predictions (through 2024) served via FastAPI and a three-page Streamlit dashboard.
-- 285 automated tests, including one explicit leakage test per identified risk.
+- 390 automated tests (95% measured `src/` coverage), including one explicit leakage test per identified risk.
 
 > This is currently **local, trusted-use software**: no authentication, containers, CI/CD, automated ingestion, or monitoring yet — those are roadmap items (see [Roadmap](#9-project-roadmap)).
 
@@ -42,7 +43,7 @@
 | **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; artifacts store the trained schema (`ColumnGuard`) and re-validate it at inference |
 | **FastAPI inference API** | `GET /health`, `/model`, `/races`, `/predictions/{race_id}`; degraded-mode startup; FIFO prediction cache keyed by `(model_version, race_id)`; forward-holdout guard (409 for years > 2024) |
 | **Streamlit dashboard** | Overview, Predictions, and Model Insights pages; consumes the API over HTTP only — zero imports from model code |
-| **Automated testing** | 285 tests across 11 modules covering cleaning, integration, features (leakage suite), splits, training, calibration, prediction, and the API |
+| **Automated testing** | 390 tests across 15 modules covering loading, cleaning, interim repairs, integration, features (leakage suite), splits, training, calibration, prediction, analysis, CLI entry points, and the API — 95% measured `src/` coverage |
 
 ---
 
@@ -95,7 +96,8 @@ flowchart TB
 | API | FastAPI, Uvicorn, Pydantic |
 | Dashboard | Streamlit, Plotly, httpx |
 | Configuration | pydantic-settings (`F1_` env prefix) |
-| Testing | pytest (285 tests) |
+| Testing | pytest + pytest-cov (390 tests, 95% `src/` coverage) |
+| Linting | Ruff (configured in `pyproject.toml`; lint-only, formatter not adopted) |
 
 ---
 
@@ -113,7 +115,9 @@ src/integration/     Join-only master dataset builder
 src/pipelines/       Dataset build orchestration
 src/features/        Modular feature groups + pipeline + feature metadata
 src/models/          Splits, registry, training, evaluation, analysis, calibration, prediction
-tests/               285 pytest tests mirroring every implemented layer
+scripts/             smoke.py — end-to-end smoke test on a synthetic stack
+tests/               390 pytest tests mirroring every implemented layer
+Makefile             make lint / test / coverage / quality / smoke / all
 ```
 
 ---
@@ -127,8 +131,13 @@ tests/               285 pytest tests mirroring every implemented layer
 pip install -r requirements.txt
 pip install -e .
 
-# 2. Run the test suite
+# 2. Quality checks: tests + lint (both expected clean)
 pytest tests/
+python -m ruff check .
+
+# 2b. End-to-end smoke test — synthetic stack, works BEFORE data/ exists
+python scripts/smoke.py
+# (with make: `make quality` / `make smoke` / `make all`)
 
 # 3. Build the datasets (idempotent; run in order)
 python -m src.data.build_interim --target all   # interim parquet
@@ -195,9 +204,9 @@ The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic
 
 ### In progress — Quality baseline
 
-- [ ] Dedicated loader unit tests and measured ≥ 80% `src/` coverage
-- [ ] Repeatable full-system smoke-test script
-- [ ] Established Git workflow
+- [x] Dedicated loader unit tests and measured ≥ 80% `src/` coverage (95% measured)
+- [x] Repeatable full-system smoke-test script (`scripts/smoke.py`, synthetic stack)
+- [x] Established Git workflow
 
 ### Planned
 
@@ -216,7 +225,7 @@ The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic
 | Artifact | Preview |
 |---|---|
 | SHAP feature importance (logistic regression) | ![SHAP summary](reports/phase4_analysis/shap_summary_logreg.png) |
-| Grid position vs win rate (EDA) | ![Grid vs win rate](reports/fig01_grid_vs_win_rate.png) |
+| Grid position vs win rate (EDA) | ![Grid vs win rate](docs/images/fig01_grid_vs_win_rate.png) |
 | Streamlit dashboard | *Screenshot pending — placeholder: `docs/images/dashboard.png`* |
 | MLflow experiment tracking | *Screenshot pending — placeholder: `docs/images/mlflow.png`* |
 | Architecture diagram (rendered) | *See the Mermaid diagram in [Architecture](#3-architecture); image export pending: `docs/images/architecture.png`* |

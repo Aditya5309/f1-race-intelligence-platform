@@ -34,7 +34,6 @@ from src.models.registry import (
     training_schema,
 )
 
-
 # ---------------------------------------------------------------------------
 # Synthetic training data — realistic dtypes: floats with informative NaNs,
 # booleans, ~5% positive rate, 2 drivers x 100 races.

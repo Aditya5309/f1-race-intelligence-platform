@@ -47,15 +47,14 @@ from pathlib import Path
 
 import pandas as pd
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_INTERIM_DIR = _PROJECT_ROOT / "data" / "interim"
-_OUTPUT_PATH = _INTERIM_DIR / "results.parquet"
-_QUALIFYING_OUTPUT_PATH = _INTERIM_DIR / "qualifying.parquet"
-
 from src.data.cleaner import clean_qualifying, clean_results
 from src.data.loader import load_csv
 from src.data.validator import validate_qualifying, validate_results
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_INTERIM_DIR = _PROJECT_ROOT / "data" / "interim"
+_OUTPUT_PATH = _INTERIM_DIR / "results.parquet"
+_QUALIFYING_OUTPUT_PATH = _INTERIM_DIR / "qualifying.parquet"
 
 # ---------------------------------------------------------------------------
 # Repair helpers
@@ -225,7 +224,7 @@ def build_qualifying_interim(
 
     print("2/3  Cleaning ...")
     cleaned = clean_qualifying(raw)
-    print(f"     Dtypes cast; q1/q2/q3 left as raw time strings.\n")
+    print("     Dtypes cast; q1/q2/q3 left as raw time strings.\n")
 
     print("3/3  Validating ...")
     result = validate_qualifying(cleaned, raise_on_error=True)

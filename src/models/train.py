@@ -51,12 +51,11 @@ import sys
 import warnings
 from pathlib import Path
 
+import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import ParameterSampler
 from sklearn.pipeline import Pipeline
-
-import mlflow
 
 from src.features.metadata import FEATURE_CLASSIFICATION
 from src.features.pipeline import FEATURES_PATH

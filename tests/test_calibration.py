@@ -14,11 +14,10 @@ Coverage:
     alias resolution; CLI flag validation
 """
 
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
-
-import mlflow
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.calibration import (
@@ -33,10 +32,9 @@ from src.models.evaluate import (
     log_loss_score,
     top1_accuracy,
 )
-from src.models.registry import get_model, training_schema
+from src.models.registry import training_schema
 from src.models.splits import temporal_split, to_xy
 from src.models.train import main, register_model
-
 
 # ---------------------------------------------------------------------------
 # Synthetic frame: pole (grid_adjusted == 1) wins with high but not perfect
@@ -236,7 +234,7 @@ def test_register_model_calibrated_sets_alias_and_tag(tmp_mlflow, train_df, val_
     run = client.get_run(resolved.run_id)
     assert run.data.tags["calibration"] == "isotonic-oof"
 
-    loaded = mlflow.sklearn.load_model(f"models:/f1-winner@Staging")
+    loaded = mlflow.sklearn.load_model("models:/f1-winner@Staging")
     assert isinstance(loaded, CalibratedModel)
 
 

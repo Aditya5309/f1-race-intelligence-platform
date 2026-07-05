@@ -10,12 +10,11 @@ forward-holdout guard, debug endpoint gating, reserved POST /predict (501),
 and cache behavior across calls.
 """
 
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-
-import mlflow
 
 from app.api import create_app
 from app.config import Settings

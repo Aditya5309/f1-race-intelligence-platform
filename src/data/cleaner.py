@@ -32,7 +32,6 @@ Non-finishers (DNF, DNS, DSQ, Withdrawn) are intentionally retained:
 
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Lookup tables
 # ---------------------------------------------------------------------------

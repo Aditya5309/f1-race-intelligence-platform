@@ -16,20 +16,18 @@ Coverage per design Section 12 + Decision 015:
     metadata and produces the calibrated (not raw) probabilities
 """
 
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
-
-import mlflow
 from mlflow.exceptions import MlflowException
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.calibration import CalibratedModel
-from src.models.predict import ModelInfo, load_model, predict_race
+from src.models.predict import ModelInfo, load_model, main, predict_race
 from src.models.registry import get_model
 from src.models.splits import temporal_split, to_xy
 from src.models.train import register_model
-
 
 # ---------------------------------------------------------------------------
 # Synthetic data + a tmp registry with one calibrated and one raw model
@@ -223,7 +221,6 @@ def test_schema_comes_from_artifact_not_repository(staging, race_frame, monkeypa
     """A future FEATURE_COLUMNS change must not affect a loaded artifact:
     the guard validates against its RECORDED schema."""
     model, _ = staging
-    import src.models.predict as predict_mod
     # Even if repository constants changed, predict_race reads the artifact.
     out = predict_race(model, race_frame)
     recorded = model.named_steps["guard"].feature_names_in_
@@ -286,3 +283,37 @@ def test_raw_model_reports_no_calibration(registry, race_frame):
     assert getattr(model, "calibration", "none") == "none"
     out = predict_race(model, race_frame)          # model-agnostic path works
     assert np.allclose(out.groupby("raceId")["win_probability"].sum(), 1.0)
+
+
+# ---------------------------------------------------------------------------
+# CLI (python -m src.models.predict --race-id N)
+# ---------------------------------------------------------------------------
+
+def test_cli_missing_features_parquet_returns_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        "src.features.pipeline.FEATURES_PATH", tmp_path / "missing.parquet"
+    )
+    assert main(["--race-id", "202301"]) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_cli_unknown_race_id_returns_1(monkeypatch, tmp_path, full_frame, capsys):
+    path = tmp_path / "features.parquet"
+    full_frame.to_parquet(path, index=False)
+    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
+    assert main(["--race-id", "999999"]) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_cli_scores_race_with_staging_model(
+    monkeypatch, tmp_path, full_frame, registry, capsys
+):
+    path = tmp_path / "features.parquet"
+    full_frame.to_parquet(path, index=False)
+    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
+    rc = main(["--race-id", "202301", "--tracking-uri", registry])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "f1-winner" in out
+    assert "5 drivers" in out
+    assert "win_probability" in out
