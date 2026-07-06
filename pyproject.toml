@@ -21,7 +21,7 @@ requires-python = ">=3.11"
 # (Decision 012 point 5 pinning policy carried over from requirements.txt).
 dependencies = [
     "pandas~=2.3.3",
-    "numpy~=2.5.0",
+    "numpy~=2.4.6",
     "scikit-learn~=1.8.0",
     "scipy~=1.17.1",
     "xgboost~=3.2.0",
