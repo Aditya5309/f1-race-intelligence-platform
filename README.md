@@ -24,7 +24,7 @@
 
 - Reproducible batch pipeline from raw Ergast-format CSVs to a 27,279-row feature store (31 leakage-controlled features).
 - Five-candidate model zoo compared under season-grouped temporal cross-validation; final model calibrated and registered in MLflow.
-- Historical race predictions (through 2024) served via FastAPI and a three-page Streamlit dashboard.
+- Historical race predictions (through 2024) served via FastAPI and a five-page Streamlit dashboard.
 - 390 automated tests (95% measured `src/` coverage), including one explicit leakage test per identified risk.
 
 > This is currently **local, trusted-use software**: no authentication, containers, CI/CD, automated ingestion, or monitoring yet — those are roadmap items (see [Roadmap](#9-project-roadmap)).
@@ -42,7 +42,7 @@
 | **Probability calibration** | Out-of-fold isotonic calibration fit strictly on training-fold predictions (validation ECE 0.153 → 0.012) |
 | **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; artifacts store the trained schema (`ColumnGuard`) and re-validate it at inference |
 | **FastAPI inference API** | `GET /health`, `/model`, `/races`, `/predictions/{race_id}`; degraded-mode startup; FIFO prediction cache keyed by `(model_version, race_id)`; forward-holdout guard (409 for years > 2024) |
-| **Streamlit dashboard** | Overview, Predictions, and Model Insights pages; consumes the API over HTTP only — zero imports from model code |
+| **Streamlit dashboard** | Dashboard, Race Center, Driver Explorer, Season Analytics, and Model Insights (advanced) pages; predictions consumed from the API over HTTP only (zero imports from model code), plus optional display metadata (GP names, grids, standings) read from local CSVs with graceful degradation |
 | **Automated testing** | 390 tests across 15 modules covering loading, cleaning, interim repairs, integration, features (leakage suite), splits, training, calibration, prediction, analysis, CLI entry points, and the API — 95% measured `src/` coverage |
 
 ---
@@ -181,13 +181,16 @@ The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic
 |---|---|
 | [docs/user_guide.md](docs/user_guide.md) | Running and using the platform |
 | [docs/api_reference.md](docs/api_reference.md) | Endpoint contracts and configuration |
-| [reports/eda_summary.md](reports/eda_summary.md) | Exploratory analysis findings |
-| [reports/master_dataset_design.md](reports/master_dataset_design.md) | Dataset grain, joins, and leakage rules |
-| [reports/model_development_design.md](reports/model_development_design.md) | Modeling contract and evaluation protocol |
-| [reports/model_selection_report.md](reports/model_selection_report.md) | Model comparison evidence and final selection |
-| [reports/application_design.md](reports/application_design.md) | API and dashboard design |
-| [context/decisions.md](context/decisions.md) | Append-only architectural decision log (17 decisions) |
-| [context/domain_knowledge.md](context/domain_knowledge.md) | F1 domain reference: regulation eras, leakage vectors, data limitations |
+| `reports/eda_summary.md` | Exploratory analysis findings |
+| `reports/master_dataset_design.md` | Dataset grain, joins, and leakage rules |
+| `reports/model_development_design.md` | Modeling contract and evaluation protocol |
+| `reports/model_selection_report.md` | Model comparison evidence and final selection |
+| `reports/application_design.md` | API and dashboard design |
+| `context/decisions.md` | Append-only architectural decision log (21 decisions) |
+| `context/domain_knowledge.md` | F1 domain reference: regulation eras, leakage vectors, data limitations |
+
+> `reports/` and `context/` are gitignored (not shipped with a fresh clone) —
+> the links above are local-filesystem paths, not live GitHub links.
 
 ---
 
@@ -222,9 +225,11 @@ The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic
 
 ## 10. Screenshots
 
+_SHAP artifacts live in the gitignored `reports/phase4_analysis/` (local
+filesystem only — not rendered below since it won't resolve from GitHub)._
+
 | Artifact | Preview |
 |---|---|
-| SHAP feature importance (logistic regression) | ![SHAP summary](reports/phase4_analysis/shap_summary_logreg.png) |
 | Grid position vs win rate (EDA) | ![Grid vs win rate](docs/images/fig01_grid_vs_win_rate.png) |
 | Streamlit dashboard | *Screenshot pending — placeholder: `docs/images/dashboard.png`* |
 | MLflow experiment tracking | *Screenshot pending — placeholder: `docs/images/mlflow.png`* |

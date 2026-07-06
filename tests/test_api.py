@@ -21,6 +21,7 @@ from app.config import Settings
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.splits import temporal_split
 from src.models.train import register_model
+from tests.conftest import set_tmp_experiment
 
 
 def _synthetic_features(years, races_per_year=3, n_drivers=5, seed=0) -> pd.DataFrame:
@@ -54,7 +55,7 @@ def serving_stack(tmp_path_factory):
     frame.to_parquet(features_path)
 
     mlflow.set_tracking_uri(uri)
-    mlflow.set_experiment("test-experiment")
+    set_tmp_experiment("test-experiment", root)
     split = temporal_split(frame)
     register_model("logreg", split, alias="Staging", calibrate=True)
     mlflow.set_tracking_uri(None)

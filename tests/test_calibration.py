@@ -35,6 +35,7 @@ from src.models.evaluate import (
 from src.models.registry import training_schema
 from src.models.splits import temporal_split, to_xy
 from src.models.train import main, register_model
+from tests.conftest import set_tmp_experiment
 
 # ---------------------------------------------------------------------------
 # Synthetic frame: pole (grid_adjusted == 1) wins with high but not perfect
@@ -82,7 +83,7 @@ def calibrated(train_df) -> CalibratedModel:
 @pytest.fixture()
 def tmp_mlflow(tmp_path):
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-    mlflow.set_experiment("test-experiment")
+    set_tmp_experiment("test-experiment", tmp_path)
     yield
     mlflow.set_tracking_uri(None)
 

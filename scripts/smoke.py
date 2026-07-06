@@ -19,7 +19,11 @@ Actions job:
   5. FastAPI startup + /health in-process TestClient (lifespan runs; no
                                socket): /health ok + one full prediction
   6. Streamlit dashboard       streamlit imports, every view module imports,
-                               dashboard entry script byte-compiles
+                               dashboard entry script byte-compiles, AND the
+                               script actually runs headless via
+                               streamlit.testing.v1.AppTest (catches runtime-
+                               only failures like st.navigation() duplicate
+                               URL pathnames — see step docstring)
 
 The synthetic frame is seeded (pole sitter always wins), so every run is
 deterministic. Exit code 0 = all steps passed; 1 = a step failed.
@@ -105,7 +109,13 @@ def step_mlflow_train_and_register(ctx: dict) -> None:
     frame.to_parquet(ctx["features_path"], index=False)
 
     mlflow.set_tracking_uri(ctx["tracking_uri"])
-    mlflow.set_experiment("smoke-test")
+    # Create the experiment with its artifact store INSIDE the temp dir — the
+    # default is ./mlruns relative to the CWD, which would leak run artifacts
+    # into the repository / CI checkout.
+    experiment_id = mlflow.create_experiment(
+        "smoke-test", artifact_location=(ctx["tmp_dir"] / "mlartifacts").as_uri()
+    )
+    mlflow.set_experiment(experiment_id=experiment_id)
     version = register_model(
         "logreg", temporal_split(frame), alias="Staging", calibrate=True,
     )
@@ -161,21 +171,49 @@ def step_api_health_and_prediction(ctx: dict) -> None:
 
 
 def step_streamlit_dashboard(ctx: dict) -> None:
-    """streamlit + every view module import; the entry script byte-compiles.
+    """streamlit + every view module import; the entry script actually runs.
 
-    app/dashboard.py itself calls st.navigation().run() at module level, so it
-    is only ever executed by `streamlit run` — compile-checking it is the
-    strongest service-free verification available.
+    Import/compile checks alone are NOT enough: app/dashboard.py's
+    st.navigation([...]) call only validates that page URL pathnames are
+    unique when it detects a live Streamlit ScriptRunContext
+    (streamlit/commands/navigation.py::_navigation — see the `if not ctx:
+    return default_page` early-out). Outside a real script run (e.g. a bare
+    `import` or `py_compile`), that check silently never runs. This is
+    exactly how a real bug shipped invisibly: the pre-redesign Overview,
+    Predictions, and Model Insights pages all named their entry point
+    `render`, so without an explicit `url_path` they collided on the same
+    inferred pathname — `st.navigation()` raised StreamlitAPIException the
+    moment a user opened the dashboard in a browser, while every existing
+    check here (import, compile) stayed green. Fixed by giving each st.Page
+    an explicit url_path (app/dashboard.py) — kept for all five pages in the
+    UI/UX redesign (home/race_center/driver_explorer/season_analytics/insights).
+
+    streamlit.testing.v1.AppTest runs the script inside a real, headless
+    ScriptRunContext (no browser, no socket) — the only way to catch this
+    class of bug here. It needs no live API: every page's
+    sidebar_model_panel() catches httpx errors and degrades gracefully
+    (app/views/common.py), so this step stays fully offline like every
+    other step in this file.
     """
     import importlib
 
     import streamlit
+    from streamlit.testing.v1 import AppTest
 
     assert streamlit.__version__
-    for module in ("app.views.common", "app.views.overview",
-                   "app.views.predictions", "app.views.insights"):
+    for module in ("app.views.common", "app.views.components",
+                   "app.views.metadata", "app.views.charts", "app.views.home",
+                   "app.views.race_center", "app.views.driver_explorer",
+                   "app.views.season_analytics", "app.views.insights"):
         importlib.import_module(module)
-    py_compile.compile(str(_PROJECT_ROOT / "app" / "dashboard.py"), doraise=True)
+    dashboard_path = _PROJECT_ROOT / "app" / "dashboard.py"
+    py_compile.compile(str(dashboard_path), doraise=True)
+
+    at = AppTest.from_file(str(dashboard_path), default_timeout=15).run()
+    assert not at.exception, (
+        "dashboard raised on headless run: "
+        f"{[e.value for e in at.exception]}"
+    )
 
 
 STEPS = [

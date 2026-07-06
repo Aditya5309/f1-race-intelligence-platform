@@ -1,0 +1,73 @@
+# Continuous Integration (Phase C2 — Decision-free tooling, see .ai/backlog.md).
+#
+# Runs the exact local quality workflow (`make quality && make smoke`) on every
+# push and pull request, so a broken commit is caught on GitHub before it is
+# merged, without depending on any one contributor's machine.
+#
+# This workflow deliberately does NOT invoke `make` itself (a clean Ubuntu
+# runner does have make preinstalled, but Windows contributors on this project
+# do not run make locally — see Makefile's own header comment). Instead it
+# runs the identical underlying commands the Makefile documents, so local and
+# CI runs can never drift out of sync with each other.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    name: Lint, test, coverage, smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # Editable install with the [dev] extra: pytest, pytest-cov, ruff
+      # (pyproject.toml is the single source of truth for pins — Decision 020).
+      - name: Install dependencies
+        run: pip install -e .[dev]
+
+      # [tool.ruff] in pyproject.toml owns the rule set and exemptions;
+      # this step just runs it. Zero findings expected (Decision-free
+      # Phase C1 baseline).
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      # Full suite. data/ and mlflow.db are gitignored (Decision 002) and do
+      # not exist on this runner, so the handful of real-data smoke tests
+      # (tests/test_features.py, tests/test_splits.py) skip themselves via
+      # their own skipif guards rather than failing — expected, not a bug.
+      - name: Run tests with coverage
+        run: >
+          python -m pytest tests/
+          --cov=src --cov=app
+          --cov-report=term-missing
+          --cov-report=xml
+
+      # Synthetic, service-free end-to-end check (config -> MLflow
+      # train/register -> load_model -> predict_race -> FastAPI TestClient
+      # /health + one prediction -> Streamlit import/compile checks).
+      # Needs no data/, no ports, no network — see scripts/smoke.py's module
+      # docstring. Its own >70% top-1 leakage-tripwire warning on the seeded
+      # synthetic signal is EXPECTED log noise, not a failure.
+      - name: Smoke test
+        run: python scripts/smoke.py
+
+      # Coverage numbers as a downloadable CI artifact (not a hard gate yet —
+      # see .ai/backlog.md for the follow-up to add a --cov-fail-under
+      # threshold once a stable target is agreed).
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml

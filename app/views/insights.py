@@ -1,51 +1,126 @@
 """Model Insights page — importance/SHAP/calibration artifacts (design §3/§14).
 
 Renders the static Phase-4 analysis figures from reports/phase4_analysis/;
-no model computation happens here.
+no model computation happens here. This is the ADVANCED page (UI/UX
+redesign): the technical detail intentionally kept off the other four
+user-facing pages — calibration method, run id, algorithm choice — lives
+here, for recruiters/engineers who want to see how the model actually works.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from app.views.common import sidebar_model_panel
+from app.views.components import page_header, stat_row
 
 _ANALYSIS_DIR = Path(__file__).resolve().parents[2] / "reports" / "phase4_analysis"
+_COMPARISON_CSV = _ANALYSIS_DIR.parent / "model_comparison.csv"
 _REPORT = "reports/model_selection_report.md"
+
+# Decision-013 feature classification (display copy — the dashboard cannot
+# import src/, so the code-level source of truth stays
+# src/features/metadata.py; keep the two in sync on reclassification).
+_STABLE_FEATURES = [
+    "qualifying_position", "qualifying_gap_to_pole_pct", "reached_q2",
+    "reached_q3", "pit_lane_start", "grid_adjusted", "grid_position_norm",
+    "driver_experience_races", "driver_avg_finish_last_5",
+    "driver_dnf_rate_last_5", "driver_standing_position_prev",
+    "constructor_standing_position_prev",
+]
+_ERA_SENSITIVE_FEATURES = [
+    "driver_wins_last_3", "driver_wins_last_5", "driver_wins_last_10",
+    "driver_podiums_last_5", "driver_points_last_5", "constructor_wins_last_3",
+    "constructor_wins_last_5", "constructor_podiums_last_5",
+    "constructor_dnf_rate_last_5", "driver_standing_points_prev",
+    "driver_standing_wins_prev", "constructor_standing_points_prev",
+]
+_EXPERIMENTAL_FEATURES = [
+    "q1_sec", "q2_sec", "q3_sec", "driver_circuit_starts",
+    "driver_circuit_wins", "driver_circuit_avg_finish",
+    "constructor_circuit_wins",
+]
 
 
 def _figure(name: str, caption: str) -> None:
     path = _ANALYSIS_DIR / name
     if path.exists():
-        st.image(str(path), caption=caption, use_container_width=True)
+        st.image(str(path), caption=caption, width="stretch")
     else:
         st.caption(f"_{name} not found — run `python -m src.models.analysis`._")
 
 
 def render() -> None:
-    st.title("Model Insights")
-    sidebar_model_panel()
+    page_header("Model Insights", "🤖", "Advanced — the ML internals behind the predictions.")
+    st.badge("Advanced / technical", icon=":material/science:", color="violet")
+    health = sidebar_model_panel()
+
+    model = (health or {}).get("model")
+    if model:
+        st.subheader("🔧 Model card")
+        stat_row([
+            {"label": "Algorithm", "value": model["model_class"]},
+            {"label": "Calibration", "value": model["calibration"]},
+            {"label": "Registry alias", "value": f"v{model['version']} @ {model['alias']}"},
+            {"label": "Trained", "value": model["trained_at"][:10]},
+        ])
+        st.caption(f"Run id: `{model['run_id']}`")
+
+    st.subheader("📐 Validation results")
+    stat_row([
+        {"label": "Top-1 · validation 2022–23", "value": "68.2%",
+         "help": "Pole-sitter baseline on the same races: 54.5%"},
+        {"label": "Top-3 recall · validation", "value": "88.6%"},
+        {"label": "Top-1 · final test 2024", "value": "45.8%",
+         "help": "Equal to the pole baseline — the edge is dominance-season "
+                 "concentrated"},
+        {"label": "ECE after calibration", "value": "0.012",
+         "delta": "-0.141 vs raw", "delta_color": "inverse",
+         "help": "Expected calibration error on validation, isotonic "
+                 "calibration fit on out-of-fold training predictions"},
+    ])
 
     st.markdown(
         f"""
 The serving model is a **calibrated logistic regression** chosen over random
 forest, XGBoost and LightGBM on validation performance, consistency, and
 simplicity. Full evidence: `{_REPORT}`.
-
-**Feature classes (Decision 013):** each of the 31 features is labeled
-**Stable** (era-robust: normalized grid/qualifying, experience, lagged
-standings positions), **Era-sensitive** (raw form counts — strongest in
-dominance eras), or **Experimental** (sparse circuit history, raw lap
-seconds). A healthy model concentrates its signal in Stable features — this
-one draws ~59% of its importance from them, led by grid position and
-qualifying results.
         """
     )
 
-    tab_imp, tab_shap, tab_cal = st.tabs(
-        ["Feature importance", "SHAP analysis", "Calibration"]
+    st.subheader("⚖️ Model comparison")
+    if _COMPARISON_CSV.exists():
+        st.dataframe(pd.read_csv(_COMPARISON_CSV), hide_index=True,
+                     width="stretch")
+    else:
+        st.caption("_model_comparison.csv not found — the comparison table "
+                   "lives in reports/ (local-only) and in MLflow "
+                   "(`mlflow ui`)._")
+
+    st.subheader("🏷 Feature classes (Decision 013)")
+    st.caption("All 31 model features, classified by era-robustness. A "
+               "healthy model concentrates its signal in Stable features — "
+               "this one draws ~59% of its importance from them, led by grid "
+               "position and qualifying results.")
+    col_s, col_e, col_x = st.columns(3)
+    with col_s:
+        st.markdown(f"**Stable ({len(_STABLE_FEATURES)})**")
+        for feature in _STABLE_FEATURES:
+            st.badge(feature, color="green")
+    with col_e:
+        st.markdown(f"**Era-sensitive ({len(_ERA_SENSITIVE_FEATURES)})**")
+        for feature in _ERA_SENSITIVE_FEATURES:
+            st.badge(feature, color="orange")
+    with col_x:
+        st.markdown(f"**Experimental ({len(_EXPERIMENTAL_FEATURES)})**")
+        for feature in _EXPERIMENTAL_FEATURES:
+            st.badge(feature, color="violet")
+
+    tab_imp, tab_shap, tab_cal, tab_diag = st.tabs(
+        ["Feature importance", "SHAP analysis", "Calibration", "Diagnostics"]
     )
     with tab_imp:
         _figure("feature_importance_logreg.png",
@@ -70,3 +145,10 @@ restores honest probabilities: expected calibration error drops from
         _figure("calibration_logreg.png", "Reliability diagram")
         st.caption("Per-run calibration plots are logged with every MLflow "
                    "training run (`mlflow ui --backend-store-uri sqlite:///mlflow.db`).")
+    with tab_diag:
+        st.caption("Classifier diagnostics. Note: per-race top-1/top-3 (above) "
+                   "are this project's primary metrics — row-level curves are "
+                   "secondary at a 4.7% positive rate.")
+        _figure("confusion_matrix.png", "Confusion matrix")
+        _figure("roc_curve.png", "ROC curve")
+        _figure("precision_recall.png", "Precision–recall curve")

@@ -28,6 +28,7 @@ from src.models.predict import ModelInfo, load_model, main, predict_race
 from src.models.registry import get_model
 from src.models.splits import temporal_split, to_xy
 from src.models.train import register_model
+from tests.conftest import set_tmp_experiment
 
 # ---------------------------------------------------------------------------
 # Synthetic data + a tmp registry with one calibrated and one raw model
@@ -68,9 +69,10 @@ def race_frame(full_frame) -> pd.DataFrame:
 def registry(tmp_path_factory, full_frame):
     """Tmp sqlite registry: v1 = raw logreg @Candidate-less, v2 = calibrated
     logreg @Staging. Returns the tracking URI."""
-    uri = f"sqlite:///{tmp_path_factory.mktemp('mlflow') / 'mlflow.db'}"
+    root = tmp_path_factory.mktemp("mlflow")
+    uri = f"sqlite:///{root / 'mlflow.db'}"
     mlflow.set_tracking_uri(uri)
-    mlflow.set_experiment("test-experiment")
+    set_tmp_experiment("test-experiment", root)
     split = temporal_split(full_frame)
     register_model("logreg", split, alias="Staging", calibrate=False)      # v1
     register_model("logreg", split, alias="Staging", calibrate=True)       # v2 takes alias

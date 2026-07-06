@@ -36,6 +36,7 @@ from src.models.train import (
     train_candidate,
     tune_candidate,
 )
+from tests.conftest import set_tmp_experiment
 
 # ---------------------------------------------------------------------------
 # Synthetic feature frame: driver on pole (grid_adjusted == 1) always wins —
@@ -73,10 +74,18 @@ def _full_frame(**kwargs) -> pd.DataFrame:
 
 
 @pytest.fixture()
-def tmp_mlflow(tmp_path):
-    """Point MLflow at an isolated sqlite store per test."""
+def tmp_mlflow(tmp_path, monkeypatch):
+    """Isolated MLflow store per test — tracking URI, artifacts, AND cwd.
+
+    chdir must happen BEFORE the first mlflow call: the sqlite store caches
+    a default artifact root of ./mlruns resolved against the cwd at store
+    creation, and experiments created later inside a CLI main()
+    (--experiment) inherit it. Without the chdir those artifacts leak into
+    the repository / CI checkout.
+    """
+    monkeypatch.chdir(tmp_path)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-    mlflow.set_experiment("test-experiment")
+    set_tmp_experiment("test-experiment", tmp_path)
     yield
     mlflow.set_tracking_uri(None)
 

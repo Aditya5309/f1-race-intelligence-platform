@@ -228,6 +228,9 @@ class TestMainCLI:
         monkeypatch.setattr(
             "src.models.analysis.data_fingerprint", lambda: "test-fp"
         )
+        # main() creates its --experiment with the DEFAULT ./mlruns artifact
+        # location — chdir so those artifacts land in tmp, not the checkout.
+        monkeypatch.chdir(tmp_path)
         tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
         yield {"reports_dir": reports_dir, "tracking_uri": tracking_uri}
         mlflow.set_tracking_uri(None)
