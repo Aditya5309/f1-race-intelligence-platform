@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "f1-race-winner-prediction"
-version = "1.1.0"
+version = "1.3.0"
 description = "Production-style ML platform predicting F1 race winners from pre-race information"
 readme = "README.md"
 license = { file = "LICENSE" }
