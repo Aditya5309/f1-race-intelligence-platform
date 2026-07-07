@@ -1,11 +1,11 @@
 # Task runner for the local quality workflow — and the exact commands the
 # future GitHub Actions pipeline (backlog C2) will invoke, so CI and local
 # runs cannot drift. On Windows machines without `make`, run the underlying
-# commands directly (they are documented in README.md and .ai/AI_AGENT.md).
+# commands directly (they are documented in README.md).
 
 PYTHON ?= python
 
-.PHONY: lint test coverage quality smoke all
+.PHONY: lint test coverage quality smoke dev all
 
 lint:
 	$(PYTHON) -m ruff check .
@@ -22,5 +22,9 @@ quality: lint test
 ## smoke: end-to-end serving workflow on a synthetic stack (no data/ needed)
 smoke:
 	$(PYTHON) scripts/smoke.py
+
+## dev: single-command local dev — starts the API if needed, then the dashboard
+dev:
+	$(PYTHON) scripts/dev.py
 
 all: quality smoke

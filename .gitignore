@@ -1,4 +1,4 @@
-# --- Data and model artifacts (bootstrap documented in README / .ai/session_handoff.md)
+# --- Data and model artifacts (bootstrap documented in README)
 /data/
 /models/
 
@@ -24,10 +24,13 @@ coverage.xml
 htmlcov/
 .ruff_cache/
 
+# --- Local dev-launcher logs (scripts/dev.py; Decision 025)
+/logs/
+
 # --- Jupyter
 .ipynb_checkpoints/
 
-# --- AI agent operational memory (machine-local; durable knowledge lives in context/)
+# --- Internal engineering notes (machine-local; not part of the public project)
 .ai/
 .claude/
 .agents/
