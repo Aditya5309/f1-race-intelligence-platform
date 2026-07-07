@@ -50,10 +50,22 @@ dev = [
 Repository = "https://github.com/Aditya5309/f1-race-intelligence-platform"
 
 [tool.setuptools]
-# Parity with the retired setup.py: only src/ is an installed package.
-# app/ is a serving-entry directory run from the project root
-# (uvicorn app.api:app / streamlit run app/dashboard.py), not a library.
-packages = { find = { include = ["src", "src.*"] } }
+# Both src/ (the ML library) and app/ (the serving layer) are installed
+# packages. app/ was historically left out on the theory that it's "just"
+# a serving-entry directory run from the project root (uvicorn app.api:app
+# / streamlit run app/dashboard.py) rather than a library — but that theory
+# depends on the launcher adding the project root to sys.path. uvicorn's
+# CLI does this itself (--app-dir defaults to the cwd), so `uvicorn
+# app.api:app` never depended on app/ being installed. `python -m streamlit
+# run app/dashboard.py` only worked locally because `-m` ALSO adds the cwd
+# to sys.path before Streamlit's own bootstrap runs (which only adds
+# app/dashboard.py's own directory, app/, to sys.path — never its parent).
+# Streamlit Community Cloud does not invoke `python -m streamlit`; it drives
+# Streamlit's server directly, so that `-m` side effect never happens there,
+# and `from app.views import ...` fails with ModuleNotFoundError. Installing
+# app/ as a real package (Decision 030) removes the dependency on any
+# launcher's incidental sys.path behavior, on any platform.
+packages = { find = { include = ["src", "src.*", "app", "app.*"] } }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
