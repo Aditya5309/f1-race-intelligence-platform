@@ -1,4 +1,7 @@
-# --- Data and model artifacts (bootstrap documented in README)
+# --- Training-side data and model artifacts (bootstrap documented in
+# README). NEVER add /artifacts/ here (below) — that is the committed
+# runtime tree a deployed API/dashboard needs; these are the training-only
+# trees that stay local (Decision 029).
 /data/
 /models/
 

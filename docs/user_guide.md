@@ -50,9 +50,12 @@ python scripts/dev.py                    # equivalent: make dev
 `/health` endpoint, waits for it to come up, then runs the dashboard in the
 foreground; it cleans up the API on exit only if it started it.
 
-Prerequisites: the built feature matrix (`data/processed/features.parquet`)
-and a frozen serving bundle at `models/serving/staging/` (default; see
-`F1_SERVING_BUNDLE_PATH` below). If missing, rebuild:
+Prerequisites: a committed runtime features snapshot (`artifacts/
+features.parquet`) and a frozen serving bundle at `artifacts/serving/
+staging/` (defaults; see `F1_FEATURES_PATH`/`F1_SERVING_BUNDLE_PATH` below).
+Both ship in the repository — a fresh clone already has everything the API
+needs. If missing (or you want to refresh them from a new training run),
+rebuild:
 
 ```bash
 python -m src.data.build_interim --target all
@@ -61,6 +64,13 @@ python -m src.features.pipeline
 python -m src.models.train --model logreg --register Staging --calibrate \
     --params '{"model__C": 0.01653693718282442}'
 ```
+
+`--register` freezes BOTH runtime artifacts automatically (Decision 029):
+the frozen model bundle at `artifacts/serving/staging/` and a snapshot of
+`data/processed/features.parquet` copied to `artifacts/features.parquet` —
+the file the deployed API actually reads. The gitignored `data/` tree
+(raw CSVs, interim/processed parquet, MLflow's own store) is a training-time
+concern only; the deployed API never touches it.
 
 ## The dashboard
 
@@ -110,7 +120,8 @@ file). The defaults work out of the box. Common overrides:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `F1_SERVING_BUNDLE_PATH` | `models/serving/staging` | which frozen serving bundle the API loads (Decision 026/027 — no live MLflow registry needed) |
+| `F1_SERVING_BUNDLE_PATH` | `artifacts/serving/staging` | which frozen serving bundle the API loads (Decision 026/027/029 — no live MLflow registry needed, and no dependency on the gitignored `data/` tree) |
+| `F1_FEATURES_PATH` | `artifacts/features.parquet` | the committed runtime feature snapshot the API scores races from (Decision 029 — NOT the training-side `data/processed/features.parquet`) |
 | `F1_API_URL` | `http://localhost:8000` | where the dashboard finds the API |
 | `F1_SERVE_MAX_YEAR` | `2024` | newest season the API will serve (2025+ is a reserved evaluation holdout) |
 | `F1_DEBUG_ENDPOINTS` | `false` | enables `/debug/*` inspection routes (development only) |

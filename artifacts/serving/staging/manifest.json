@@ -1,0 +1,11 @@
+{
+  "name": "f1-winner",
+  "version": "2",
+  "alias": "Staging",
+  "run_id": "0c16d584af9047fda616e0fa473b4dd9",
+  "trained_at": "2026-07-03T18:25:30+00:00",
+  "calibration": "isotonic-oof",
+  "model_class": "CalibratedModel",
+  "bundle_format_version": 1,
+  "exported_at": "2026-07-07T10:47:19+00:00"
+}

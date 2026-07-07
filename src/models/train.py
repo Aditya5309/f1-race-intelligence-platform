@@ -404,6 +404,8 @@ def register_model(
     params: dict | None = None,
     calibrate: bool = False,
     bundle_root: Path | None = None,
+    features_source: Path = FEATURES_PATH,
+    artifacts_root: Path | None = None,
 ) -> str:
     """
     Register a fitted pipeline as `f1-winner` and point `alias` at it.
@@ -425,8 +427,19 @@ def register_model(
     already-fitted in-memory model_obj, no extra MLflow round trip. This is
     what src/models/predict.py's serving-side load_model() reads; the API
     never resolves a live registry alias at request time. bundle_root
-    defaults to models/serving/ — TESTS MUST pass an explicit tmp bundle_root
-    or they will write into the real project directory.
+    defaults to artifacts/serving/ — TESTS MUST pass an explicit tmp
+    bundle_root or they will write into the real project directory.
+
+    Decision 029: registration ALSO freezes a runtime features snapshot
+    (src.models.serving_bundle.export_features_snapshot) by copying
+    features_source (default: the training pipeline's own
+    data/processed/features.parquet — the file `split` was itself built
+    from in the normal CLI flow) to artifacts_root/features.parquet. This
+    is the file app/config.py's Settings.features_path reads by default —
+    the deployed API never reads data/processed/features.parquet directly.
+    artifacts_root defaults to the project's artifacts/ — TESTS MUST pass an
+    explicit tmp artifacts_root (and features_source) or they will read/write
+    the real project's files.
 
     Returns the registered model version.
     """
@@ -468,7 +481,11 @@ def register_model(
         REGISTERED_MODEL_NAME, alias, version
     )
 
-    from src.models.serving_bundle import ModelInfo, export_bundle
+    from src.models.serving_bundle import (
+        ModelInfo,
+        export_bundle,
+        export_features_snapshot,
+    )
     bundle_info = ModelInfo(
         name=REGISTERED_MODEL_NAME,
         version=str(version),
@@ -479,6 +496,7 @@ def register_model(
         model_class=type(model_obj).__name__,
     )
     export_bundle(model_obj, bundle_info, bundle_root=bundle_root)
+    export_features_snapshot(features_source, artifacts_root=artifacts_root)
 
     return str(version)
 
@@ -505,8 +523,12 @@ def main(argv: list[str] | None = None) -> int:
                              "Decision 015) before registering.")
     parser.add_argument("--bundle-root", type=Path, default=None,
                         help="With --register: where to export the frozen "
-                             "serving bundle (Decision 026/027). Default: "
-                             "models/serving/.")
+                             "serving bundle (Decision 026/027/029). "
+                             "Default: artifacts/serving/.")
+    parser.add_argument("--artifacts-root", type=Path, default=None,
+                        help="With --register: where to freeze the runtime "
+                             "features snapshot (Decision 029). Default: "
+                             "artifacts/ (writes artifacts/features.parquet).")
     parser.add_argument("--params", default=None,
                         help="JSON dict of pipeline params (copy from --tune "
                              "output) applied to --final-test / --register / a "
@@ -557,15 +579,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.register:
+        # features_source is passed explicitly (rather than relying on
+        # register_model's own default) so it resolves the SAME FEATURES_PATH
+        # module global `split` was just built from above — including under
+        # a test's monkeypatch.setattr("src.models.train.FEATURES_PATH", ...),
+        # which a bound default parameter would not see.
         version = register_model(args.model, split, args.register, fingerprint,
                                  params=params, calibrate=args.calibrate,
-                                 bundle_root=args.bundle_root)
+                                 bundle_root=args.bundle_root,
+                                 features_source=FEATURES_PATH,
+                                 artifacts_root=args.artifacts_root)
         suffix = " (isotonic-oof calibrated)" if args.calibrate else ""
-        from src.models.serving_bundle import bundle_dir_for_alias
+        from src.models.serving_bundle import (
+            DEFAULT_FEATURES_ARTIFACT,
+            bundle_dir_for_alias,
+        )
         bundle_dir = bundle_dir_for_alias(args.register, args.bundle_root)
+        features_artifact = (
+            (args.artifacts_root / "features.parquet")
+            if args.artifacts_root else DEFAULT_FEATURES_ARTIFACT
+        )
         print(f"Registered {REGISTERED_MODEL_NAME} v{version} as "
               f"@{args.register}{suffix}.")
         print(f"Serving bundle exported to {bundle_dir}")
+        print(f"Runtime features snapshot frozen to {features_artifact}")
         return 0
 
     if args.tune:

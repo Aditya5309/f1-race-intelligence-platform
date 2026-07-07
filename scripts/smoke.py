@@ -124,6 +124,8 @@ def step_mlflow_train_and_register(ctx: dict) -> None:
     version = register_model(
         "logreg", temporal_split(frame), alias="Staging", calibrate=True,
         bundle_root=ctx["bundle_root"],
+        features_source=ctx["features_path"],
+        artifacts_root=ctx["tmp_dir"] / "artifacts",
     )
     mlflow.set_tracking_uri(None)
     assert version == "1", f"expected fresh registry version 1, got {version}"
@@ -245,9 +247,9 @@ def main() -> int:
             "tmp_dir": tmp_dir,
             "tracking_uri": f"sqlite:///{tmp_dir / 'mlflow.db'}",
             "features_path": tmp_dir / "features.parquet",
-            # register_model (Decision 026/027) exports a bundle here; this
-            # path is explicit so nothing ever touches the real project's
-            # models/serving/ during a smoke run.
+            # register_model (Decision 026/027/029) exports a bundle + a
+            # features snapshot here; these paths are explicit so nothing
+            # ever touches the real project's artifacts/ during a smoke run.
             "bundle_root": bundle_root,
             "bundle_dir": bundle_root / "staging",
         }

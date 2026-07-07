@@ -79,19 +79,24 @@ def race_frame(full_frame) -> pd.DataFrame:
 def registry(tmp_path_factory, full_frame):
     """Tmp sqlite registry + tmp bundle root: v1 = raw logreg @Candidate-less,
     v2 = calibrated logreg @Staging (the one with a bundle any real caller
-    would load). Returns (tracking_uri, bundle_root) — bundle_root is
-    explicit so register_model never writes into the real project
-    models/serving/ during tests."""
+    would load). Returns (tracking_uri, bundle_root) — bundle_root (and the
+    features_source/artifacts_root passed below) are explicit so
+    register_model never reads/writes the real project's
+    data/processed/features.parquet or artifacts/ during tests."""
     root = tmp_path_factory.mktemp("mlflow")
     uri = f"sqlite:///{root / 'mlflow.db'}"
     bundle_root = root / "bundle"
+    features_source = root / "features-source.parquet"
+    full_frame.to_parquet(features_source, index=False)
     mlflow.set_tracking_uri(uri)
     set_tmp_experiment("test-experiment", root)
     split = temporal_split(full_frame)
     register_model("logreg", split, alias="Staging", calibrate=False,
-                   bundle_root=bundle_root)                                # v1
+                   bundle_root=bundle_root, features_source=features_source,
+                   artifacts_root=root / "artifacts")                      # v1
     register_model("logreg", split, alias="Staging", calibrate=True,
-                   bundle_root=bundle_root)                                # v2 takes alias + bundle
+                   bundle_root=bundle_root, features_source=features_source,
+                   artifacts_root=root / "artifacts")                      # v2 takes alias + bundle
     yield uri, bundle_root
     mlflow.set_tracking_uri(None)
 
@@ -319,31 +324,28 @@ def test_raw_model_reports_no_calibration(registry, race_frame):
 # CLI (python -m src.models.predict --race-id N)
 # ---------------------------------------------------------------------------
 
-def test_cli_missing_features_parquet_returns_1(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(
-        "src.features.pipeline.FEATURES_PATH", tmp_path / "missing.parquet"
-    )
-    assert main(["--race-id", "202301"]) == 1
+def test_cli_missing_features_parquet_returns_1(tmp_path, capsys):
+    assert main(["--race-id", "202301",
+                 "--features-path", str(tmp_path / "missing.parquet")]) == 1
     assert "not found" in capsys.readouterr().err
 
 
-def test_cli_unknown_race_id_returns_1(monkeypatch, tmp_path, full_frame, capsys):
+def test_cli_unknown_race_id_returns_1(tmp_path, full_frame, capsys):
     path = tmp_path / "features.parquet"
     full_frame.to_parquet(path, index=False)
-    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
-    assert main(["--race-id", "999999"]) == 1
+    assert main(["--race-id", "999999", "--features-path", str(path)]) == 1
     assert "not found" in capsys.readouterr().err
 
 
 def test_cli_scores_race_from_live_registry(
-    monkeypatch, tmp_path, full_frame, registry, capsys
+    tmp_path, full_frame, registry, capsys
 ):
     """--tracking-uri opts into the dev/CLI-only live-registry path."""
     uri, _ = registry
     path = tmp_path / "features.parquet"
     full_frame.to_parquet(path, index=False)
-    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
-    rc = main(["--race-id", "202301", "--tracking-uri", uri])
+    rc = main(["--race-id", "202301", "--tracking-uri", uri,
+               "--features-path", str(path)])
     assert rc == 0
     out = capsys.readouterr().out
     assert "f1-winner" in out
@@ -352,16 +354,16 @@ def test_cli_scores_race_from_live_registry(
 
 
 def test_cli_scores_race_from_bundle(
-    monkeypatch, tmp_path, full_frame, registry, capsys
+    tmp_path, full_frame, registry, capsys
 ):
     """Default CLI behavior (no --tracking-uri): the frozen bundle, same
     path app/api.py uses."""
     _, bundle_root = registry
     path = tmp_path / "features.parquet"
     full_frame.to_parquet(path, index=False)
-    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
     rc = main(["--race-id", "202301", "--bundle-dir",
-              str(bundle_dir_for_alias("Staging", bundle_root))])
+              str(bundle_dir_for_alias("Staging", bundle_root)),
+              "--features-path", str(path)])
     assert rc == 0
     out = capsys.readouterr().out
     assert "f1-winner" in out

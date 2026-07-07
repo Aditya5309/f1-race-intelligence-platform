@@ -60,7 +60,7 @@
 | **Model training & evaluation** | Pole-sitter baseline + LogReg + Random Forest + XGBoost + LightGBM; season-grouped expanding-window CV; per-race top-1 / top-3 / MRR metrics; one-time guarded final test; SHAP + permutation-importance analysis |
 | **Probability calibration** | Out-of-fold isotonic calibration fit strictly on training-fold predictions (validation ECE 0.153 → 0.012) |
 | **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; artifacts store the trained schema (`ColumnGuard`) and re-validate it at inference |
-| **Frozen serving bundle** | Registration exports a plain local bundle (`models/serving/<alias>/`) that FastAPI loads directly — no live MLflow tracking server, SQLite registry, or `mlruns/` needed at request time |
+| **Frozen runtime artifacts** | Registration exports a plain local model bundle (`artifacts/serving/<alias>/`) plus a features snapshot (`artifacts/features.parquet`) that FastAPI loads directly — no live MLflow tracking server, SQLite registry, `mlruns/`, or gitignored `data/` needed at request time; `artifacts/` is committed to git (Decision 026/027/029) |
 | **FastAPI inference API** | `GET /health`, `/model`, `/races`, `/predictions/{race_id}`; degraded-mode startup; FIFO prediction cache keyed by `(model_version, race_id)`; forward-holdout guard (409 for years > 2024) |
 | **Streamlit dashboard** | Five fan-first pages (see [Dashboard Overview](#3-dashboard-overview)); predictions consumed from the API over HTTP only — zero imports from model code |
 | **Continuous integration** | GitHub Actions: Ruff lint + 398-test suite + coverage report + synthetic end-to-end smoke on every push and pull request — currently green (see [Continuous Integration](#12-continuous-integration)) |
@@ -88,7 +88,7 @@ Predictions come exclusively from the FastAPI service over HTTP; display metadat
 
 ```mermaid
 flowchart TB
-    subgraph DATA["Data Layer — src/data"]
+    subgraph DATA["Data Layer — src/data (gitignored data/)"]
         A[Ergast-format CSVs] --> B[Load · Clean · Repair · Validate]
         B --> C[(data/interim/*.parquet)]
     end
@@ -97,15 +97,18 @@ flowchart TB
     end
     subgraph FEAT["Feature Layer — src/features"]
         D --> E[Temporal transforms + leakage validation<br/>31 pre-race features]
-        E --> F[(data/processed/features.parquet)]
+        E --> F[(data/processed/features.parquet<br/>training-side, gitignored)]
     end
     subgraph MODEL["Model Layer — src/models"]
         F --> G[Temporal CV · model zoo · tuning · analysis]
         G --> H[(MLflow tracking + registry<br/>f1-winner v2 @ Staging)]
-        H --> H2[(Frozen serving bundle<br/>models/serving/staging)]
-        H2 --> I[predict.py — schema-validated scoring]
+        H --> H2["register_model() freezes BOTH:"]
+        H2 --> RB[(Serving bundle<br/>artifacts/serving/staging)]
+        H2 --> RF[(Features snapshot<br/>artifacts/features.parquet)]
+        RB --> I[predict.py — schema-validated scoring]
+        RF --> I
     end
-    subgraph APP["Application Layer — app/"]
+    subgraph APP["Application Layer — app/ (reads ONLY artifacts/)"]
         I --> J[FastAPI service]
         J -->|HTTP/JSON| K[Streamlit dashboard]
     end
@@ -117,9 +120,11 @@ flowchart TB
 | `src/integration` + `src/pipelines` | Pure key-joins of cleaned sources into one `(raceId, driverId)`-grain master table — no feature logic |
 | `src/features` | All temporal feature construction: shift-before-roll windows, race-grain constructor aggregation (no teammate leakage), prior-visits-only circuit history, standings lagged to the previous round |
 | `src/models` | Temporal splits, model zoo, training/tuning, evaluation, SHAP analysis, OOF isotonic calibration, MLflow registration, and the single model-agnostic inference contract |
-| `app/` | Thin serving adapter: FastAPI translates HTTP into `predict.py` calls, which load a frozen serving bundle — no live MLflow tracking server or registry needed at request time (Decision 026/027); five Streamlit views plus shared `components`/`charts`/`metadata` modules consume the API over HTTP for all predictions |
+| `app/` | Thin serving adapter: FastAPI translates HTTP into `predict.py` calls, which load a frozen serving bundle and features snapshot — no live MLflow tracking server/registry and no gitignored `data/` needed at request time (Decision 026/027/029); five Streamlit views plus shared `components`/`charts`/`metadata` modules consume the API over HTTP for all predictions |
 
 **Temporal discipline** is the platform's #1 correctness constraint: strictly year-based splits (train 2010–2021, validation 2022–2023, one-shot test 2024), 2025–2026 held out entirely, and every feature computable at the moment the starting grid is known.
+
+**Training vs. runtime artifacts** is the platform's #1 *deployment* correctness constraint (Decision 029): `data/`, `mlruns/`, `mlflow.db`, and `models/` hold every training-time artifact and stay fully gitignored; `artifacts/` holds only the two files the deployed API reads (`serving/<alias>/` and `features.parquet`) and is committed to git. Registration (`train.py --register`) is the one place that bridges the two, freezing a training-side snapshot into the committed runtime tree — the API and dashboard never read from `data/` for predictions.
 
 ---
 
@@ -146,7 +151,10 @@ flowchart TB
 .github/workflows/   ci.yml — GitHub Actions CI (lint, tests, coverage, smoke)
 app/                 FastAPI service, settings, five-page Streamlit dashboard
                      (views + components/charts/metadata modules)
-data/                Raw / interim / processed datasets (gitignored)
+artifacts/           COMMITTED runtime artifacts — features.parquet snapshot +
+                     serving/<alias>/ frozen model bundle (Decision 029); the
+                     deployed API needs only this + source, nothing from data/
+data/                Raw / interim / processed training datasets (gitignored)
 docs/                User guide, API reference, EDA images, CI screenshot
 notebooks/           Exploratory analysis only — no business logic
 reports/             Design docs, model-selection evidence, SHAP artifacts
@@ -158,7 +166,7 @@ src/integration/     Join-only master dataset builder
 src/pipelines/       Dataset build orchestration
 src/features/        Modular feature groups + pipeline + feature metadata
 src/models/          Splits, eras, registry, training, evaluation, analysis,
-                     calibration, prediction, frozen serving-bundle export/load
+                     calibration, prediction, frozen runtime-artifact export/load
 tests/               398 pytest tests mirroring every implemented layer
 Makefile             make lint / test / coverage / quality / smoke / all
 pyproject.toml       PEP 621 packaging — version, dependencies, Ruff config
@@ -171,11 +179,11 @@ requirements.txt     Installer shim (-e .[dev]); pins live in pyproject.toml
 
 | Stage | Module | Output artifact |
 |---|---|---|
-| Load · clean · repair · validate | `src/data` | `data/interim/*.parquet` |
-| Master join (integration only) | `src/integration` + `src/pipelines` | `master_dataset.parquet` (27,279 rows × 43 cols) |
-| Temporal feature engineering | `src/features` | `features.parquet` (31 pre-race features) |
+| Load · clean · repair · validate | `src/data` | `data/interim/*.parquet` (gitignored) |
+| Master join (integration only) | `src/integration` + `src/pipelines` | `master_dataset.parquet` (27,279 rows × 43 cols, gitignored) |
+| Temporal feature engineering | `src/features` | `data/processed/features.parquet` (31 pre-race features, gitignored) |
 | Train · tune · calibrate · register | `src/models/train.py` + `calibration.py` | MLflow registry — `f1-winner` v2 @ `Staging` |
-| Export frozen serving bundle (Decision 026/027) | `src/models/serving_bundle.py` | `models/serving/staging/` — model + manifest, no live MLflow needed to serve |
+| Freeze runtime artifacts (Decision 026/027/029) | `src/models/serving_bundle.py` | `artifacts/serving/staging/` (model + manifest) and `artifacts/features.parquet` (snapshot) — both committed; no live MLflow or `data/` needed to serve |
 | Score | `src/models/predict.py` | Per-race normalized win probabilities |
 
 Every stage enforces temporal discipline: rolling windows shift before they roll, championship standings are lagged to the previous round, circuit history uses prior visits only, and fitted preprocessing state is learned from the training window alone. The 2024 test season was scored exactly once behind a guarded flag, and 2025–2026 data is excluded from every split and from serving by default.
@@ -184,7 +192,12 @@ Every stage enforces temporal discipline: rolling windows shift before they roll
 
 ## 8. Installation & Quick Start
 
-**Prerequisites:** Python ≥ 3.11 and the Ergast-format CSV files in `data/` (data is not committed to git).
+**Prerequisites:** Python ≥ 3.11. That's it for *serving* — the committed
+`artifacts/` tree (Decision 029) ships a frozen model bundle and features
+snapshot, so a fresh clone can install and serve predictions immediately.
+The Ergast-format CSV files in `data/` (not committed to git) are only
+needed if you want to rebuild the datasets or retrain from scratch (steps
+3–5 below).
 
 ```bash
 # 1. Install
@@ -199,6 +212,10 @@ python -m ruff check .
 python scripts/smoke.py
 # (with make: `make quality` / `make smoke` / `make all`)
 
+# --- Everything below this line is OPTIONAL: only needed to rebuild data/
+# or retrain a model. Skip straight to step 6 to serve the committed
+# artifacts/ that ship with the repository. ---
+
 # 3. Build the datasets (idempotent; run in order)
 python -m src.data.build_interim --target all   # interim parquet
 python -m src.pipelines.build_dataset           # master dataset
@@ -209,7 +226,12 @@ python -m src.models.train                      # stage 1: full model zoo
 python -m src.models.train --model logreg --tune  # stage 2: randomized search
 mlflow ui                                       # browse experiments
 
-# 5. Score a race from the registered model
+# 4b. Register + freeze runtime artifacts (Decision 026/027/029) — refreshes
+#     BOTH artifacts/serving/staging/ and artifacts/features.parquet
+python -m src.models.train --model logreg --register Staging --calibrate \
+    --params '{"model__C": 0.01653693718282442}'
+
+# 5. Score a race directly from the committed runtime artifacts
 python -m src.models.predict --race-id 1120
 
 # 6. Serve — one command, starts the API if needed and waits for it to be
@@ -339,7 +361,7 @@ On a clean runner the 4 tests that need the local `data/` files skip themselves 
 | [docs/user_guide.md](docs/user_guide.md) | Running and using the platform, including the five-page dashboard |
 | [docs/api_reference.md](docs/api_reference.md) | Endpoint contracts and configuration |
 
-Detailed design documents, EDA findings, and model-selection evidence live in the local-only `reports/` directory (not distributed with the repository). The project also maintains an internal, append-only architectural decision log (28 entries) and an F1 domain-knowledge reference as local engineering notes — not part of this repository.
+Detailed design documents, EDA findings, and model-selection evidence live in the local-only `reports/` directory (not distributed with the repository). The project also maintains an internal, append-only architectural decision log (29 entries) and an F1 domain-knowledge reference as local engineering notes — not part of this repository.
 
 ---
 
@@ -356,12 +378,14 @@ Detailed design documents, EDA findings, and model-selection evidence live in th
 - [x] **Quality baseline:** 95% measured `src/` coverage, Ruff clean, synthetic smoke test, Makefile
 - [x] **Continuous integration:** GitHub Actions running lint + tests + coverage + smoke — live and green
 - [x] **Dashboard redesign:** five-page fan-first analytics UI with an advanced Model Insights page
-- [x] **Training/serving decoupling (Decision 026/027):** the API loads a frozen serving bundle (`models/serving/`) — no live MLflow tracking server, SQLite registry, or `mlruns/` directory required at request time; training/tracking/registration are unchanged
+- [x] **Training/serving decoupling (Decision 026/027):** the API loads a frozen serving bundle — no live MLflow tracking server, SQLite registry, or `mlruns/` directory required at request time; training/tracking/registration are unchanged
 - [x] **Repository self-containment (Decision 028):** no tracked file references this project's private local engineering-notes directories anymore — verified by temporarily removing them and re-running the full test/lint/smoke gate clean
+- [x] **Runtime/training artifact separation (Decision 029):** a new committed `artifacts/` tree (`serving/<alias>/` + `features.parquet`) is the *only* thing the deployed API reads — the gitignored `data/`, `mlruns/`, `mlflow.db`, and `models/` training-side trees are no longer a deployment dependency; `train.py --register` freezes both automatically. Verified by simulating a fresh clone (training trees temporarily hidden) and confirming the API, predictions, and dashboard are all unaffected
 
 ### Current
 
-- [ ] **Docker:** containerized API and dashboard as separate services (artifact strategy resolved — bake the same frozen bundle into the image)
+- [ ] **Deploy:** stand up the API on Render and the dashboard on Streamlit Community Cloud (artifact blocker resolved by Decision 029 — the repository is deployable without committing raw data)
+- [ ] **Docker:** containerized API and dashboard as separate services (artifact strategy resolved — bake the same `artifacts/` tree into the image)
 
 ### Planned
 
@@ -389,7 +413,8 @@ Pointers to the most interesting engineering, for reviewers:
 - **Regulation-aware evaluation** — `src/models/eras.py` + `SplitStrategy` presets encode F1 regulation eras as a code-level domain model with import-time contiguity asserts.
 - **Hermetic MLflow testing** — `tests/conftest.py` pins experiment artifact roots into temp directories, keeping 398 tests and the smoke script from writing a single file into the checkout.
 - **Headless dashboard verification** — the smoke test runs the real Streamlit entry point via `AppTest`, catching failures that only occur inside a live script context (this caught a real navigation bug).
-- **Decision discipline** — 28 append-only architectural decision records; superseding requires a new entry, never an edit.
+- **Runtime/training artifact separation** (Decision 029) — the deployed API reads only from the committed `artifacts/` tree; every gitignored training artifact (`data/`, `mlruns/`, `mlflow.db`, `models/`) can be deleted entirely and the API, predictions, and dashboard are unaffected.
+- **Decision discipline** — 29 append-only architectural decision records; superseding requires a new entry, never an edit.
 
 ---
 

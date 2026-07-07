@@ -225,11 +225,14 @@ def test_mlflow_round_trip(tmp_mlflow, calibrated, val_df):
 
 
 def test_register_model_calibrated_sets_alias_and_tag(tmp_mlflow, tmp_path, train_df, val_df):
-    split = temporal_split(
-        pd.concat([train_df, val_df, _synthetic_features([2024], seed=5)])
-    )
+    frame = pd.concat([train_df, val_df, _synthetic_features([2024], seed=5)])
+    split = temporal_split(frame)
+    features_source = tmp_path / "features-source.parquet"
+    frame.to_parquet(features_source, index=False)
     version = register_model("logreg", split, alias="Staging", calibrate=True,
-                             bundle_root=tmp_path / "bundle")
+                             bundle_root=tmp_path / "bundle",
+                             features_source=features_source,
+                             artifacts_root=tmp_path / "artifacts")
     client = mlflow.MlflowClient()
     resolved = client.get_model_version_by_alias("f1-winner", "Staging")
     assert str(resolved.version) == str(version)

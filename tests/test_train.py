@@ -17,6 +17,8 @@ Plus: feature-importance frame with Decision-013 classes and missing-
 indicator mapping; tune_candidate selection; model registration + alias.
 """
 
+from pathlib import Path
+
 import mlflow
 import numpy as np
 import pandas as pd
@@ -276,10 +278,22 @@ def test_tune_rejects_untunable_candidate(tmp_mlflow):
         tune_candidate("pole_baseline", split.train, n_iter=2, n_folds=2)
 
 
+def _features_snapshot_source(tmp_path) -> Path:
+    """A tmp features.parquet for register_model's features_source param —
+    tests must never let register_model default to the real project's
+    data/processed/features.parquet (mirrors the bundle_root hermeticity
+    discipline)."""
+    path = tmp_path / "features-source.parquet"
+    _full_frame().to_parquet(path, index=False)
+    return path
+
+
 def test_register_model_sets_alias(tmp_mlflow, tmp_path):
     split = temporal_split(_full_frame())
     version = register_model("pole_baseline", split, alias="Staging",
-                             bundle_root=tmp_path / "bundle")
+                             bundle_root=tmp_path / "bundle",
+                             features_source=_features_snapshot_source(tmp_path),
+                             artifacts_root=tmp_path / "artifacts")
     client = mlflow.MlflowClient()
     resolved = client.get_model_version_by_alias("f1-winner", "Staging")
     assert str(resolved.version) == str(version)
@@ -314,7 +328,9 @@ def test_register_applies_params(tmp_mlflow, tmp_path):
     split = temporal_split(_full_frame())
     version = register_model("logreg", split, alias="Staging",
                              params={"model__C": 0.123},
-                             bundle_root=tmp_path / "bundle")
+                             bundle_root=tmp_path / "bundle",
+                             features_source=_features_snapshot_source(tmp_path),
+                             artifacts_root=tmp_path / "artifacts")
     model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
     assert model.named_steps["model"].get_params()["C"] == 0.123
 
@@ -386,9 +402,12 @@ def test_cli_register_run(tmp_mlflow, monkeypatch, tmp_path, capsys):
     rc = main(["--model", "logreg", "--register", "Staging",
                "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
                "--experiment", "cli-test",
-               "--bundle-root", str(tmp_path / "bundle")])
+               "--bundle-root", str(tmp_path / "bundle"),
+               "--artifacts-root", str(tmp_path / "artifacts")])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Registered f1-winner v1 as @Staging" in out
     assert "Serving bundle exported to" in out
+    assert "Runtime features snapshot frozen to" in out
     assert (tmp_path / "bundle" / "staging" / "manifest.json").exists()
+    assert (tmp_path / "artifacts" / "features.parquet").exists()

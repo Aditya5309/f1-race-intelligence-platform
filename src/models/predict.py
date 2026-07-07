@@ -2,7 +2,9 @@
 src/models/predict.py
 
 Inference for Phase 4/5 (Decision 012 module 5; design Section 2; Decision
-026/027) — the serving contract app/api.py will call.
+026/027/029) — the serving contract app/api.py will call. The CLI defaults
+to the committed runtime artifacts (artifacts/serving/<alias>/,
+artifacts/features.parquet) — the exact same files the deployed API reads.
 
     python -m src.models.predict --race-id 1101                     # frozen bundle (default)
     python -m src.models.predict --race-id 1101 --bundle-dir PATH    # explicit bundle
@@ -44,7 +46,12 @@ import numpy as np
 import pandas as pd
 
 from src.models.registry import training_schema
-from src.models.serving_bundle import ModelInfo, bundle_dir_for_alias, load_bundle
+from src.models.serving_bundle import (
+    DEFAULT_FEATURES_ARTIFACT,
+    ModelInfo,
+    bundle_dir_for_alias,
+    load_bundle,
+)
 
 DEFAULT_ALIAS = "Staging"
 #: Identifier columns carried through to the prediction output when present.
@@ -59,7 +66,7 @@ def load_model(bundle_dir: Path | str | None = None):
     (app/api.py's degraded-start lifespan catches this, same as it caught a
     missing registry entry before).
 
-    bundle_dir defaults to models/serving/staging (DEFAULT_ALIAS).
+    bundle_dir defaults to artifacts/serving/staging (DEFAULT_ALIAS).
     """
     if bundle_dir is None:
         bundle_dir = bundle_dir_for_alias(DEFAULT_ALIAS)
@@ -192,33 +199,42 @@ def predict_race(model, race_df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
-    from src.features.pipeline import FEATURES_PATH  # local: CLI-only dependency
-
     parser = argparse.ArgumentParser(
         description="Score a race's field with the registered model.")
     parser.add_argument("--race-id", type=int, required=True,
-                        help="raceId present in data/processed/features.parquet.")
+                        help="raceId present in the features file scored "
+                             "(default: the runtime artifacts snapshot).")
     parser.add_argument("--alias", default=DEFAULT_ALIAS,
                         choices=["Staging", "Production"],
                         help="Which alias's frozen bundle to load (or, with "
                              "--tracking-uri, which live registry alias).")
     parser.add_argument("--bundle-dir", type=Path, default=None,
                         help="Explicit serving bundle directory "
-                             "(default: models/serving/<alias>).")
+                             "(default: artifacts/serving/<alias>).")
+    parser.add_argument("--features-path", type=Path, default=None,
+                        help="Explicit features parquet to score (default: "
+                             "artifacts/features.parquet, the same frozen "
+                             "runtime snapshot app/api.py reads — pass "
+                             "data/processed/features.parquet explicitly to "
+                             "score against the freshest, not-yet-registered "
+                             "training-side build instead).")
     parser.add_argument("--tracking-uri", default=None,
                         help="If given, score directly from a LIVE MLflow "
                              "registry instead of a frozen bundle — dev "
                              "convenience for a model not yet exported.")
     args = parser.parse_args(argv)
 
-    if not FEATURES_PATH.exists():
-        print(f"ERROR: {FEATURES_PATH} not found — run `python -m src.features.pipeline`.",
+    features_path = args.features_path or DEFAULT_FEATURES_ARTIFACT
+    if not features_path.exists():
+        print(f"ERROR: {features_path} not found — run "
+              "`python -m src.models.train --register <alias> --calibrate` "
+              "to freeze a runtime snapshot, or pass --features-path.",
               file=sys.stderr)
         return 1
-    features = pd.read_parquet(FEATURES_PATH)
+    features = pd.read_parquet(features_path)
     race_df = features[features["raceId"] == args.race_id]
     if race_df.empty:
-        print(f"ERROR: raceId {args.race_id} not found in features.parquet.",
+        print(f"ERROR: raceId {args.race_id} not found in {features_path}.",
               file=sys.stderr)
         return 1
 

@@ -48,8 +48,9 @@ def _synthetic_features(years, races_per_year=3, n_drivers=5, seed=0) -> pd.Data
 @pytest.fixture(scope="module")
 def serving_stack(tmp_path_factory):
     """Registry (calibrated model @Staging) + exported bundle + features
-    parquet + Settings. bundle_root is an explicit tmp path — register_model
-    would otherwise export into the real project models/serving/."""
+    parquet + Settings. bundle_root/features_source/artifacts_root are all
+    explicit tmp paths — register_model would otherwise read/write the real
+    project's data/processed/features.parquet and artifacts/serving/."""
     root = tmp_path_factory.mktemp("serving")
     uri = f"sqlite:///{root / 'mlflow.db'}"
     bundle_root = root / "bundle"
@@ -61,7 +62,9 @@ def serving_stack(tmp_path_factory):
     mlflow.set_tracking_uri(uri)
     set_tmp_experiment("test-experiment", root)
     split = temporal_split(frame)
-    register_model("logreg", split, alias="Staging", calibrate=True, bundle_root=bundle_root)
+    register_model("logreg", split, alias="Staging", calibrate=True,
+                   bundle_root=bundle_root, features_source=features_path,
+                   artifacts_root=root / "artifacts")
     mlflow.set_tracking_uri(None)
 
     settings = Settings(

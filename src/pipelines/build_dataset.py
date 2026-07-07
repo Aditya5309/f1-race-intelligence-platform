@@ -102,7 +102,7 @@ def build_dataset(dry_run: bool = False, output_path: Path = _OUTPUT_PATH):
     if dry_run:
         print("     Dry run — skipping write.")
     else:
-        _PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         master.to_parquet(output_path, index=False)
         size_kb = output_path.stat().st_size / 1024
         print(f"     Saved: {output_path}  ({size_kb:.1f} KB)")

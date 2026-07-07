@@ -156,3 +156,17 @@ class TestBuildDatasetOrchestrator:
         with pytest.raises(ValueError, match="Output validation failed"):
             build_dataset(output_path=cli_env["out"])
         assert not cli_env["out"].exists()
+
+    def test_happy_path_never_touches_module_processed_dir(
+        self, cli_env, monkeypatch, tmp_path
+    ):
+        """Regression: build_dataset() used to unconditionally
+        `_PROCESSED_DIR.mkdir()` (the module's own hardcoded data/processed/
+        default) regardless of `output_path`, leaking an empty directory into
+        the real project checkout on every test run. It must create only
+        output_path's own parent."""
+        sentinel = tmp_path / "should-never-be-created"
+        monkeypatch.setattr(build_dataset_mod, "_PROCESSED_DIR", sentinel)
+        build_dataset(output_path=cli_env["out"])
+        assert not sentinel.exists()
+        assert cli_env["out"].exists()

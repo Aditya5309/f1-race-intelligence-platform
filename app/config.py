@@ -13,6 +13,12 @@ Decision 026/027: serving no longer resolves a live MLflow registry alias —
 there is deliberately no `tracking_uri`/`model_alias` setting here anymore.
 `serving_bundle_path` points at a frozen bundle (src.models.serving_bundle);
 the API doesn't know what alias or experiment produced it.
+
+Decision 029: both `serving_bundle_path` and `features_path` default under
+`artifacts/` — a runtime artifact tree that is committed to git (contrast
+with `data_dir`, `data/`, `mlruns/`, `mlflow.db`, all gitignored). A freshly
+cloned repository (source + `artifacts/` only, no `data/`) has everything
+the deployed API requires to serve predictions.
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ARTIFACTS_ROOT = _PROJECT_ROOT / "artifacts"
 
 
 class Settings(BaseSettings):
@@ -30,14 +37,22 @@ class Settings(BaseSettings):
     )
 
     # --- model --------------------------------------------------------------
-    #: Frozen serving bundle directory (Decision 026/027) — no MLflow
-    #: tracking URI or registry alias needed at request time.
-    serving_bundle_path: Path = _PROJECT_ROOT / "models" / "serving" / "staging"
+    #: Frozen serving bundle directory (Decision 026/027/029) — no MLflow
+    #: tracking URI or registry alias needed at request time. Committed to
+    #: git under artifacts/ (unlike the gitignored data/ and mlruns/ trees).
+    serving_bundle_path: Path = _ARTIFACTS_ROOT / "serving" / "staging"
 
     # --- data --------------------------------------------------------------
-    features_path: Path = _PROJECT_ROOT / "data" / "processed" / "features.parquet"
-    #: Directory holding drivers.csv / constructors.csv for display names.
-    #: Names degrade to null in responses if the files are absent.
+    #: Frozen serving feature matrix (Decision 029) — a committed snapshot
+    #: exported by train.py::register_model(), NOT the live training-side
+    #: data/processed/features.parquet (which stays gitignored).
+    features_path: Path = _ARTIFACTS_ROOT / "features.parquet"
+    #: Directory holding drivers.csv / constructors.csv for display names —
+    #: an OPTIONAL enrichment only (Decision 016): names degrade to null in
+    #: API responses if the files are absent, so this is a soft dependency
+    #: on the gitignored data/ tree, never a hard requirement to serve
+    #: predictions. Deploying data_dir alongside artifacts/ is an
+    #: enhancement, not a blocker.
     data_dir: Path = _PROJECT_ROOT / "data"
 
     # --- serving policy ----------------------------------------------------

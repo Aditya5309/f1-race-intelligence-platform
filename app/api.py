@@ -2,21 +2,25 @@
 app/api.py
 
 FastAPI serving layer (Decision 016; reports/application_design.md;
-Decision 026/027).
+Decision 026/027/029).
 
     uvicorn app.api:app --reload
 
 The app is deliberately logic-free: HTTP concerns in, exactly two calls to
 the tested prediction layer out — `predict.load_model()` once at startup,
 `predict.predict_race()` per request. Feature rows are looked up SERVER-SIDE
-from features.parquet by raceId (clients never send feature payloads —
+from the frozen runtime features snapshot (settings.features_path, default
+artifacts/features.parquet) by raceId (clients never send feature payloads —
 features are derived artifacts of the leakage-audited pipeline; design §1).
 
 `predict.load_model()` reads a frozen serving bundle (settings.
-serving_bundle_path) — no live MLflow tracking server, SQLite registry, or
-mlruns/ directory is required at runtime (Decision 026/027). This module
-has no concept of experiments or registry aliases; that machinery lives
-entirely on the training side (src/models/train.py).
+serving_bundle_path, default artifacts/serving/staging) — no live MLflow
+tracking server, SQLite registry, or mlruns/ directory is required at
+runtime (Decision 026/027). Both runtime artifacts live under the committed
+artifacts/ tree (Decision 029) — the deployed API needs nothing from the
+gitignored data/ training tree to serve predictions. This module has no
+concept of experiments or registry aliases; that machinery lives entirely
+on the training side (src/models/train.py).
 
 Endpoints (design §5):
     GET  /health                    liveness + serving model metadata

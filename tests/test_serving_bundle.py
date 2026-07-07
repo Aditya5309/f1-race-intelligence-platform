@@ -1,5 +1,5 @@
 """
-Tests for src/models/serving_bundle.py (Decision 026/027).
+Tests for src/models/serving_bundle.py (Decision 026/027/029).
 
 Coverage:
   - export_bundle writes model/ + manifest.json + feature_schema.json
@@ -8,6 +8,11 @@ Coverage:
   - load_bundle raises FileNotFoundError with a clear, actionable message
     when the bundle (or its model/manifest) is missing
   - bundle_dir_for_alias lowercases the alias for the directory name
+  - export_features_snapshot copies the source parquet to
+    artifacts_root/features.parquet, creating directories as needed
+  - default runtime artifact paths are all rooted under artifacts/
+    (Decision 029 — the committed runtime tree, contrast with the
+    gitignored data/ and models/ training-side trees)
 """
 
 import json
@@ -19,9 +24,13 @@ import pytest
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.registry import get_model
 from src.models.serving_bundle import (
+    DEFAULT_ARTIFACTS_ROOT,
+    DEFAULT_BUNDLE_ROOT,
+    DEFAULT_FEATURES_ARTIFACT,
     ModelInfo,
     bundle_dir_for_alias,
     export_bundle,
+    export_features_snapshot,
     load_bundle,
 )
 from src.models.splits import to_xy
@@ -117,3 +126,48 @@ def test_load_bundle_missing_manifest_raises(tmp_path, fitted_model, sample_info
     (bundle_dir / "manifest.json").unlink()
     with pytest.raises(FileNotFoundError, match="No serving bundle"):
         load_bundle(bundle_dir)
+
+
+# ---------------------------------------------------------------------------
+# Runtime artifact layout (Decision 029)
+# ---------------------------------------------------------------------------
+
+def test_default_paths_are_rooted_under_artifacts():
+    """The committed runtime tree — contrast with gitignored data/models/."""
+    assert DEFAULT_ARTIFACTS_ROOT.name == "artifacts"
+    assert DEFAULT_BUNDLE_ROOT == DEFAULT_ARTIFACTS_ROOT / "serving"
+    assert DEFAULT_FEATURES_ARTIFACT == DEFAULT_ARTIFACTS_ROOT / "features.parquet"
+
+
+def test_export_features_snapshot_copies_to_artifacts_root(tmp_path):
+    source = tmp_path / "source.parquet"
+    pd.DataFrame({"raceId": [1, 2], "driverId": [1, 2]}).to_parquet(source)
+
+    dest = export_features_snapshot(source, artifacts_root=tmp_path / "artifacts")
+
+    assert dest == tmp_path / "artifacts" / "features.parquet"
+    assert dest.exists()
+    pd.testing.assert_frame_equal(pd.read_parquet(dest), pd.read_parquet(source))
+
+
+def test_export_features_snapshot_creates_missing_directories(tmp_path):
+    source = tmp_path / "source.parquet"
+    pd.DataFrame({"raceId": [1]}).to_parquet(source)
+
+    dest = export_features_snapshot(
+        source, artifacts_root=tmp_path / "nested" / "artifacts"
+    )
+
+    assert dest.exists()
+
+
+def test_export_features_snapshot_overwrites_existing(tmp_path):
+    source = tmp_path / "source.parquet"
+    artifacts_root = tmp_path / "artifacts"
+    pd.DataFrame({"raceId": [1]}).to_parquet(source)
+    export_features_snapshot(source, artifacts_root=artifacts_root)
+
+    pd.DataFrame({"raceId": [1, 2, 3]}).to_parquet(source)
+    dest = export_features_snapshot(source, artifacts_root=artifacts_root)
+
+    assert len(pd.read_parquet(dest)) == 3
