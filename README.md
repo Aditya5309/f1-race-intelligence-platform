@@ -313,12 +313,22 @@ On a clean runner the 4 tests that need the local `data/` files skip themselves 
 
 ## 13. Screenshots
 
+**Dashboard — five pages:**
+
+| Page | Preview |
+|---|---|
+| 🏠 Dashboard | ![Dashboard](docs/images/dashboard_overview.png) |
+| 🏎 Race Center | ![Race Center](docs/images/dashboard_race_center.png) |
+| 👤 Driver Explorer | ![Driver Explorer](docs/images/dashboard_driver_explorer.png) |
+| 📊 Season Analytics | ![Season Analytics](docs/images/dashboard_season_analytics.png) |
+| 🤖 Model Insights | ![Model Insights](docs/images/dashboard_model_insights.png) |
+
+**Other artifacts:**
+
 | Artifact | Preview |
 |---|---|
 | Grid position vs win rate (EDA) | ![Grid vs win rate](docs/images/fig01_grid_vs_win_rate.png) |
 | CI pipeline green | See [Continuous Integration](#12-continuous-integration) |
-
-_Dashboard screenshots are queued for the README-finalization pass._
 
 ---
 
@@ -326,7 +336,7 @@ _Dashboard screenshots are queued for the README-finalization pass._
 
 | Document | Purpose |
 |---|---|
-| [docs/user_guide.md](docs/user_guide.md) | Running and using the platform *(being refreshed for the five-page dashboard)* |
+| [docs/user_guide.md](docs/user_guide.md) | Running and using the platform, including the five-page dashboard |
 | [docs/api_reference.md](docs/api_reference.md) | Endpoint contracts and configuration |
 
 Detailed design documents, EDA findings, and model-selection evidence live in the local-only `reports/` directory (not distributed with the repository). The project also maintains an internal, append-only architectural decision log (28 entries) and an F1 domain-knowledge reference as local engineering notes — not part of this repository.

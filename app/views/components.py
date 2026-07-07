@@ -2,7 +2,7 @@
 app/views/components.py
 
 Reusable, presentation-only UI building blocks shared across dashboard pages
-(UI/UX redesign — see context/decisions.md for the rationale). Every helper
+(UI/UX redesign, Decision 023). Every helper
 here is a thin wrapper over native Streamlit widgets (st.container(border=),
 st.metric(border=), st.badge) — no custom CSS/HTML injection, so styling
 stays theme-aware (light/dark) for free and there is no injection surface.

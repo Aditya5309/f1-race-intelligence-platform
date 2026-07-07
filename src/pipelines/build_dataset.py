@@ -24,7 +24,7 @@ Scope
 -----
 Integration only — no feature engineering, no rolling statistics, no lagged
 standings, no training data, no model training, no inference. See
-reports/master_dataset_design.md and Decision 009 in context/decisions.md.
+reports/master_dataset_design.md and Decision 009.
 """
 
 from __future__ import annotations

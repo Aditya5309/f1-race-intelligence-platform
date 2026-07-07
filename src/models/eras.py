@@ -2,9 +2,10 @@
 src/models/eras.py
 
 Formula 1 regulation-era definitions (Decision 019) — the code-level single
-source of truth for era boundaries, mirroring context/domain_knowledge.md
-Section 1 (the prose source of truth) and following the Decision-013
-precedent of src/features/metadata.py.
+source of truth for era boundaries, mirroring this project's internal F1
+domain-knowledge reference (local engineering notes, not part of this
+repository) and following the Decision-013 precedent of
+src/features/metadata.py.
 
 WHY ERAS MATTER (concept drift in F1)
 -------------------------------------
@@ -26,14 +27,15 @@ points systems) and are outside every split strategy. `era_of()` returns
 None for pre-2010 years by design.
 
 Era boundaries are public years in advance (regulations are published ahead
-of time), so era information is never leakage (domain_knowledge.md Section 1).
+of time), so era information is never leakage.
 
 MAINTENANCE
 -----------
 When the FIA announces or starts a new regulation cycle:
 1. Close the current final era (set its `end_year`).
 2. Append the new era (usually with `end_year=None` while ongoing).
-3. Update context/domain_knowledge.md Section 1 in the same change.
+3. If you maintain an internal domain-knowledge reference alongside this
+   repo, update it in the same change.
 Nothing in the splitting logic needs to change; within-era presets for the
 new era become available automatically once the era is closed (or has enough
 seasons) — see `within_era_strategy` in src/models/splits.py.
@@ -85,8 +87,8 @@ class RegulationEra:
 
 
 # ---------------------------------------------------------------------------
-# The era table (domain_knowledge.md Section 1; segmentation verified in the
-# Decision-012 Section 14 era-nonstationarity analysis and Decision 013).
+# The era table (segmentation verified in the Decision-012 Section 14
+# era-nonstationarity analysis and Decision 013).
 # ---------------------------------------------------------------------------
 
 V8 = RegulationEra(

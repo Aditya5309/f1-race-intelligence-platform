@@ -1,4 +1,4 @@
-# Continuous Integration (Phase C2 — Decision-free tooling, see .ai/backlog.md).
+# Continuous Integration (Phase C2 — Decision-free tooling).
 #
 # Runs the exact local quality workflow (`make quality && make smoke`) on every
 # push and pull request, so a broken commit is caught on GitHub before it is
@@ -63,8 +63,8 @@ jobs:
         run: python scripts/smoke.py
 
       # Coverage numbers as a downloadable CI artifact (not a hard gate yet —
-      # see .ai/backlog.md for the follow-up to add a --cov-fail-under
-      # threshold once a stable target is agreed).
+      # a --cov-fail-under threshold is a tracked follow-up once a stable
+      # target is agreed).
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,7 +1,7 @@
 # F1 Race Winner Prediction — User Guide
 
-_User-facing documentation. (Internal engineering memory lives in `context/`;
-design documents and analysis reports live in `reports/`.)_
+_User-facing documentation. (Design documents and analysis reports live in
+`reports/`.)_
 
 ## What this system does
 
@@ -39,9 +39,20 @@ uvicorn app.api:app                      # http://localhost:8000, docs at /docs
 streamlit run app/dashboard.py           # http://localhost:8501
 ```
 
+Or, for local development, start both with one command (dev tooling only,
+Decision 025 — production still runs the two services independently):
+
+```bash
+python scripts/dev.py                    # equivalent: make dev
+```
+
+`scripts/dev.py` starts the API only if nothing is already answering at its
+`/health` endpoint, waits for it to come up, then runs the dashboard in the
+foreground; it cleans up the API on exit only if it started it.
+
 Prerequisites: the built feature matrix (`data/processed/features.parquet`)
-and the MLflow store (`mlflow.db` + `mlruns/`) with a registered
-`f1-winner@Staging` model. If missing, rebuild:
+and a frozen serving bundle at `models/serving/staging/` (default; see
+`F1_SERVING_BUNDLE_PATH` below). If missing, rebuild:
 
 ```bash
 python -m src.data.build_interim --target all
@@ -53,16 +64,38 @@ python -m src.models.train --model logreg --register Staging --calibrate \
 
 ## The dashboard
 
-Three pages (left navigation):
+Five pages (left navigation). Four are fan-first; all ML/technical detail is
+confined to the fifth, clearly-labeled "Advanced" page. Every prediction
+number comes from the FastAPI service over HTTP — the dashboard never
+imports model code. Grand Prix names, grids, standings, and career stats are
+read-only display metadata that degrades gracefully when `data/` is absent.
 
-- **Overview** — what the system is, the serving model's identity and
-  headline metrics, and how to interpret win shares.
-- **Predictions** — pick a season and race (2010–2024); see the field's win
-  shares as a bar chart with the actual winner highlighted, a hit/miss badge,
-  and the full field table. Tied probabilities between midfield drivers are
-  normal (the calibrator maps similar strength to the same probability step).
-- **Model Insights** — which features drive predictions (grid position and
-  qualifying dominate), SHAP analysis, and calibration quality.
+- **🏠 Dashboard** — system status at a glance: model stage (Staging/
+  Production), API health, latest model version, supported season range,
+  and headline validation/test metrics. One-line links out to the other four
+  pages.
+- **🏎 Race Center** — pick a season and race (2010–2024); see the model's
+  favorite as a hero card with a confidence level, the top-5 contenders as
+  cards (grid/qualifying position, rank trend vs. the previous round), a
+  plain-language "why did the model choose this driver?" breakdown, a
+  hit/miss badge against the actual winner, race facts, and the full field
+  as a constructor-colored bar chart plus table. Tied probabilities between
+  midfield drivers are normal (the calibrator maps similar strength to the
+  same probability step).
+- **👤 Driver Explorer** — one driver's races, scoped to a season or their
+  whole served career: profile card with current championship position,
+  wins/podiums/poles/points/average-qualifying/average-finish tiles,
+  qualifying/finishing/championship-points/win-share trend charts, and a
+  full race log.
+- **📊 Season Analytics** — how a season is unfolding: model hit rate round
+  by round (plus cumulative), championship standings, most-predicted
+  winners, most surprising races (biggest upsets), win-share distribution,
+  and which drivers/constructors are rising or fading.
+- **🤖 Model Insights** *(advanced)* — model card (algorithm, calibration
+  method, registry alias, run id), validation/test results, the full
+  five-model comparison table, the Decision-013 feature classification
+  (stable / era-sensitive / experimental), and the feature-importance/SHAP/
+  calibration/diagnostic figures.
 
 ## Command-line prediction
 
@@ -77,7 +110,7 @@ file). The defaults work out of the box. Common overrides:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `F1_MODEL_ALIAS` | `Staging` | which registered model the API serves |
+| `F1_SERVING_BUNDLE_PATH` | `models/serving/staging` | which frozen serving bundle the API loads (Decision 026/027 — no live MLflow registry needed) |
 | `F1_API_URL` | `http://localhost:8000` | where the dashboard finds the API |
 | `F1_SERVE_MAX_YEAR` | `2024` | newest season the API will serve (2025+ is a reserved evaluation holdout) |
 | `F1_DEBUG_ENDPOINTS` | `false` | enables `/debug/*` inspection routes (development only) |

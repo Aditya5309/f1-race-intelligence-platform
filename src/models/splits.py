@@ -6,8 +6,8 @@ reports/model_development_design.md Sections 2 and 4).
 
 WHY SPLITS ARE REGULATION-AWARE (concept drift)
 -----------------------------------------------
-F1 regulation rewrites reset the competitive order (see src/models/eras.py
-and context/domain_knowledge.md Section 1): constructor form, dominance
+F1 regulation rewrites reset the competitive order (see src/models/eras.py):
+constructor form, dominance
 concentration, and qualifying-to-race relationships learned under one
 ruleset weaken or break under the next. A temporal split therefore does not
 just prevent leakage — it CHOOSES which drift question the evaluation
@@ -60,8 +60,8 @@ MECHANICS
    years >= FORWARD_HOLDOUT_MIN_YEAR if it declares
    `allow_forward_holdout=True` at construction — and actually running such
    a strategy on real data additionally requires the 2025-2026 provenance
-   resolution (domain_knowledge.md Section 8). The default remains a hard
-   rejection, so no existing caller can leak the holdout by accident.
+   resolution. The default remains a hard rejection, so no existing caller
+   can leak the holdout by accident.
 
 3. `season_folds(train_df, ...)` — season-grouped expanding-window CV folds
    within the selected strategy's training window (design doc Section 4),
@@ -93,7 +93,7 @@ from src.models import eras
 # Phase 8 retraining/monitoring rehearsal. Only strategies that explicitly
 # declare `allow_forward_holdout=True` may reach it (Decision 018), and
 # running such a strategy on real data is additionally gated on resolving
-# 2025-2026 data provenance (domain_knowledge.md Section 8).
+# 2025-2026 data provenance.
 FORWARD_HOLDOUT_MIN_YEAR: int = 2025
 
 # Design doc Section 4 — six expanding-window folds for the historical
@@ -314,9 +314,9 @@ def rolling_window_strategy(
 
     Era caveat (deliberate): rolling windows ignore era boundaries. A window
     spanning a regulation reset carries weakened constructor-form signal for
-    post-reset seasons (domain_knowledge.md Section 1) — expected domain
-    behavior to report, not an error to prevent. Use `eras.era_of()` if a
-    caller wants to flag boundary-spanning windows.
+    post-reset seasons — expected domain behavior to report, not an error to
+    prevent. Use `eras.era_of()` if a caller wants to flag boundary-spanning
+    windows.
 
     Raises
     ------

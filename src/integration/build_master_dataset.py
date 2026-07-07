@@ -139,8 +139,8 @@ def load_inputs(interim_dir: Path = _INTERIM_DIR) -> dict[str, pd.DataFrame]:
     `results` and `qualifying` come from data/interim/ (already cleaned by
     src/data/cleaner.py + src/data/build_interim.py). `races`, `drivers`,
     `constructors`, and `circuits` are loaded directly from data/*.csv — per
-    Decision 005 / current_status.md, these dimension tables join cleanly
-    as-is and have no dedicated clean_* step.
+    Decision 005, these dimension tables join cleanly as-is and have no
+    dedicated clean_* step.
 
     Raises
     ------

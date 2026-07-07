@@ -10,7 +10,7 @@ dashboard in the foreground. If THIS script started the API, it is stopped
 when Streamlit exits (Ctrl+C or normal exit); an API that was already
 running is left untouched.
 
-Dev tooling only (context/decisions.md Decision 025) — never imported by
+Dev tooling only (Decision 025) — never imported by
 app/api.py or app/dashboard.py, and never invoked by any deployment path:
 Streamlit Community Cloud always launches app/dashboard.py directly, and
 each Docker image runs `uvicorn app.api:app` / `streamlit run

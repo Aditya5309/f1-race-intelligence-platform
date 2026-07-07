@@ -214,9 +214,8 @@ def evaluate_all(y_true, y_prob, race_ids) -> dict[str, float]:
 def evaluate_by_season(y_true, y_prob, race_ids, years) -> pd.DataFrame:
     """
     evaluate_all() per season — the regulation-era monitoring view mandated
-    by design Section 9 / domain_knowledge.md Section 1 ("report metrics per
-    season, not only pooled"): era effects and form-feature nonstationarity
-    are invisible in pooled numbers.
+    by design Section 9 ("report metrics per season, not only pooled"): era
+    effects and form-feature nonstationarity are invisible in pooled numbers.
 
     Returns a DataFrame indexed by year, one column per evaluate_all metric.
     """

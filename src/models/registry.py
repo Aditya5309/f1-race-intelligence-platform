@@ -20,7 +20,7 @@ Design rules enforced here:
 - Informative NaNs are preserved for the tree boosters (native NaN handling);
   LogReg gets a median imputer WITH missing-indicator flags so "no prior
   history" stays visible as a signal instead of dissolving into the median
-  (Section 3 rationale; domain_knowledge.md Section 2).
+  (Section 3 rationale).
 - The pole-sitter heuristic (Section 3, candidate 0b) implements the same
   predict_proba interface as the real models so it flows through identical
   CV/evaluation/MLflow plumbing. It is the bar every model must beat

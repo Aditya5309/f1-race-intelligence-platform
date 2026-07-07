@@ -36,7 +36,7 @@ never decides between competing rows):
    Resolution: fill position from positionText when finished=True and
    position is null.
 
-See decisions.md Decision 007 for the rationale behind these choices.
+See Decision 007 for the rationale behind these choices.
 """
 
 from __future__ import annotations

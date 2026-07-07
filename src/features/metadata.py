@@ -10,8 +10,8 @@ data problem; Era-sensitive drift at regulation boundaries is expected domain
 behavior), and future dashboard components. Import from here — never re-type
 feature lists or classifications elsewhere.
 
-Rationale for each class lives in context/decisions.md (Decision 013) and the
-feature-set review in reports/model_development_design.md §14:
+Rationale for each class lives in Decision 013 and the feature-set review in
+reports/model_development_design.md §14:
 - Stable: era-robust relative/normalized measures, rank-based values, or
   structural facts. Expected to survive regulation resets.
 - Era-sensitive: predictive power depends on dominance concentration,
