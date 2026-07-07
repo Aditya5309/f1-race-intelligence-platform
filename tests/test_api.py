@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from app.api import create_app
 from app.config import Settings
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
+from src.models.serving_bundle import bundle_dir_for_alias
 from src.models.splits import temporal_split
 from src.models.train import register_model
 from tests.conftest import set_tmp_experiment
@@ -46,9 +47,12 @@ def _synthetic_features(years, races_per_year=3, n_drivers=5, seed=0) -> pd.Data
 
 @pytest.fixture(scope="module")
 def serving_stack(tmp_path_factory):
-    """Registry (calibrated model @Staging) + features parquet + Settings."""
+    """Registry (calibrated model @Staging) + exported bundle + features
+    parquet + Settings. bundle_root is an explicit tmp path — register_model
+    would otherwise export into the real project models/serving/."""
     root = tmp_path_factory.mktemp("serving")
     uri = f"sqlite:///{root / 'mlflow.db'}"
+    bundle_root = root / "bundle"
     # 2010–2024 in-window plus 2025 forward-holdout rows for the guard tests.
     frame = _synthetic_features(range(2010, 2026))
     features_path = root / "features.parquet"
@@ -57,11 +61,11 @@ def serving_stack(tmp_path_factory):
     mlflow.set_tracking_uri(uri)
     set_tmp_experiment("test-experiment", root)
     split = temporal_split(frame)
-    register_model("logreg", split, alias="Staging", calibrate=True)
+    register_model("logreg", split, alias="Staging", calibrate=True, bundle_root=bundle_root)
     mlflow.set_tracking_uri(None)
 
     settings = Settings(
-        tracking_uri=uri,
+        serving_bundle_path=bundle_dir_for_alias("Staging", bundle_root),
         features_path=features_path,
         data_dir=root / "no-such-dir",     # name lookups degrade to null
         debug_endpoints=False,
@@ -103,7 +107,7 @@ def test_health_ok_with_model_metadata(client):
 
 def test_health_degraded_when_registry_missing(tmp_path):
     settings = Settings(
-        tracking_uri=f"sqlite:///{tmp_path / 'empty.db'}",
+        serving_bundle_path=tmp_path / "no-such-bundle",
         features_path=tmp_path / "missing.parquet",
     )
     with TestClient(create_app(settings)) as c:

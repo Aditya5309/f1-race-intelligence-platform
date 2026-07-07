@@ -49,6 +49,7 @@ import hashlib
 import json
 import sys
 import warnings
+from datetime import UTC, datetime
 from pathlib import Path
 
 import mlflow
@@ -402,6 +403,7 @@ def register_model(
     fingerprint: str = "unfingerprinted",
     params: dict | None = None,
     calibrate: bool = False,
+    bundle_root: Path | None = None,
 ) -> str:
     """
     Register a fitted pipeline as `f1-winner` and point `alias` at it.
@@ -417,6 +419,15 @@ def register_model(
     when the base model is refit on train+val for Production.
 
     Requires a registry-capable tracking store (the default sqlite URI is).
+
+    Decision 026/027: registration ALSO exports a frozen serving bundle
+    (src.models.serving_bundle) to bundle_root/alias.lower() — the SAME
+    already-fitted in-memory model_obj, no extra MLflow round trip. This is
+    what src/models/predict.py's serving-side load_model() reads; the API
+    never resolves a live registry alias at request time. bundle_root
+    defaults to models/serving/ — TESTS MUST pass an explicit tmp bundle_root
+    or they will write into the real project directory.
+
     Returns the registered model version.
     """
     if alias == "Production":
@@ -426,7 +437,7 @@ def register_model(
     else:
         raise ValueError(f"Unknown alias '{alias}' — use 'Staging' or 'Production'.")
 
-    with mlflow.start_run(run_name=f"{name}-register-{alias.lower()}"):
+    with mlflow.start_run(run_name=f"{name}-register-{alias.lower()}") as run:
         _log_common(name, fingerprint, stage="register")
         mlflow.set_tag("register_alias", alias)
         if params:
@@ -443,17 +454,32 @@ def register_model(
             if params:
                 model_obj.set_params(**params)
             model_obj.fit(X_fit, y_fit)
-        mlflow.set_tag("calibration", getattr(model_obj, "calibration", "none"))
+        calibration = getattr(model_obj, "calibration", "none")
+        mlflow.set_tag("calibration", calibration)
 
         mlflow.log_dict(training_schema(model_obj), "training_schema.json")
-        info = mlflow.sklearn.log_model(
+        log_info = mlflow.sklearn.log_model(
             model_obj, name="model", registered_model_name=REGISTERED_MODEL_NAME,
         )
+        run_id = run.info.run_id
 
-    version = info.registered_model_version
+    version = log_info.registered_model_version
     mlflow.MlflowClient().set_registered_model_alias(
         REGISTERED_MODEL_NAME, alias, version
     )
+
+    from src.models.serving_bundle import ModelInfo, export_bundle
+    bundle_info = ModelInfo(
+        name=REGISTERED_MODEL_NAME,
+        version=str(version),
+        alias=alias,
+        run_id=run_id,
+        trained_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        calibration=calibration,
+        model_class=type(model_obj).__name__,
+    )
+    export_bundle(model_obj, bundle_info, bundle_root=bundle_root)
+
     return str(version)
 
 
@@ -477,6 +503,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="With --register: wrap the model in the OOF "
                              "isotonic calibrator (design Section 5, "
                              "Decision 015) before registering.")
+    parser.add_argument("--bundle-root", type=Path, default=None,
+                        help="With --register: where to export the frozen "
+                             "serving bundle (Decision 026/027). Default: "
+                             "models/serving/.")
     parser.add_argument("--params", default=None,
                         help="JSON dict of pipeline params (copy from --tune "
                              "output) applied to --final-test / --register / a "
@@ -528,10 +558,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.register:
         version = register_model(args.model, split, args.register, fingerprint,
-                                 params=params, calibrate=args.calibrate)
+                                 params=params, calibrate=args.calibrate,
+                                 bundle_root=args.bundle_root)
         suffix = " (isotonic-oof calibrated)" if args.calibrate else ""
+        from src.models.serving_bundle import bundle_dir_for_alias
+        bundle_dir = bundle_dir_for_alias(args.register, args.bundle_root)
         print(f"Registered {REGISTERED_MODEL_NAME} v{version} as "
               f"@{args.register}{suffix}.")
+        print(f"Serving bundle exported to {bundle_dir}")
         return 0
 
     if args.tune:

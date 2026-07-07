@@ -224,11 +224,12 @@ def test_mlflow_round_trip(tmp_mlflow, calibrated, val_df):
     assert np.array_equal(loaded.predict_proba(X), calibrated.predict_proba(X))
 
 
-def test_register_model_calibrated_sets_alias_and_tag(tmp_mlflow, train_df, val_df):
+def test_register_model_calibrated_sets_alias_and_tag(tmp_mlflow, tmp_path, train_df, val_df):
     split = temporal_split(
         pd.concat([train_df, val_df, _synthetic_features([2024], seed=5)])
     )
-    version = register_model("logreg", split, alias="Staging", calibrate=True)
+    version = register_model("logreg", split, alias="Staging", calibrate=True,
+                             bundle_root=tmp_path / "bundle")
     client = mlflow.MlflowClient()
     resolved = client.get_model_version_by_alias("f1-winner", "Staging")
     assert str(resolved.version) == str(version)

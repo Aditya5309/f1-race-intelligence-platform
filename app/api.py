@@ -1,7 +1,8 @@
 """
 app/api.py
 
-FastAPI serving layer (Decision 016; reports/application_design.md).
+FastAPI serving layer (Decision 016; reports/application_design.md;
+Decision 026/027).
 
     uvicorn app.api:app --reload
 
@@ -10,6 +11,12 @@ the tested prediction layer out — `predict.load_model()` once at startup,
 `predict.predict_race()` per request. Feature rows are looked up SERVER-SIDE
 from features.parquet by raceId (clients never send feature payloads —
 features are derived artifacts of the leakage-audited pipeline; design §1).
+
+`predict.load_model()` reads a frozen serving bundle (settings.
+serving_bundle_path) — no live MLflow tracking server, SQLite registry, or
+mlruns/ directory is required at runtime (Decision 026/027). This module
+has no concept of experiments or registry aliases; that machinery lives
+entirely on the training side (src/models/train.py).
 
 Endpoints (design §5):
     GET  /health                    liveness + serving model metadata
@@ -162,10 +169,7 @@ async def _lifespan(app: FastAPI):
     app.state.driver_names, app.state.constructor_names = {}, {}
 
     try:
-        kwargs = {"alias": settings.model_alias}
-        if settings.tracking_uri:
-            kwargs["tracking_uri"] = settings.tracking_uri
-        model, info = load_model(**kwargs)
+        model, info = load_model(settings.serving_bundle_path)
         features = pd.read_parquet(settings.features_path)
         app.state.model, app.state.model_info = model, info
         app.state.features = features

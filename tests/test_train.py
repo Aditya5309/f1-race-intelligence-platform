@@ -276,9 +276,10 @@ def test_tune_rejects_untunable_candidate(tmp_mlflow):
         tune_candidate("pole_baseline", split.train, n_iter=2, n_folds=2)
 
 
-def test_register_model_sets_alias(tmp_mlflow):
+def test_register_model_sets_alias(tmp_mlflow, tmp_path):
     split = temporal_split(_full_frame())
-    version = register_model("pole_baseline", split, alias="Staging")
+    version = register_model("pole_baseline", split, alias="Staging",
+                             bundle_root=tmp_path / "bundle")
     client = mlflow.MlflowClient()
     resolved = client.get_model_version_by_alias("f1-winner", "Staging")
     assert str(resolved.version) == str(version)
@@ -309,10 +310,11 @@ def test_final_test_applies_and_logs_params(tmp_mlflow):
     assert run["params.model__C"] == "0.123"
 
 
-def test_register_applies_params(tmp_mlflow):
+def test_register_applies_params(tmp_mlflow, tmp_path):
     split = temporal_split(_full_frame())
     version = register_model("logreg", split, alias="Staging",
-                             params={"model__C": 0.123})
+                             params={"model__C": 0.123},
+                             bundle_root=tmp_path / "bundle")
     model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
     assert model.named_steps["model"].get_params()["C"] == 0.123
 
@@ -383,6 +385,10 @@ def test_cli_register_run(tmp_mlflow, monkeypatch, tmp_path, capsys):
     _patch_features(monkeypatch, tmp_path)
     rc = main(["--model", "logreg", "--register", "Staging",
                "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
-               "--experiment", "cli-test"])
+               "--experiment", "cli-test",
+               "--bundle-root", str(tmp_path / "bundle")])
     assert rc == 0
-    assert "Registered f1-winner v1 as @Staging" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Registered f1-winner v1 as @Staging" in out
+    assert "Serving bundle exported to" in out
+    assert (tmp_path / "bundle" / "staging" / "manifest.json").exists()

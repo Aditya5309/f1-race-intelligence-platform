@@ -11,9 +11,12 @@ Actions job:
   1. project configuration     app.config.Settings constructs and exposes the
                                documented knobs
   2. MLflow train + registry   register a calibrated logreg into a THROWAWAY
-                               sqlite registry built in a temp dir
-  3. model loading             resolve models:/f1-winner@Staging via
-                               src.models.predict.load_model
+                               sqlite registry built in a temp dir, which
+                               ALSO exports a frozen serving bundle to a
+                               temp dir (Decision 026/027)
+  3. model loading             load the frozen serving bundle exported in
+                               step 2 via src.models.predict.load_model — no
+                               MLflow tracking URI or registry call
   4. prediction pipeline       predict_race contract: per-race normalization,
                                dense ranks, deterministic output
   5. FastAPI startup + /health in-process TestClient (lifespan runs; no
@@ -87,11 +90,11 @@ def step_configuration(ctx: dict) -> None:
     defaults = Settings()                       # env/.env may override values
     assert isinstance(defaults.serve_max_year, int)
     assert isinstance(defaults.features_path, Path)
-    assert isinstance(defaults.model_alias, str) and defaults.model_alias
+    assert isinstance(defaults.serving_bundle_path, Path)
 
     # The smoke stack overrides everything explicitly — host env cannot leak in.
     ctx["settings"] = Settings(
-        tracking_uri=ctx["tracking_uri"],
+        serving_bundle_path=ctx["bundle_dir"],
         features_path=ctx["features_path"],
         data_dir=ctx["tmp_dir"] / "no-such-dir",   # display names degrade to null
         debug_endpoints=False,
@@ -99,7 +102,9 @@ def step_configuration(ctx: dict) -> None:
 
 
 def step_mlflow_train_and_register(ctx: dict) -> None:
-    """Train + calibrate + register into the throwaway registry (MLflow up)."""
+    """Train + calibrate + register into the throwaway registry (MLflow up),
+    which ALSO exports a frozen serving bundle (Decision 026/027) — the
+    thing step 3 actually loads, with no MLflow call at all."""
     import mlflow
 
     from src.models.splits import temporal_split
@@ -118,17 +123,20 @@ def step_mlflow_train_and_register(ctx: dict) -> None:
     mlflow.set_experiment(experiment_id=experiment_id)
     version = register_model(
         "logreg", temporal_split(frame), alias="Staging", calibrate=True,
+        bundle_root=ctx["bundle_root"],
     )
     mlflow.set_tracking_uri(None)
     assert version == "1", f"expected fresh registry version 1, got {version}"
+    assert ctx["bundle_dir"].exists(), "register_model did not export a bundle"
     ctx["frame"] = frame
 
 
 def step_model_loading(ctx: dict) -> None:
-    """models:/f1-winner@Staging resolves with calibrated-artifact metadata."""
+    """Loads the frozen bundle exported in step 2 — no MLflow tracking URI,
+    no registry call (Decision 026/027)."""
     from src.models.predict import load_model
 
-    model, info = load_model(alias="Staging", tracking_uri=ctx["tracking_uri"])
+    model, info = load_model(ctx["bundle_dir"])
     assert info.name == "f1-winner"
     assert info.alias == "Staging"
     assert info.calibration == "isotonic-oof"
@@ -219,7 +227,7 @@ def step_streamlit_dashboard(ctx: dict) -> None:
 STEPS = [
     ("project configuration", step_configuration),
     ("MLflow training + registry", step_mlflow_train_and_register),
-    ("model loading (registry alias)", step_model_loading),
+    ("model loading (frozen bundle)", step_model_loading),
     ("prediction pipeline contract", step_prediction_pipeline),
     ("FastAPI startup + /health + prediction", step_api_health_and_prediction),
     ("Streamlit dashboard imports", step_streamlit_dashboard),
@@ -232,10 +240,16 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         tmp_dir = Path(tmp)
+        bundle_root = tmp_dir / "bundle"
         ctx: dict = {
             "tmp_dir": tmp_dir,
             "tracking_uri": f"sqlite:///{tmp_dir / 'mlflow.db'}",
             "features_path": tmp_dir / "features.parquet",
+            # register_model (Decision 026/027) exports a bundle here; this
+            # path is explicit so nothing ever touches the real project's
+            # models/serving/ during a smoke run.
+            "bundle_root": bundle_root,
+            "bundle_dir": bundle_root / "staging",
         }
         for i, (name, step) in enumerate(STEPS, start=1):
             t0 = time.perf_counter()

@@ -4,10 +4,15 @@ app/config.py
 Application-layer configuration (Decision 016; application_design.md §11).
 
 Every knob the API or dashboard reads comes through this Settings class —
-environment variables prefixed `F1_` (e.g. F1_MODEL_ALIAS=Production), with
+environment variables prefixed `F1_` (e.g. F1_SERVING_BUNDLE_PATH=...), with
 `.env`-file support for local development (.env is gitignored). No hardcoded
 paths in app code (project guiding principle): the first local run and a
 future container run use identical code, different environments.
+
+Decision 026/027: serving no longer resolves a live MLflow registry alias —
+there is deliberately no `tracking_uri`/`model_alias` setting here anymore.
+`serving_bundle_path` points at a frozen bundle (src.models.serving_bundle);
+the API doesn't know what alias or experiment produced it.
 """
 
 from __future__ import annotations
@@ -24,10 +29,10 @@ class Settings(BaseSettings):
         env_prefix="F1_", env_file=".env", extra="ignore",
     )
 
-    # --- model / registry -------------------------------------------------
-    #: MLflow tracking URI; empty string -> predict.py's project-root default.
-    tracking_uri: str = ""
-    model_alias: str = "Staging"
+    # --- model --------------------------------------------------------------
+    #: Frozen serving bundle directory (Decision 026/027) — no MLflow
+    #: tracking URI or registry alias needed at request time.
+    serving_bundle_path: Path = _PROJECT_ROOT / "models" / "serving" / "staging"
 
     # --- data --------------------------------------------------------------
     features_path: Path = _PROJECT_ROOT / "data" / "processed" / "features.parquet"

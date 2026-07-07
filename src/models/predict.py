@@ -1,18 +1,21 @@
 """
 src/models/predict.py
 
-Inference for Phase 4/5 (Decision 012 module 5; design Section 2) — the
-serving contract app/api.py will call.
+Inference for Phase 4/5 (Decision 012 module 5; design Section 2; Decision
+026/027) — the serving contract app/api.py will call.
 
-    python -m src.models.predict --race-id 1101              # score one race
-    python -m src.models.predict --race-id 1101 --alias Staging
+    python -m src.models.predict --race-id 1101                     # frozen bundle (default)
+    python -m src.models.predict --race-id 1101 --bundle-dir PATH    # explicit bundle
+    python -m src.models.predict --race-id 1101 --tracking-uri URI   # live registry (dev only)
 
 Responsibilities:
-- `load_model(alias)` — resolve the alias in the MLflow Model Registry
-  (`f1-winner`, sqlite store) and return (model, ModelInfo). ModelInfo is
-  JSON-ready metadata: name, version, alias, run id, training date, and
-  calibration status (introspected from the artifact, "none" for raw
-  pipelines — predict code never assumes which it got).
+- `load_model(bundle_dir)` — load a FROZEN SERVING BUNDLE (see
+  src.models.serving_bundle) from a local directory and return
+  (model, ModelInfo). No MLflow tracking URI, no registry client, no
+  network — this is what app/api.py calls, and it has no concept of
+  experiments or aliases (Decision 026/027). `load_from_registry(alias,
+  tracking_uri)` is kept alongside it for ad-hoc dev/CLI use directly
+  against a live MLflow registry — app/api.py never calls it.
 - `predict_race(model, race_df)` — score one or more races' fields and
   return per-race SUM-NORMALIZED win probabilities sorted descending
   (design Section 6: normalization is monotone within a race, so it never
@@ -35,46 +38,56 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from pathlib import Path
 
-import mlflow
 import numpy as np
 import pandas as pd
 
 from src.models.registry import training_schema
-from src.models.train import DEFAULT_TRACKING_URI, REGISTERED_MODEL_NAME
+from src.models.serving_bundle import ModelInfo, bundle_dir_for_alias, load_bundle
 
 DEFAULT_ALIAS = "Staging"
 #: Identifier columns carried through to the prediction output when present.
 CARRIED_ID_COLUMNS = ("raceId", "driverId", "constructorId", "year", "round")
 
 
-@dataclass(frozen=True)
-class ModelInfo:
-    """JSON-ready registry metadata for a loaded model (dashboard/API use)."""
-    name: str
-    version: str
-    alias: str
-    run_id: str
-    trained_at: str          # ISO-8601 UTC, from the registry version timestamp
-    calibration: str         # "isotonic-oof" | "none"
-    model_class: str         # e.g. "CalibratedModel", "Pipeline"
+def load_model(bundle_dir: Path | str | None = None):
+    """Load the frozen serving bundle FastAPI depends on (Decision 026/027).
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    A plain local-filesystem read — no MLflow tracking URI, no registry
+    client, no network. Raises FileNotFoundError if the bundle is missing
+    (app/api.py's degraded-start lifespan catches this, same as it caught a
+    missing registry entry before).
+
+    bundle_dir defaults to models/serving/staging (DEFAULT_ALIAS).
+    """
+    if bundle_dir is None:
+        bundle_dir = bundle_dir_for_alias(DEFAULT_ALIAS)
+    return load_bundle(bundle_dir)
 
 
-def load_model(
-    alias: str = DEFAULT_ALIAS,
-    tracking_uri: str = DEFAULT_TRACKING_URI,
-    name: str = REGISTERED_MODEL_NAME,
-):
-    """Load `name@alias` from the MLflow Model Registry.
+def load_from_registry(alias: str = DEFAULT_ALIAS, tracking_uri: str | None = None,
+                       name: str | None = None):
+    """Resolve `name@alias` directly against a LIVE MLflow Model Registry.
+
+    Dev/CLI convenience only (e.g. scoring a freshly-tuned model before it's
+    been exported as a bundle) — app/api.py never calls this; it always
+    uses load_model()'s frozen bundle instead (Decision 026/027). Imports of
+    mlflow and train.py's constants are deferred here so the serving path
+    (load_model/predict_race) never needs them.
 
     Returns (model, ModelInfo). Raises MlflowException if the model or alias
     does not exist (e.g. Production before anything was promoted).
     """
+    from datetime import UTC, datetime
+
+    import mlflow
+
+    from src.models.train import DEFAULT_TRACKING_URI, REGISTERED_MODEL_NAME
+
+    tracking_uri = tracking_uri if tracking_uri is not None else DEFAULT_TRACKING_URI
+    name = name if name is not None else REGISTERED_MODEL_NAME
+
     mlflow.set_tracking_uri(tracking_uri)
     client = mlflow.MlflowClient()
     version = client.get_model_version_by_alias(name, alias)
@@ -182,12 +195,20 @@ def main(argv: list[str] | None = None) -> int:
     from src.features.pipeline import FEATURES_PATH  # local: CLI-only dependency
 
     parser = argparse.ArgumentParser(
-        description="Score a race's field with a registered model.")
+        description="Score a race's field with the registered model.")
     parser.add_argument("--race-id", type=int, required=True,
                         help="raceId present in data/processed/features.parquet.")
     parser.add_argument("--alias", default=DEFAULT_ALIAS,
-                        choices=["Staging", "Production"])
-    parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI)
+                        choices=["Staging", "Production"],
+                        help="Which alias's frozen bundle to load (or, with "
+                             "--tracking-uri, which live registry alias).")
+    parser.add_argument("--bundle-dir", type=Path, default=None,
+                        help="Explicit serving bundle directory "
+                             "(default: models/serving/<alias>).")
+    parser.add_argument("--tracking-uri", default=None,
+                        help="If given, score directly from a LIVE MLflow "
+                             "registry instead of a frozen bundle — dev "
+                             "convenience for a model not yet exported.")
     args = parser.parse_args(argv)
 
     if not FEATURES_PATH.exists():
@@ -201,7 +222,11 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    model, info = load_model(alias=args.alias, tracking_uri=args.tracking_uri)
+    if args.tracking_uri:
+        model, info = load_from_registry(alias=args.alias, tracking_uri=args.tracking_uri)
+    else:
+        bundle_dir = args.bundle_dir or bundle_dir_for_alias(args.alias)
+        model, info = load_model(bundle_dir)
     predictions = predict_race(model, race_df)
 
     print(f"Model: {info.name} v{info.version} @{info.alias} "

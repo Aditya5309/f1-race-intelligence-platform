@@ -1,9 +1,12 @@
 """
-Tests for src/models/predict.py (Phase 4 module 5; design Sections 2, 12).
+Tests for src/models/predict.py (Phase 4 module 5; design Sections 2, 12;
+Decision 026/027).
 
 Coverage per design Section 12 + Decision 015:
-  - registry loading: alias resolution, ModelInfo metadata (version, run id,
-    calibration status), missing alias raises
+  - bundle loading (Decision 026/027): ModelInfo metadata (version, run id,
+    calibration status), missing bundle raises FileNotFoundError
+  - registry loading (load_from_registry, dev/CLI convenience only): alias
+    resolution, missing alias raises MlflowException
   - schema validation: missing feature columns, extra design-matrix columns
     (via ColumnGuard), wrong dtypes, reliance on the ARTIFACT's stored
     schema rather than repository constants
@@ -24,8 +27,15 @@ from mlflow.exceptions import MlflowException
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.calibration import CalibratedModel
-from src.models.predict import ModelInfo, load_model, main, predict_race
+from src.models.predict import (
+    ModelInfo,
+    load_from_registry,
+    load_model,
+    main,
+    predict_race,
+)
 from src.models.registry import get_model
+from src.models.serving_bundle import bundle_dir_for_alias
 from src.models.splits import temporal_split, to_xy
 from src.models.train import register_model
 from tests.conftest import set_tmp_experiment
@@ -67,30 +77,37 @@ def race_frame(full_frame) -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def registry(tmp_path_factory, full_frame):
-    """Tmp sqlite registry: v1 = raw logreg @Candidate-less, v2 = calibrated
-    logreg @Staging. Returns the tracking URI."""
+    """Tmp sqlite registry + tmp bundle root: v1 = raw logreg @Candidate-less,
+    v2 = calibrated logreg @Staging (the one with a bundle any real caller
+    would load). Returns (tracking_uri, bundle_root) — bundle_root is
+    explicit so register_model never writes into the real project
+    models/serving/ during tests."""
     root = tmp_path_factory.mktemp("mlflow")
     uri = f"sqlite:///{root / 'mlflow.db'}"
+    bundle_root = root / "bundle"
     mlflow.set_tracking_uri(uri)
     set_tmp_experiment("test-experiment", root)
     split = temporal_split(full_frame)
-    register_model("logreg", split, alias="Staging", calibrate=False)      # v1
-    register_model("logreg", split, alias="Staging", calibrate=True)       # v2 takes alias
-    yield uri
+    register_model("logreg", split, alias="Staging", calibrate=False,
+                   bundle_root=bundle_root)                                # v1
+    register_model("logreg", split, alias="Staging", calibrate=True,
+                   bundle_root=bundle_root)                                # v2 takes alias + bundle
+    yield uri, bundle_root
     mlflow.set_tracking_uri(None)
 
 
 @pytest.fixture(scope="module")
 def staging(registry):
-    model, info = load_model(alias="Staging", tracking_uri=registry)
+    _, bundle_root = registry
+    model, info = load_model(bundle_dir_for_alias("Staging", bundle_root))
     return model, info
 
 
 # ---------------------------------------------------------------------------
-# Registry loading + metadata
+# Bundle loading + metadata (Decision 026/027 — the primary serving path)
 # ---------------------------------------------------------------------------
 
-def test_load_model_resolves_staging_alias(staging):
+def test_load_model_reads_bundle_metadata(staging):
     model, info = staging
     assert isinstance(info, ModelInfo)
     assert info.name == "f1-winner"
@@ -103,9 +120,19 @@ def test_load_model_resolves_staging_alias(staging):
     assert isinstance(model, CalibratedModel)
 
 
-def test_load_model_missing_alias_raises(registry):
+def test_load_model_missing_bundle_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="No serving bundle"):
+        load_model(tmp_path / "does-not-exist")
+
+
+# ---------------------------------------------------------------------------
+# Registry loading (load_from_registry — dev/CLI convenience, not the API path)
+# ---------------------------------------------------------------------------
+
+def test_load_from_registry_missing_alias_raises(registry):
+    uri, _ = registry
     with pytest.raises(MlflowException):
-        load_model(alias="Production", tracking_uri=registry)
+        load_from_registry(alias="Production", tracking_uri=uri)
 
 
 def test_model_info_is_json_ready(staging):
@@ -280,7 +307,8 @@ def test_staging_predictions_are_calibrated_not_raw(staging, race_frame):
 
 def test_raw_model_reports_no_calibration(registry, race_frame):
     """Loading v1 (the raw pipeline) by version: metadata degrades gracefully."""
-    mlflow.set_tracking_uri(registry)
+    uri, _ = registry
+    mlflow.set_tracking_uri(uri)
     model = mlflow.sklearn.load_model("models:/f1-winner/1")
     assert getattr(model, "calibration", "none") == "none"
     out = predict_race(model, race_frame)          # model-agnostic path works
@@ -307,13 +335,33 @@ def test_cli_unknown_race_id_returns_1(monkeypatch, tmp_path, full_frame, capsys
     assert "not found" in capsys.readouterr().err
 
 
-def test_cli_scores_race_with_staging_model(
+def test_cli_scores_race_from_live_registry(
     monkeypatch, tmp_path, full_frame, registry, capsys
 ):
+    """--tracking-uri opts into the dev/CLI-only live-registry path."""
+    uri, _ = registry
     path = tmp_path / "features.parquet"
     full_frame.to_parquet(path, index=False)
     monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
-    rc = main(["--race-id", "202301", "--tracking-uri", registry])
+    rc = main(["--race-id", "202301", "--tracking-uri", uri])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "f1-winner" in out
+    assert "5 drivers" in out
+    assert "win_probability" in out
+
+
+def test_cli_scores_race_from_bundle(
+    monkeypatch, tmp_path, full_frame, registry, capsys
+):
+    """Default CLI behavior (no --tracking-uri): the frozen bundle, same
+    path app/api.py uses."""
+    _, bundle_root = registry
+    path = tmp_path / "features.parquet"
+    full_frame.to_parquet(path, index=False)
+    monkeypatch.setattr("src.features.pipeline.FEATURES_PATH", path)
+    rc = main(["--race-id", "202301", "--bundle-dir",
+              str(bundle_dir_for_alias("Staging", bundle_root))])
     assert rc == 0
     out = capsys.readouterr().out
     assert "f1-winner" in out
