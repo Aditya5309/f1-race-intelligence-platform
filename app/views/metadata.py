@@ -109,6 +109,40 @@ def grid_and_quali(race_id: int) -> pd.DataFrame:
     return out
 
 
+@st.cache_data(show_spinner=False)
+def actual_result(race_id: int, driver_id: int) -> dict:
+    """Actual outcome for one driver in one race (results.csv, joined to
+    status.csv for human-readable status text) -- display only, used for
+    Historical Replay / "how wrong" framing.
+
+    Returns {} when results.csv is unavailable or this driver/race isn't in
+    it. Otherwise: {"dnf": bool, "finish_position": int | None (the
+    classified numeric position; None when dnf), "status": str (e.g.
+    "Finished", "Accident", "Engine" -- results.csv `position` is null
+    exactly for retirements/non-classified finishes, per Ergast convention;
+    verified against status.csv)}."""
+    results = _read_csv("results.csv")
+    if results.empty:
+        return {}
+    r = results[(results["raceId"] == race_id) & (results["driverId"] == driver_id)]
+    if r.empty:
+        return {}
+    row = r.iloc[0]
+    dnf = pd.isna(row.get("position"))
+    out: dict = {
+        "dnf": bool(dnf),
+        "finish_position": None if dnf else int(row["position"]),
+    }
+    status_id = row.get("statusId")
+    if pd.notna(status_id):
+        status = _read_csv("status.csv")
+        if not status.empty:
+            s = status[status["statusId"] == status_id]
+            if len(s):
+                out["status"] = str(s.iloc[0]["status"])
+    return out
+
+
 _DNF_LOOKBACK_YEARS = 5
 _DNF_MIN_RACES = 3   # below this, a rate is noise, not signal
 

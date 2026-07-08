@@ -227,6 +227,34 @@ def render() -> None:
         st.subheader("📋 Race facts")
         stat_row(fact_items[:5])
 
+    if winner_id is not None:
+        st.subheader("🔁 Historical Replay")
+        top = preds[0]
+        result = metadata.actual_result(race["race_id"], top["driver_id"])
+        st.caption(f"**Predicted:** {driver_label(top)} — "
+                   f"{top['win_probability']:.0%} win share (model favorite)")
+        if not result:
+            st.caption("**Actual:** result unavailable (display metadata not loaded).")
+        elif result["dnf"]:
+            status = result.get("status", "did not finish")
+            st.caption(f"**Actual:** retired — {status}")
+            st.caption(
+                f"**Error analysis:** the model's favorite retired ({status}) — "
+                "a DNF is a genuine outcome no pre-race signal in this model "
+                "predicts, not a ranking error."
+            )
+        else:
+            st.caption(f"**Actual:** finished P{result['finish_position']}")
+            if body["model_top1_hit"]:
+                st.caption("**Result:** the model's favorite won as predicted.")
+            else:
+                st.caption(
+                    f"**Error analysis:** {top['win_probability']:.0%} win share "
+                    f"→ P{result['finish_position']} — the gap between predicted "
+                    "confidence and actual result (see Top contenders above for "
+                    "who did win)."
+                )
+
     st.subheader("📊 Full field")
     frame = pd.DataFrame(preds)
     frame["label"] = [driver_label(p) for p in preds]
