@@ -30,7 +30,6 @@ from app.views.components import (
     page_header,
     podium_row,
     race_header,
-    reason_badges,
     stat_row,
 )
 
@@ -152,19 +151,40 @@ def render() -> None:
                 is_winner=(winner_id is not None and p["driver_id"] == winner_id),
             )
 
-    st.subheader("🧠 Why did the model choose this driver?")
-    top = preds[0]
-    reasons = _reasons_for_favorite(
-        top, grid_by.get(top["driver_id"]), quali_by.get(top["driver_id"]),
-        season, body["round"],
-    )
-    if reasons:
-        reason_badges(reasons)
-    else:
-        st.caption("No pre-race factor breakdown available for this race "
-                   "(display metadata not loaded).")
+    st.subheader("🧠 Why the model favors these drivers")
+    top_n = preds[:3]
+    any_reasons = False
+    cols = st.columns(len(top_n))
+    for col, p in zip(cols, top_n, strict=True):
+        reasons = _reasons_for_favorite(
+            p, grid_by.get(p["driver_id"]), quali_by.get(p["driver_id"]),
+            season, body["round"],
+        )
+        any_reasons = any_reasons or bool(reasons)
+        with col:
+            st.markdown(f"**{driver_label(p)}**")
+            if reasons:
+                for reason in reasons:
+                    st.caption(f"✅ {reason}")
+            else:
+                st.caption("No pre-race factor breakdown available.")
+    if not any_reasons:
+        st.caption("Display metadata not loaded — pre-race factor "
+                   "breakdown is unavailable for this race.")
     st.caption("Indicative factors from pre-race data — full SHAP analysis "
                "on the Model Insights page.")
+
+    st.subheader("⚠️ Risk factors")
+    dnf = metadata.circuit_dnf_rate(race["race_id"])
+    if dnf:
+        st.caption(
+            f"**DNF rate at this circuit: {dnf['dnf_rate']:.0%}** — "
+            f"{dnf['n_races']} races, {dnf['years']}. The only risk signal "
+            "in this dataset with real underlying data (no tire-degradation "
+            "or safety-car data exists in this project's source)."
+        )
+    else:
+        st.caption("Not enough circuit history yet for a DNF-rate risk signal.")
 
     fact_items = [
         {"label": label, "value": str(facts[key])}

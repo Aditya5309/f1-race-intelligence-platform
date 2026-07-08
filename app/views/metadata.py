@@ -109,6 +109,52 @@ def grid_and_quali(race_id: int) -> pd.DataFrame:
     return out
 
 
+_DNF_LOOKBACK_YEARS = 5
+_DNF_MIN_RACES = 3   # below this, a rate is noise, not signal
+
+
+@st.cache_data(show_spinner=False)
+def circuit_dnf_rate(race_id: int, lookback_years: int = _DNF_LOOKBACK_YEARS) -> dict:
+    """DNF rate at this circuit over the `lookback_years` seasons before this
+    race (exclusive). results.csv `position` is null exactly for
+    retirements/non-classified finishes (Ergast convention: positionText
+    'R'/'D'/etc.; verified against status.csv) — a genuine data-backed risk
+    signal, unlike tire-degradation or safety-car frequency which this
+    project's source data doesn't contain. {} when there isn't enough
+    history (< _DNF_MIN_RACES prior races at this circuit) to be a signal
+    rather than noise."""
+    catalog = race_catalog()
+    if catalog.empty:
+        return {}
+    rows = catalog[catalog["raceId"] == race_id]
+    if not len(rows) or "circuitId" not in rows.columns:
+        return {}
+    row = rows.iloc[0]
+    circuit_id, year = row.get("circuitId"), row.get("year")
+    if pd.isna(circuit_id) or pd.isna(year):
+        return {}
+    year = int(year)
+    scope = catalog[
+        (catalog["circuitId"] == circuit_id)
+        & (catalog["year"] < year)
+        & (catalog["year"] >= year - lookback_years)
+    ]
+    n_races = scope["raceId"].nunique()
+    if n_races < _DNF_MIN_RACES:
+        return {}
+    results = _read_csv("results.csv")
+    if results.empty:
+        return {}
+    r = results.merge(scope[["raceId"]], on="raceId", how="inner")
+    if r.empty:
+        return {}
+    return {
+        "dnf_rate": float(r["position"].isna().mean()),
+        "n_races": int(n_races),
+        "years": f"{int(scope['year'].min())}–{int(scope['year'].max())}",
+    }
+
+
 @st.cache_data(show_spinner=False)
 def race_facts(race_id: int) -> dict:
     """Whatever display facts exist for a race: grand_prix, circuit, country,

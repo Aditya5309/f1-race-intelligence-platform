@@ -239,18 +239,6 @@ def driver_card(prediction: dict, grid: int | None = None,
             st.badge("Actual winner", icon=":material/emoji_events:", color="green")
 
 
-def reason_badges(reasons: Sequence[str]) -> None:
-    """'Why this prediction' factors as green check badges."""
-    if not reasons:
-        return
-    cols = st.columns(min(4, len(reasons)))
-    for col, reason in zip(cols, reasons[:4], strict=False):
-        with col:
-            st.badge(reason, icon=":material/check:", color="green")
-    for reason in reasons[4:]:
-        st.badge(reason, icon=":material/check:", color="green")
-
-
 def race_header(label: str, season: int, round_: int,
                 circuit: str | None = None, date: str | None = None) -> None:
     """Grand Prix header block: name + season/round/circuit/date chips."""
