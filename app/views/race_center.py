@@ -98,15 +98,45 @@ def render() -> None:
         return
 
     years = sorted({r["year"] for r in races}, reverse=True)
+    race_by_id = {r["race_id"]: r for r in races}
+    # Chronological across every served season, for Prev/Next to roll
+    # cleanly from one season's last race into the next season's round 1.
+    all_sorted = sorted(races, key=lambda r: (r["year"], r["round"]))
+    ordered_ids = [r["race_id"] for r in all_sorted]
+
+    if "race_id" not in st.session_state:
+        st.session_state["race_id"] = ordered_ids[-1]   # latest race by default
+
     with st.sidebar:
         st.divider()
-        year = st.selectbox("Season", years, index=0)
+        pos = ordered_ids.index(st.session_state["race_id"])
+        col_prev, col_next = st.columns(2)
+        with col_prev:
+            if st.button("◀ Prev", disabled=(pos == 0), width="stretch"):
+                st.session_state["race_id"] = ordered_ids[pos - 1]
+        with col_next:
+            if st.button("Next ▶", disabled=(pos == len(ordered_ids) - 1),
+                        width="stretch"):
+                st.session_state["race_id"] = ordered_ids[pos + 1]
+
+        current = race_by_id[st.session_state["race_id"]]
+        year = st.selectbox("Season", years, index=years.index(current["year"]))
         year_races = [r for r in races if r["year"] == year]
+        if year != current["year"]:
+            # User changed the season dropdown directly — jump to that
+            # season's first race rather than trying to preserve a round
+            # number that may not exist in the new season.
+            st.session_state["race_id"] = year_races[0]["race_id"]
+        race_index = next(
+            (i for i, r in enumerate(year_races)
+             if r["race_id"] == st.session_state["race_id"]), 0,
+        )
         race = st.selectbox(
-            "Race", year_races,
+            "Race", year_races, index=race_index,
             format_func=lambda r: metadata.race_label(
                 r["race_id"], fallback_round=r["round"]),
         )
+        st.session_state["race_id"] = race["race_id"]
 
     body = api_get_or_stop(f"/predictions/{race['race_id']}")
     preds = body["predictions"]
