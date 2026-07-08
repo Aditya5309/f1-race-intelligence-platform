@@ -15,12 +15,18 @@ import pandas as pd
 import streamlit as st
 
 from app.views import metadata
+from app.views.charts import radar_chart
 from app.views.common import (
     list_races_or_stop,
     season_predictions_or_stop,
     sidebar_model_panel,
 )
-from app.views.components import constructor_dot, empty_state, page_header
+from app.views.components import (
+    constructor_color,
+    constructor_dot,
+    empty_state,
+    page_header,
+)
 
 
 def _driver_labels(frame: pd.DataFrame) -> dict[int, str]:
@@ -122,3 +128,26 @@ def render() -> None:
                          f"{row.iloc[0]['win_probability']:.1%}")
             else:
                 st.caption(f"{label_by_id[driver_id]} didn't enter this race.")
+
+    st.divider()
+    st.subheader("🕸 Season profile")
+    overlay: dict[str, dict[str, float]] = {}
+    colors: dict[str, str] = {}
+    for driver_id in (driver_a, driver_b):
+        scores = metadata.radar_scores(driver_id, year)
+        if scores:
+            label = label_by_id[driver_id]
+            overlay[label] = scores
+            team = frame.loc[frame["driver_id"] == driver_id, "constructor_name"].dropna()
+            colors[label] = constructor_color(team.iloc[-1] if len(team) else None)
+    if overlay:
+        radar_chart(overlay, colors=colors)
+        st.caption(
+            "Scores are relative to this season's field (0 = worst, 100 = "
+            "best among drivers with 3+ races) — not an absolute or "
+            "cross-era scale. Consistency is based on 3+ classified races "
+            "this season; small samples can swing it."
+        )
+    else:
+        empty_state("Not enough races this season for a season profile "
+                    "for either driver.")

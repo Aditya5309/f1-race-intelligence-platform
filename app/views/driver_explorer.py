@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from app.views import metadata
-from app.views.charts import trend_line
+from app.views.charts import radar_chart, trend_line
 from app.views.common import (
     career_predictions_or_stop,
     list_races_or_stop,
@@ -187,6 +187,27 @@ def render() -> None:
         trend_line(chart, "race", "win_probability",
                    title="Win share through the season",
                    y_label="Win share", color=team_color)
+
+    # --- season profile radar ------------------------------------------------
+    st.subheader("🕸 Season profile")
+    if year is None:
+        st.caption("Season profile is season-scoped only — the scores are "
+                   "normalized against one season's field, which doesn't "
+                   "cleanly combine across multiple seasons. Turn off "
+                   "\"Full career\" to see it.")
+    else:
+        scores = metadata.radar_scores(driver_id, year)
+        if scores:
+            radar_chart({label_by_id[driver_id]: scores},
+                       colors={label_by_id[driver_id]: team_color})
+            st.caption(
+                "Scores are relative to this season's field (0 = worst, "
+                "100 = best among drivers with 3+ races) — not an absolute "
+                "or cross-era scale. Consistency is based on 3+ classified "
+                "races this season; small samples can swing it."
+            )
+        else:
+            empty_state("Not enough races this season for a season profile.")
 
     # --- race log ------------------------------------------------------------
     st.subheader("🗓 Race log")

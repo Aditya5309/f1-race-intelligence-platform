@@ -100,6 +100,34 @@ def standings_bar(frame: pd.DataFrame, name_col: str, value_col: str,
     st.plotly_chart(fig, width="stretch")
 
 
+def radar_chart(scores_by_label: dict[str, dict[str, float]],
+                colors: dict[str, str] | None = None, height: int = 400) -> None:
+    """Overlay 1-2 drivers' 0-100 axis scores on one radar (Scatterpolar).
+
+    scores_by_label: {driver_label: {axis_name: score}} -- every entry is
+    expected to share the same axis set (app.views.metadata.radar_scores()
+    always returns the same three keys). colors optionally maps label ->
+    hex (falls back to OTHER_COLOR / WINNER_COLOR for the 1st/2nd trace).
+    """
+    fig = go.Figure()
+    fallback_colors = (OTHER_COLOR, WINNER_COLOR)
+    for i, (label, scores) in enumerate(scores_by_label.items()):
+        axes = list(scores.keys())
+        values = list(scores.values())
+        color = (colors or {}).get(label) or fallback_colors[i % len(fallback_colors)]
+        fig.add_trace(go.Scatterpolar(
+            r=values + [values[0]], theta=axes + [axes[0]],
+            fill="toself", name=label, line_color=color,
+            hovertemplate="%{theta}: %{r:.0f}<extra>%{fullData.name}</extra>",
+        ))
+    fig.update_layout(
+        polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+        showlegend=len(scores_by_label) > 1, height=height,
+        margin=dict(l=40, r=40, t=30, b=30),
+    )
+    st.plotly_chart(fig, width="stretch")
+
+
 def histogram(series: pd.Series, x_label: str, nbins: int = 12,
               height: int = 300, percent_axis: bool = False) -> None:
     """Distribution histogram for a numeric series."""

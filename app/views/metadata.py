@@ -599,3 +599,77 @@ def driver_race_results(driver_id: int, year: int | None = None) -> pd.DataFrame
         r = r.merge(q, on="raceId", how="left")
     r["finish"] = pd.to_numeric(r["positionOrder"], errors="coerce")
     return r.sort_values(["year", "round"])
+
+
+RADAR_AXES = ("Qualifying pace", "Race pace", "Consistency")
+
+
+@st.cache_data(show_spinner=False)
+def _season_driver_ids(year: int) -> list[int]:
+    results = _read_csv("results.csv")
+    catalog = race_catalog()
+    if results.empty or catalog.empty:
+        return []
+    season = catalog.loc[catalog["year"] == year, ["raceId"]]
+    r = results.merge(season, on="raceId", how="inner")
+    return sorted(r["driverId"].unique().tolist())
+
+
+@st.cache_data(show_spinner=False)
+def _season_radar_pool(year: int) -> pd.DataFrame:
+    """avg_quali / avg_finish_classified / consistency_std for every driver
+    with enough races this season to have all three (>= _CONSISTENCY_MIN_
+    RACES, driver_season_stats()'s own floor) -- the normalization pool
+    radar_scores() measures one driver against."""
+    rows = []
+    for driver_id in _season_driver_ids(year):
+        stats = driver_season_stats(driver_id, year)
+        if {"avg_quali", "avg_finish_classified", "consistency_std"} <= stats.keys():
+            rows.append({
+                "driver_id": driver_id,
+                "avg_quali": stats["avg_quali"],
+                "avg_finish_classified": stats["avg_finish_classified"],
+                "consistency_std": stats["consistency_std"],
+            })
+    return pd.DataFrame(rows)
+
+
+def _radar_axis_score(value: float, pool: pd.Series) -> float:
+    """0-100, smaller raw value = better (position/std dev axes) -> bigger
+    score. Degenerate pool (every driver tied) scores everyone 100 rather
+    than dividing by zero."""
+    lo, hi = pool.min(), pool.max()
+    if hi <= lo:
+        return 100.0
+    return 100.0 * (1 - (value - lo) / (hi - lo))
+
+
+def radar_scores(driver_id: int, year: int) -> dict[str, float] | None:
+    """{axis: 0-100 score} for Qualifying pace / Race pace / Consistency,
+    normalized *within this season's field* -- the best value among
+    drivers with enough races that season scores 100, the worst scores 0.
+
+    Normalizing within a season (not across all history) is deliberate:
+    comparing raw lap/position numbers across eras conflates decades of
+    car-performance evolution with driver skill -- the same confound
+    flagged for Circuit Explorer's fastest-lap stat. The cost is that
+    these scores are NOT comparable across seasons (a 2019 "80" and a
+    2023 "80" mean "relative to their own field," not the same absolute
+    level) -- callers must say so in the UI.
+
+    None when this driver doesn't have enough races this season for all
+    three underlying stats, or the field itself is too small (< 2
+    qualifying drivers) to normalize against."""
+    stats = driver_season_stats(driver_id, year)
+    if not {"avg_quali", "avg_finish_classified", "consistency_std"} <= stats.keys():
+        return None
+    pool = _season_radar_pool(year)
+    if len(pool) < 2:
+        return None
+    return {
+        "Qualifying pace": _radar_axis_score(stats["avg_quali"], pool["avg_quali"]),
+        "Race pace": _radar_axis_score(
+            stats["avg_finish_classified"], pool["avg_finish_classified"]),
+        "Consistency": _radar_axis_score(
+            stats["consistency_std"], pool["consistency_std"]),
+    }
