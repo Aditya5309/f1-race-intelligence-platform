@@ -287,8 +287,11 @@ def podium_row(predictions: Sequence[dict], winner_id: int | None) -> None:
     medals = ["🥇", "🥈", "🥉"]
     cols = st.columns(min(3, len(predictions)))
     for medal, pred, col in zip(medals, predictions[:3], cols, strict=False):
+        team = pred.get("constructor_name")
         with col, st.container(border=True):
             st.markdown(f"**{medal} {driver_label(pred)}**")
+            if team:
+                st.caption(f"{constructor_dot(team)} {team}")
             st.caption(f"{pred['win_probability']:.1%} win share")
             if winner_id is not None and pred["driver_id"] == winner_id:
                 st.badge("Actual winner", icon=":material/emoji_events:", color="green")

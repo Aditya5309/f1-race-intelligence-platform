@@ -257,7 +257,7 @@ def render() -> None:
     dnf = metadata.circuit_dnf_rate(race["race_id"])
     if dnf:
         st.caption(
-            f"**DNF rate at this circuit: {dnf['dnf_rate']:.0%}** — "
+            f"🛞 **DNF rate at this circuit: {dnf['dnf_rate']:.0%}** — "
             f"{dnf['n_races']} races, {dnf['years']}. The only risk signal "
             "in this dataset with real underlying data (no tire-degradation "
             "or safety-car data exists in this project's source)."
