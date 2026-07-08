@@ -9,11 +9,13 @@ here, for recruiters/engineers who want to see how the model actually works.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from app.config import Settings
 from app.views.common import sidebar_model_panel
 from app.views.components import page_header, stat_row
 
@@ -51,6 +53,39 @@ def _figure(name: str, caption: str) -> None:
         st.image(str(path), caption=caption, width="stretch")
     else:
         st.caption(f"_{name} not found — run `python -m src.models.analysis`._")
+
+
+def _developer_console() -> None:
+    """?dev=true extra: raw serving-bundle artifacts that exist on disk but
+    are never otherwise rendered anywhere -- the actual manifest, recorded
+    training schema, and dependency versions the deployed bundle was frozen
+    with. Distinct from the curated charts above it, additive only (no nav
+    change, no removal of anything public)."""
+    bundle_dir = Settings().serving_bundle_path
+    manifest_path = bundle_dir / "manifest.json"
+    schema_path = bundle_dir / "feature_schema.json"
+    env_path = bundle_dir / "model" / "python_env.yaml"
+    req_path = bundle_dir / "model" / "requirements.txt"
+
+    with st.expander("Serving bundle manifest"):
+        if manifest_path.exists():
+            st.json(json.loads(manifest_path.read_text()))
+        else:
+            st.caption(f"_{manifest_path} not found._")
+
+    with st.expander("Recorded training schema (feature_schema.json)"):
+        if schema_path.exists():
+            st.json(json.loads(schema_path.read_text()))
+        else:
+            st.caption(f"_{schema_path} not found._")
+
+    with st.expander("Environment / dependency versions"):
+        if env_path.exists():
+            st.code(env_path.read_text(), language="yaml")
+        if req_path.exists():
+            st.code(req_path.read_text(), language="text")
+        if not env_path.exists() and not req_path.exists():
+            st.caption("_Environment files not found._")
 
 
 def render() -> None:
@@ -152,3 +187,12 @@ restores honest probabilities: expected calibration error drops from
         _figure("confusion_matrix.png", "Confusion matrix")
         _figure("roc_curve.png", "ROC curve")
         _figure("precision_recall.png", "Precision–recall curve")
+
+    if st.query_params.get("dev") == "true":
+        st.divider()
+        st.subheader("🛠 Developer Console")
+        st.caption("Extra technical detail, shown only with `?dev=true` in the URL.")
+        _developer_console()
+    else:
+        st.caption("Engineers: append `?dev=true` to this page's URL for the raw "
+                   "serving bundle manifest, training schema, and dependency versions.")
