@@ -23,6 +23,7 @@ from app.views.common import (
     sidebar_model_panel,
 )
 from app.views.components import (
+    confidence_tier,
     driver_card,
     driver_label,
     empty_state,
@@ -301,6 +302,18 @@ def render() -> None:
     frame = pd.DataFrame(preds)
     frame["label"] = [driver_label(p) for p in preds]
     frame["is_winner"] = frame["driver_id"] == winner_id
+    frame["grid"] = frame["driver_id"].map(grid_by)
+    frame["grid_display"] = frame["grid"].map(
+        lambda g: "PL" if g == 0 else (str(int(g)) if pd.notna(g) else "—"))
+    # Pit-lane starts (grid 0) and missing grids aren't a meaningful "gained
+    # N places" delta — only compute it for a real numbered grid slot.
+    frame["grid_delta"] = frame.apply(
+        lambda r: int(r["grid"] - r["predicted_rank"])
+        if pd.notna(r["grid"]) and r["grid"] != 0 else None,
+        axis=1,
+    )
+    frame["confidence_tier"] = frame["win_probability"].map(
+        lambda p: confidence_tier(p)[0])
     top10, rest = frame.head(10), frame.iloc[10:]
 
     win_share_bar(top10, winner_id=winner_id)
@@ -308,19 +321,28 @@ def render() -> None:
                "Tied shares are normal — similar cars land on the same "
                "probability step; ranking uses a deterministic tiebreak.")
 
+    table_columns = ["predicted_rank", "label", "win_probability", "grid_display",
+                     "grid_delta", "confidence_tier"]
+    column_config = {
+        "predicted_rank": "Rank", "label": "Driver", "grid_display": "Grid",
+        "grid_delta": st.column_config.NumberColumn(
+            "Grid → Rank", help="Grid position minus predicted rank; "
+            "positive means the model expects them to gain places."),
+        "confidence_tier": "Confidence",
+        "win_probability": st.column_config.NumberColumn("Win share", format="percent"),
+    }
+
     if len(rest):
         with st.expander(f"Rest of the field ({len(rest)} drivers)"):
             st.dataframe(
-                rest[["predicted_rank", "label", "win_probability",
-                      "win_probability_raw"]],
-                hide_index=True, width="stretch",
+                rest[table_columns], hide_index=True, width="stretch",
+                column_config=column_config,
             )
 
     with st.expander("Full field table"):
         st.dataframe(
-            frame[["predicted_rank", "label", "win_probability",
-                   "win_probability_raw", "is_winner"]],
-            hide_index=True, width="stretch",
+            frame[[*table_columns, "win_probability_raw", "is_winner"]],
+            hide_index=True, width="stretch", column_config=column_config,
         )
     st.caption(f"prediction_id: `{body['prediction_id']}` · generated "
                f"{body['generated_at']} · model v{body['model']['version']}")
