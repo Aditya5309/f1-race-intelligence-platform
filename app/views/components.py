@@ -201,9 +201,15 @@ def favorite_card(prediction: dict, year: int, round_: int,
         st.caption(f"Confidence: {'★' * stars}{'☆' * (5 - stars)} **{label}**")
 
 
+#: Below this absolute win-share swing, treat a driver's probability as flat
+#: vs their previous race (renders "→" instead of a noisy ↑/↓ on sub-point
+#: normalization jitter).
+_PROB_TREND_DEAD_ZONE = 0.01
+
+
 def driver_card(prediction: dict, grid: int | None = None,
                 quali: int | None = None, trend: int | None = None,
-                is_winner: bool = False) -> None:
+                prob_trend: float | None = None, is_winner: bool = False) -> None:
     """Compact contender card: rank + name, team dot, grid/quali line, win
     share, rank-trend arrow vs the previous round, actual-winner badge."""
     name = prediction.get("driver_name") or f"⚠ driver {prediction['driver_id']}"
@@ -220,6 +226,12 @@ def driver_card(prediction: dict, grid: int | None = None,
         if line:
             st.caption(" · ".join(line))
         st.markdown(f"**{prediction['win_probability']:.1%}** win share")
+        if prob_trend is not None:
+            if abs(prob_trend) < _PROB_TREND_DEAD_ZONE:
+                st.caption(f"→ {prob_trend:+.1%} vs last race")
+            else:
+                arrow = "↑" if prob_trend > 0 else "↓"
+                st.caption(f"{arrow} {prob_trend:+.1%} vs last race")
         if trend is not None and trend != 0:
             arrow, color = ("▲", "green") if trend > 0 else ("▼", "orange")
             st.badge(f"{arrow} {abs(trend)} vs last race", color=color)

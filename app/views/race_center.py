@@ -114,14 +114,19 @@ def render() -> None:
                 quali_by[int(row.driverId)] = int(row.quali_position)
 
     trend_by: dict[int, int] = {}
+    prob_trend_by: dict[int, float] = {}
     prev_round = body["round"] - 1
     if prev_round >= 1 and not season.empty:
         prev = season[season["round"] == prev_round]
         prev_rank = dict(zip(prev["driver_id"], prev["predicted_rank"], strict=True))
+        prev_prob = dict(zip(prev["driver_id"], prev["win_probability"], strict=True))
         for p in preds:
             rank_before = prev_rank.get(p["driver_id"])
             if rank_before is not None:
                 trend_by[p["driver_id"]] = int(rank_before) - int(p["predicted_rank"])
+            prob_before = prev_prob.get(p["driver_id"])
+            if prob_before is not None:
+                prob_trend_by[p["driver_id"]] = p["win_probability"] - float(prob_before)
 
     # --- Hero: headline answer, dominant on page load, no scrolling needed.
     col_hero, col_outcome = st.columns([3, 1])
@@ -143,6 +148,7 @@ def render() -> None:
                 p, grid=grid_by.get(p["driver_id"]),
                 quali=quali_by.get(p["driver_id"]),
                 trend=trend_by.get(p["driver_id"]),
+                prob_trend=prob_trend_by.get(p["driver_id"]),
                 is_winner=(winner_id is not None and p["driver_id"] == winner_id),
             )
 
