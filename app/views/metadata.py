@@ -435,12 +435,24 @@ def driver_standings_progression(driver_id: int, year: int) -> pd.DataFrame:
     return rows.sort_values("round")[["round", "points", "position", "wins"]]
 
 
+_CONSISTENCY_MIN_RACES = 3   # below this, a std dev is noise, not signal
+
+
 @st.cache_data(show_spinner=False)
 def driver_season_stats(driver_id: int, year: int | None = None) -> dict:
     """Historical outcome stats (display only): races, wins, podiums, poles,
-    points, avg_quali, avg_finish — one season, or career when year=None.
-    `points` comes from driver_standings.csv (see _authoritative_points),
-    not summed from results.csv, which undercounts sprint-race points."""
+    points, avg_quali, avg_finish, avg_finish_classified, consistency_std
+    — one season, or career when year=None. `points` comes from
+    driver_standings.csv (see _authoritative_points), not summed from
+    results.csv, which undercounts sprint-race points.
+
+    avg_finish uses positionOrder (existing behavior, includes DNFs ranked
+    at the back — unchanged, other pages already rely on this meaning).
+    avg_finish_classified/consistency_std are separate, NEW keys using the
+    classified `position` column with DNFs dropped instead — conflating
+    "crashed out" with "finished poorly" would make a consistency number
+    dishonest. consistency_std needs >= _CONSISTENCY_MIN_RACES classified
+    races to appear at all; small samples swing a std dev wildly."""
     results = _read_csv("results.csv")
     catalog = race_catalog()
     if results.empty or catalog.empty:
@@ -459,6 +471,11 @@ def driver_season_stats(driver_id: int, year: int | None = None) -> dict:
         "points": points if points is not None else float(r["points"].sum()),
         "avg_finish": float(r["positionOrder"].mean()),
     }
+    classified = position.dropna()
+    if len(classified):
+        stats["avg_finish_classified"] = float(classified.mean())
+        if len(classified) >= _CONSISTENCY_MIN_RACES:
+            stats["consistency_std"] = float(classified.std())
     quali = _read_csv("qualifying.csv")
     if not quali.empty:
         q = quali.merge(scope[["raceId"]], on="raceId", how="inner")
