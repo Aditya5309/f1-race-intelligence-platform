@@ -356,6 +356,43 @@ def _final_round_standings(standings_csv: str, year: int) -> pd.DataFrame:
     return merged[merged["round"] == merged["round"].max()].copy()
 
 
+def _authoritative_points(standings_csv: str, id_col: str, entity_id: int,
+                          year: int | None) -> float | None:
+    """Points from the *_standings.csv tables (Ergast's own running total,
+    includes sprint points) rather than summing results.csv's `points`
+    column, which is main-Grand-Prix-only and silently undercounts any
+    season with sprint races (checked against real 2024 data: summing
+    results.csv gave McLaren 609 / Norris 344 vs. the authoritative 666 /
+    374 -- sprint_results.csv, the missing points source, isn't part of
+    this project's exported display data and isn't needed once this
+    reads the standings tables instead). year=None sums each season's
+    final standings row across every season the entity appears in (a
+    fresh points table per season, so this is not a running total, and
+    IS the correct way to combine seasons). None if the entity never
+    appears in the standings at all."""
+    if year is not None:
+        rows = _final_round_standings(standings_csv, year)
+        rows = rows[rows[id_col] == entity_id]
+        return float(rows["points"].iloc[0]) if len(rows) else None
+
+    standings = _read_csv(standings_csv)
+    catalog = race_catalog()
+    if standings.empty or catalog.empty:
+        return None
+    entity_years = catalog.merge(
+        standings.loc[standings[id_col] == entity_id, ["raceId"]],
+        on="raceId", how="inner")["year"].unique()
+    if not len(entity_years):
+        return None
+    total = 0.0
+    for yr in entity_years:
+        rows = _final_round_standings(standings_csv, int(yr))
+        rows = rows[rows[id_col] == entity_id]
+        if len(rows):
+            total += float(rows["points"].iloc[0])
+    return total
+
+
 @st.cache_data(show_spinner=False)
 def season_driver_standings(year: int) -> pd.DataFrame:
     """Final driver standings of a season, with display names."""
@@ -401,7 +438,9 @@ def driver_standings_progression(driver_id: int, year: int) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def driver_season_stats(driver_id: int, year: int | None = None) -> dict:
     """Historical outcome stats (display only): races, wins, podiums, poles,
-    points, avg_quali, avg_finish — one season, or career when year=None."""
+    points, avg_quali, avg_finish — one season, or career when year=None.
+    `points` comes from driver_standings.csv (see _authoritative_points),
+    not summed from results.csv, which undercounts sprint-race points."""
     results = _read_csv("results.csv")
     catalog = race_catalog()
     if results.empty or catalog.empty:
@@ -412,11 +451,12 @@ def driver_season_stats(driver_id: int, year: int | None = None) -> dict:
     if r.empty:
         return {}
     position = pd.to_numeric(r["position"], errors="coerce")
+    points = _authoritative_points("driver_standings.csv", "driverId", driver_id, year)
     stats = {
         "races": int(len(r)),
         "wins": int((position == 1).sum()),
         "podiums": int((position <= 3).sum()),
-        "points": float(r["points"].sum()),
+        "points": points if points is not None else float(r["points"].sum()),
         "avg_finish": float(r["positionOrder"].mean()),
     }
     quali = _read_csv("qualifying.csv")
@@ -428,6 +468,98 @@ def driver_season_stats(driver_id: int, year: int | None = None) -> dict:
             stats["poles"] = int((qpos == 1).sum())
             stats["avg_quali"] = float(qpos.mean())
     return stats
+
+
+@st.cache_data(show_spinner=False)
+def constructor_catalog() -> pd.DataFrame:
+    """constructorId, name, nationality, for the Team page picker."""
+    constructors = _read_csv("constructors.csv")
+    if constructors.empty:
+        return pd.DataFrame()
+    return constructors[["constructorId", "name", "nationality"]].sort_values("name")
+
+
+@st.cache_data(show_spinner=False)
+def constructor_current_drivers(constructor_id: int, year: int) -> list[str]:
+    """Driver display names who raced for this constructor in this season."""
+    results = _read_csv("results.csv")
+    catalog = race_catalog()
+    drivers = _read_csv("drivers.csv")
+    if results.empty or catalog.empty or drivers.empty:
+        return []
+    season = catalog.loc[catalog["year"] == year, ["raceId"]]
+    r = results.merge(season, on="raceId", how="inner")
+    r = r[r["constructorId"] == constructor_id]
+    if r.empty:
+        return []
+    names = drivers[drivers["driverId"].isin(r["driverId"].unique())]
+    return sorted((names["forename"].astype(str) + " " + names["surname"].astype(str)).tolist())
+
+
+@st.cache_data(show_spinner=False)
+def constructor_season_stats(constructor_id: int, year: int | None = None) -> dict:
+    """Historical outcome stats (display only) for one constructor: races,
+    wins, podiums, points, avg_quali -- one season, or career when
+    year=None. Mirrors driver_season_stats() at constructor grain; "races"
+    is distinct raceId count (a 2-car entry doesn't double-count). `points`
+    comes from constructor_standings.csv (see _authoritative_points), not
+    summed from results.csv, which undercounts sprint-race points."""
+    results = _read_csv("results.csv")
+    catalog = race_catalog()
+    if results.empty or catalog.empty:
+        return {}
+    scope = catalog if year is None else catalog[catalog["year"] == year]
+    r = results.merge(scope[["raceId"]], on="raceId", how="inner")
+    r = r[r["constructorId"] == constructor_id]
+    if r.empty:
+        return {}
+    position = pd.to_numeric(r["position"], errors="coerce")
+    points = _authoritative_points(
+        "constructor_standings.csv", "constructorId", constructor_id, year)
+    stats = {
+        "races": int(r["raceId"].nunique()),
+        "wins": int((position == 1).sum()),
+        "podiums": int((position <= 3).sum()),
+        "points": points if points is not None else float(r["points"].sum()),
+    }
+    quali = _read_csv("qualifying.csv")
+    if not quali.empty:
+        q = quali.merge(scope[["raceId"]], on="raceId", how="inner")
+        qpos = pd.to_numeric(
+            q.loc[q["constructorId"] == constructor_id, "position"],
+            errors="coerce").dropna()
+        if len(qpos):
+            stats["avg_quali"] = float(qpos.mean())
+    return stats
+
+
+@st.cache_data(show_spinner=False)
+def constructor_race_results(constructor_id: int, year: int | None = None) -> pd.DataFrame:
+    """(year, round)-sorted per-race rows for one constructor: mean
+    qualifying position across both cars and the team's best finish that
+    round -- mirrors driver_race_results() at constructor grain, the Team
+    page's qualifying-trend chart source. Best finish uses positionOrder's
+    min (always populated, DNFs sort to the back), so one car's DNF doesn't
+    hide the other car's genuine result that round."""
+    results = _read_csv("results.csv")
+    catalog = race_catalog()
+    if results.empty or catalog.empty:
+        return pd.DataFrame()
+    scope = catalog if year is None else catalog[catalog["year"] == year]
+    r = results[results["constructorId"] == constructor_id].merge(
+        scope[["raceId", "year", "round"]], on="raceId", how="inner")
+    if r.empty:
+        return pd.DataFrame()
+    r["finish"] = pd.to_numeric(r["positionOrder"], errors="coerce")
+    agg = r.groupby(["raceId", "year", "round"], as_index=False)["finish"].min()
+    quali = _read_csv("qualifying.csv")
+    if not quali.empty:
+        q = quali[quali["constructorId"] == constructor_id]
+        quali_by_race = (
+            q.groupby("raceId")["position"].mean().rename("quali_position").reset_index()
+        )
+        agg = agg.merge(quali_by_race, on="raceId", how="left")
+    return agg.sort_values(["year", "round"])
 
 
 @st.cache_data(show_spinner=False)

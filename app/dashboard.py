@@ -2,15 +2,16 @@
 app/dashboard.py
 
 Streamlit dashboard entry point (Decision 016; UI/UX redesign, Decision
-023/024; Phase 2 new pages). Six pages (st.navigation), user-facing first
--- Compare Drivers and Team land in their own commits and will be added
-here alongside them:
+023/024; Phase 2 new pages). Seven pages (st.navigation), user-facing
+first -- Compare Drivers lands in its own commit and will be added here
+alongside it:
 
     streamlit run app/dashboard.py
 
     Dashboard          system status + headline metrics (app/views/home.py)
     Race Center         per-race storytelling view (app/views/race_center.py)
     Driver Explorer      one driver's races (app/views/driver_explorer.py)
+    Team                one constructor's season (app/views/team.py)
     Circuit Explorer     one circuit's history (app/views/circuit_explorer.py)
     Season Analytics    season-level trends (app/views/season_analytics.py)
     Model Insights       advanced/technical (app/views/insights.py)
@@ -30,6 +31,7 @@ from app.views import (
     insights,
     race_center,
     season_analytics,
+    team,
 )
 
 st.set_page_config(
@@ -44,6 +46,7 @@ race_center_page = st.Page(race_center.render, title="Race Center", icon="🏎",
                             url_path="race-center")
 driver_explorer_page = st.Page(driver_explorer.render, title="Driver Explorer",
                                 icon="👤", url_path="driver-explorer")
+team_page = st.Page(team.render, title="Team", icon="🏭", url_path="team")
 circuit_explorer_page = st.Page(circuit_explorer.render, title="Circuit Explorer",
                                  icon="🏟", url_path="circuit-explorer")
 season_analytics_page = st.Page(season_analytics.render, title="Season Analytics",
@@ -59,6 +62,7 @@ insights_page = st.Page(insights.render, title="Model Insights", icon="🤖",
 st.session_state["_dashboard_pages"] = {
     "race_center": race_center_page,
     "driver_explorer": driver_explorer_page,
+    "team": team_page,
     "circuit_explorer": circuit_explorer_page,
     "season_analytics": season_analytics_page,
     "insights": insights_page,
@@ -66,6 +70,6 @@ st.session_state["_dashboard_pages"] = {
 
 pages = st.navigation([
     dashboard_page, race_center_page, driver_explorer_page,
-    circuit_explorer_page, season_analytics_page, insights_page,
+    team_page, circuit_explorer_page, season_analytics_page, insights_page,
 ])
 pages.run()
