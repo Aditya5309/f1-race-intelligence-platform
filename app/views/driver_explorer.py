@@ -72,8 +72,15 @@ def render() -> None:
         return
 
     label_by_id = _driver_labels(frame)
+    driver_ids = list(label_by_id)
+    # One-shot preselect from a Race Center card click (app/views/components.
+    # py::driver_explorer_link) — consumed immediately so it doesn't pin
+    # later, unrelated visits to this page.
+    preselect = st.session_state.pop("_preselect_driver_id", None)
+    default_index = driver_ids.index(preselect) if preselect in driver_ids else 0
     driver_id = st.selectbox(
-        "Driver", list(label_by_id), format_func=lambda did: label_by_id[did],
+        "Driver", driver_ids, index=default_index,
+        format_func=lambda did: label_by_id[did],
     )
 
     d = frame[frame["driver_id"] == driver_id].sort_values(["year", "round"])

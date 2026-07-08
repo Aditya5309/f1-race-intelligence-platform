@@ -207,6 +207,20 @@ def favorite_card(prediction: dict, year: int, round_: int,
 _PROB_TREND_DEAD_ZONE = 0.01
 
 
+def driver_explorer_link(driver_id: int, key: str) -> None:
+    """Small nav button -> Driver Explorer, pre-selected on this driver.
+    Uses the StreamlitPage object app/dashboard.py publishes into
+    session_state (the same mechanism app/views/home.py's Explore cards
+    already use) -- a no-op if that registry isn't present (e.g. this
+    component rendered outside the dashboard's page-router context)."""
+    page = st.session_state.get("_dashboard_pages", {}).get("driver_explorer")
+    if page is None:
+        return
+    if st.button("View driver →", key=key, width="stretch"):
+        st.session_state["_preselect_driver_id"] = driver_id
+        st.switch_page(page)
+
+
 def driver_card(prediction: dict, grid: int | None = None,
                 quali: int | None = None, trend: int | None = None,
                 prob_trend: float | None = None, is_winner: bool = False) -> None:
@@ -237,6 +251,7 @@ def driver_card(prediction: dict, grid: int | None = None,
             st.badge(f"{arrow} {abs(trend)} vs last race", color=color)
         if is_winner:
             st.badge("Actual winner", icon=":material/emoji_events:", color="green")
+        driver_explorer_link(prediction["driver_id"], key=f"contender_{prediction['driver_id']}")
 
 
 def race_header(label: str, season: int, round_: int,
@@ -262,6 +277,7 @@ def podium_row(predictions: Sequence[dict], winner_id: int | None) -> None:
             st.caption(f"{pred['win_probability']:.1%} win share")
             if winner_id is not None and pred["driver_id"] == winner_id:
                 st.badge("Actual winner", icon=":material/emoji_events:", color="green")
+            driver_explorer_link(pred["driver_id"], key=f"podium_{pred['driver_id']}")
 
 
 def badge_card(label: str, text: str, color: str = "blue",
