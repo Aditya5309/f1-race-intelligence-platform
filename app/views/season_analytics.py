@@ -47,6 +47,56 @@ def _driver_trend(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+_MIN_DOMINANCE_PICKS = 2   # times as the favorite, before calling someone "dominant"
+
+
+def _season_insights(top_picks: pd.DataFrame, surprises: pd.DataFrame,
+                     trend: pd.DataFrame) -> list[str]:
+    """3-4 deterministic, templated one-line insights from aggregates this
+    page already computes (top_picks, surprises, _driver_trend) — no LLM,
+    no new data, just re-narrating numbers already on the page."""
+    insights: list[str] = []
+
+    dominance = (
+        top_picks.groupby("label")["win_probability"].agg(["mean", "size"])
+        .query(f"size >= {_MIN_DOMINANCE_PICKS}")
+        .sort_values("mean", ascending=False)
+    )
+    if len(dominance):
+        name = dominance.index[0]
+        row = dominance.iloc[0]
+        insights.append(
+            f"🏆 **Most dominant:** {name} averaged {row['mean']:.0%} win "
+            f"share across {int(row['size'])} races as the model's favorite."
+        )
+
+    if len(surprises):
+        row = surprises.iloc[0]
+        name = row["driver_name"] or f"driver {row['driver_id']}"
+        insights.append(
+            f"😲 **Biggest surprise:** {name} won from model rank "
+            f"#{int(row['predicted_rank'])}."
+        )
+
+    if len(trend):
+        best = trend.nsmallest(1, "delta").iloc[0]
+        insights.append(
+            f"📈 **Most improved:** {best['label']}, average predicted rank "
+            f"{best['early_avg']:.1f} → {best['recent_avg']:.1f} this season."
+        )
+
+    if len(top_picks):
+        most_conf = top_picks.loc[top_picks["win_probability"].idxmax()]
+        least_conf = top_picks.loc[top_picks["win_probability"].idxmin()]
+        insights.append(
+            f"🔒 **Most confident pick:** {most_conf['label']} at "
+            f"{most_conf['win_probability']:.0%} (round {int(most_conf['round'])}). "
+            f"**Least confident:** {least_conf['label']} at "
+            f"{least_conf['win_probability']:.0%} (round {int(least_conf['round'])})."
+        )
+    return insights
+
+
 def render() -> None:
     page_header("Season Analytics", "📊",
                 "How the season is unfolding, round by round.")
@@ -69,6 +119,15 @@ def render() -> None:
     decided = by_race["model_top1_hit"].dropna()
     hit_rate = decided.mean() if len(decided) else None
 
+    # Computed once, up front, and reused both by the Insights block below
+    # and by their own regular sections further down the page.
+    top_picks = frame[frame["predicted_rank"] == 1].copy()
+    top_picks["label"] = top_picks["driver_name"].fillna(
+        top_picks["driver_id"].astype(str))
+    winners = frame[frame["driver_id"] == frame["actual_winner_driver_id"]]
+    surprises = winners.nlargest(3, "predicted_rank")
+    trend = _driver_trend(frame)
+
     stat_row([
         {"label": "Races", "value": str(by_race["race_id"].nunique())},
         {"label": "Model hit rate",
@@ -77,6 +136,14 @@ def render() -> None:
         {"label": "Avg field size",
          "value": f"{frame.groupby('race_id').size().mean():.0f}"},
     ])
+
+    st.subheader("🔎 Insights")
+    insights = _season_insights(top_picks, surprises, trend)
+    if insights:
+        for insight in insights:
+            st.caption(insight)
+    else:
+        empty_state("Not enough decided races yet this season for insights.")
 
     st.subheader("📈 Model accuracy over the season")
     hits = (
@@ -121,9 +188,6 @@ def render() -> None:
                 empty_state("Constructor standings unavailable.")
 
     st.subheader("🎯 Most predicted winners")
-    top_picks = frame[frame["predicted_rank"] == 1].copy()
-    top_picks["label"] = top_picks["driver_name"].fillna(
-        top_picks["driver_id"].astype(str))
     picks = (
         top_picks.groupby("label")
         .agg(picks=("race_id", "size"), team=("constructor_name", "last"))
@@ -135,8 +199,6 @@ def render() -> None:
     st.caption("How often each driver was the model's #1 pick this season.")
 
     st.subheader("😲 Most surprising races")
-    winners = frame[frame["driver_id"] == frame["actual_winner_driver_id"]]
-    surprises = winners.nlargest(3, "predicted_rank")
     if surprises.empty:
         empty_state("No decided races in this season's data.")
     else:
@@ -157,7 +219,6 @@ def render() -> None:
                "right-shifted distribution means one-sided races.")
 
     st.subheader("📶 Rising & fading")
-    trend = _driver_trend(frame)
     if trend.empty:
         empty_state("Not enough multi-race history yet this season for a trend.")
     else:
