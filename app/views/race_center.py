@@ -105,7 +105,18 @@ def render() -> None:
     ordered_ids = [r["race_id"] for r in all_sorted]
 
     if "race_id" not in st.session_state:
-        st.session_state["race_id"] = ordered_ids[-1]   # latest race by default
+        # Shareable/bookmarkable: a ?race_id=<id> link pre-selects that race
+        # on first load; falls back to the latest race when absent/invalid.
+        default_race_id = ordered_ids[-1]
+        param_race_id = st.query_params.get("race_id")
+        if param_race_id is not None:
+            try:
+                candidate = int(param_race_id)
+            except ValueError:
+                candidate = None
+            if candidate in race_by_id:
+                default_race_id = candidate
+        st.session_state["race_id"] = default_race_id
 
     with st.sidebar:
         st.divider()
@@ -137,6 +148,7 @@ def render() -> None:
                 r["race_id"], fallback_round=r["round"]),
         )
         st.session_state["race_id"] = race["race_id"]
+        st.query_params["race_id"] = str(race["race_id"])
 
     body = api_get_or_stop(f"/predictions/{race['race_id']}")
     preds = body["predictions"]
