@@ -47,13 +47,17 @@ class Settings(BaseSettings):
     #: exported by train.py::register_model(), NOT the live training-side
     #: data/processed/features.parquet (which stays gitignored).
     features_path: Path = _ARTIFACTS_ROOT / "features.parquet"
-    #: Directory holding drivers.csv / constructors.csv for display names —
-    #: an OPTIONAL enrichment only (Decision 016): names degrade to null in
-    #: API responses if the files are absent, so this is a soft dependency
-    #: on the gitignored data/ tree, never a hard requirement to serve
-    #: predictions. Deploying data_dir alongside artifacts/ is an
-    #: enhancement, not a blocker.
-    data_dir: Path = _PROJECT_ROOT / "data"
+    #: Directory holding the display-name/metadata CSVs (drivers, races,
+    #: standings, etc.) — an OPTIONAL enrichment only (Decision 016): names
+    #: degrade to a fallback string if the files are absent, never a hard
+    #: requirement to serve predictions. Defaults to the committed frozen
+    #: snapshot (artifacts/display/, scripts/export_display_data.py) rather
+    #: than the gitignored data/ tree, so a fresh clone (Streamlit Cloud,
+    #: Render, CI) resolves real names out of the box — mirrors how
+    #: features_path/serving_bundle_path already default under artifacts/.
+    #: Point at the full data/ tree locally via .env (F1_DATA_DIR=data) if
+    #: wanted; nothing requires it.
+    data_dir: Path = _ARTIFACTS_ROOT / "display"
 
     # --- serving policy ----------------------------------------------------
     #: Forward-holdout guard (application_design.md §5.1): races after this

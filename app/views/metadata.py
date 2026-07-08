@@ -74,8 +74,9 @@ def race_catalog() -> pd.DataFrame:
 
 def race_label(race_id: int, fallback_year: int | None = None,
                fallback_round: int | None = None) -> str:
-    """'🇮🇹 Italian Grand Prix' from the catalog; 'Round N' fallback when the
-    metadata CSVs are unavailable."""
+    """'🇮🇹 Italian Grand Prix' from the catalog; a loud '⚠ Round N' fallback
+    (not a blank/plain string) when the metadata CSVs are unavailable, so a
+    data-loading failure is visible instead of looking like valid data."""
     catalog = race_catalog()
     if not catalog.empty:
         rows = catalog[catalog["raceId"] == race_id]
@@ -87,8 +88,8 @@ def race_label(race_id: int, fallback_year: int | None = None,
                 return f"{flag} {name}"
     if fallback_round is not None:
         suffix = f" · {fallback_year}" if fallback_year is not None else ""
-        return f"Round {fallback_round}{suffix}"
-    return f"raceId {race_id}"
+        return f"⚠ Round {fallback_round}{suffix}"
+    return f"⚠ raceId {race_id}"
 
 
 @st.cache_data(show_spinner=False)

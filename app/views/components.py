@@ -157,9 +157,11 @@ def confidence_bar(probability: float, label: str = "Confidence") -> None:
 
 
 def driver_label(prediction: dict) -> str:
-    """'Name (Team)' from a /predictions DriverPrediction dict, falling back
-    to the numeric id when the display-name lookup is unavailable."""
-    name = prediction.get("driver_name") or f"driver {prediction['driver_id']}"
+    """'Name (Team)' from a /predictions DriverPrediction dict — a loud
+    '⚠ driver {id}' fallback (not a blank/plain string) when the
+    display-name lookup is unavailable, so a data-loading failure is
+    visible instead of looking like valid data."""
+    name = prediction.get("driver_name") or f"⚠ driver {prediction['driver_id']}"
     team = prediction.get("constructor_name")
     return f"{name} ({team})" if team else name
 
@@ -183,7 +185,7 @@ def driver_card(prediction: dict, grid: int | None = None,
                 is_winner: bool = False) -> None:
     """Compact contender card: rank + name, team dot, grid/quali line, win
     share, rank-trend arrow vs the previous round, actual-winner badge."""
-    name = prediction.get("driver_name") or f"driver {prediction['driver_id']}"
+    name = prediction.get("driver_name") or f"⚠ driver {prediction['driver_id']}"
     team = prediction.get("constructor_name")
     with st.container(border=True):
         st.markdown(f"**#{prediction['predicted_rank']} {name}**")
