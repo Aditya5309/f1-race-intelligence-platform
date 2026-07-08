@@ -16,6 +16,7 @@ import streamlit as st
 from app.views import metadata
 from app.views.charts import win_share_bar
 from app.views.common import (
+    ERA_CAVEAT_SHORT,
     api_get_or_stop,
     list_races_or_stop,
     season_predictions_or_stop,
@@ -35,6 +36,28 @@ from app.views.components import (
 
 _FORM_WIN_SHARE = 0.20          # mean share over last 3 rounds -> "excellent form"
 _CONSTRUCTOR_WIN_SHARE = 0.15   # season mean share -> "strong constructor"
+_CLEAR_SEPARATION_GAP = 0.15    # #1 vs #2 win-share gap -> "clear separation"
+_TIGHT_RACE_GAP = 0.05          # #1 vs #2 win-share gap -> "tight race"
+
+
+def _confidence_reasons(top: dict, second: dict | None, grid: int | None) -> list[str]:
+    """2-3 plain-language reasons behind the star rating — genuine per-race
+    signals only (there's no per-prediction SHAP output to draw a "feature
+    stability" reason from): the probability gap to the runner-up, the
+    favorite's grid position, and the dominance/competitive era caveat."""
+    reasons: list[str] = []
+    if second is not None:
+        gap = top["win_probability"] - second["win_probability"]
+        if gap >= _CLEAR_SEPARATION_GAP:
+            reasons.append(f"Clear separation from the field (+{gap:.0%} over 2nd)")
+        elif gap < _TIGHT_RACE_GAP:
+            reasons.append("Tight race — several close contenders")
+    if grid == 1:
+        reasons.append("Favorite started from pole")
+    elif grid is not None and grid > 5:
+        reasons.append(f"Favorite started outside the top 5 (P{grid})")
+    reasons.append(ERA_CAVEAT_SHORT)
+    return reasons
 
 
 def _reasons_for_favorite(top: dict, grid: int | None, quali: int | None,
@@ -138,6 +161,13 @@ def render() -> None:
 
     st.caption("🥇🥈🥉 Predicted podium")
     podium_row(preds, winner_id)
+
+    st.caption("🔍 Why this confidence level")
+    for reason in _confidence_reasons(
+        preds[0], preds[1] if len(preds) > 1 else None,
+        grid_by.get(preds[0]["driver_id"]),
+    ):
+        st.caption(f"• {reason}")
 
     st.subheader("🏁 Top contenders")
     cols = st.columns(min(5, len(preds)))
