@@ -7,11 +7,16 @@ All project logic goes through the API — the dashboard never imports src/.
 
 from __future__ import annotations
 
+import logging
+import os
+
 import httpx
 import pandas as pd
 import streamlit as st
 
 from app.config import Settings
+
+_log = logging.getLogger(__name__)
 
 ERA_CAVEAT = (
     "**Reading the numbers:** the model's advantage over simply picking the "
@@ -25,6 +30,13 @@ ERA_CAVEAT_SHORT = (
 )
 
 _settings = Settings()
+
+# --- TEMPORARY DIAGNOSTICS (remove after root-causing "API unreachable") ---
+_API_URL_SOURCE = "environment" if os.environ.get("F1_API_URL") is not None else "default"
+_log.warning(
+    "DIAG api_url resolved to %r (source=%s)", _settings.api_url, _API_URL_SOURCE
+)
+# --- end temporary diagnostics ---
 
 
 def api_url() -> str:
@@ -47,7 +59,21 @@ def _http_client() -> httpx.Client:
 @st.cache_data(ttl=300, show_spinner=False)
 def api_get(path: str, params: dict | None = None) -> dict:
     """GET {api_url}{path} -> parsed JSON. Raises httpx.HTTPError on failure."""
-    response = _http_client().get(path, params=params)
+    requested_url = f"{api_url()}{path}"
+    # --- TEMPORARY DIAGNOSTICS (remove after root-causing "API unreachable") ---
+    try:
+        response = _http_client().get(path, params=params)
+    except Exception as exc:
+        st.sidebar.error(
+            f"DIAG exception_type={type(exc).__name__!r} "
+            f"message={exc!r} requested_url={requested_url!r}"
+        )
+        raise
+    st.sidebar.caption(
+        f"DIAG status={response.status_code} body={response.text[:500]!r} "
+        f"requested_url={requested_url!r}"
+    )
+    # --- end temporary diagnostics ---
     response.raise_for_status()
     return response.json()
 
@@ -157,6 +183,11 @@ def sidebar_model_panel() -> dict | None:
     Model Insights advanced page — see app/views/insights.py.
     """
     from app.views.components import status_badge  # local: avoid import cycle
+
+    # --- TEMPORARY DIAGNOSTICS (remove after root-causing "API unreachable") ---
+    with st.sidebar:
+        st.caption(f"DIAG api_url={_settings.api_url!r} source={_API_URL_SOURCE}")
+    # --- end temporary diagnostics ---
 
     try:
         health = api_get("/health")
