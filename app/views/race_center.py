@@ -28,7 +28,7 @@ from app.views.components import (
     driver_label,
     empty_state,
     favorite_card,
-    hit_miss_badge,
+    hit_miss_detail,
     page_header,
     podium_row,
     race_header,
@@ -193,14 +193,20 @@ def render() -> None:
             if prob_before is not None:
                 prob_trend_by[p["driver_id"]] = p["win_probability"] - float(prob_before)
 
+    top = preds[0]
+    top_result = (
+        metadata.actual_result(race["race_id"], top["driver_id"])
+        if winner_id is not None else {}
+    )
+
     # --- Hero: headline answer, dominant on page load, no scrolling needed.
     col_hero, col_outcome = st.columns([3, 1])
     with col_hero:
-        favorite_card(preds[0], body["year"], body["round"], subtitle="Model favorite")
+        favorite_card(top, body["year"], body["round"], subtitle="Model favorite")
     with col_outcome:
         st.write("")
         st.write("")
-        hit_miss_badge(body["model_top1_hit"])
+        hit_miss_detail(body["model_top1_hit"], top_result)
 
     st.caption("🥇🥈🥉 Predicted podium")
     podium_row(preds, winner_id)
@@ -272,14 +278,12 @@ def render() -> None:
 
     if winner_id is not None:
         st.subheader("🔁 Historical Replay")
-        top = preds[0]
-        result = metadata.actual_result(race["race_id"], top["driver_id"])
         st.caption(f"**Predicted:** {driver_label(top)} — "
                    f"{top['win_probability']:.0%} win share (model favorite)")
-        if not result:
+        if not top_result:
             st.caption("**Actual:** result unavailable (display metadata not loaded).")
-        elif result["dnf"]:
-            status = result.get("status", "did not finish")
+        elif top_result["dnf"]:
+            status = top_result.get("status", "did not finish")
             st.caption(f"**Actual:** retired — {status}")
             st.caption(
                 f"**Error analysis:** the model's favorite retired ({status}) — "
@@ -287,13 +291,13 @@ def render() -> None:
                 "predicts, not a ranking error."
             )
         else:
-            st.caption(f"**Actual:** finished P{result['finish_position']}")
+            st.caption(f"**Actual:** finished P{top_result['finish_position']}")
             if body["model_top1_hit"]:
                 st.caption("**Result:** the model's favorite won as predicted.")
             else:
                 st.caption(
                     f"**Error analysis:** {top['win_probability']:.0%} win share "
-                    f"→ P{result['finish_position']} — the gap between predicted "
+                    f"→ P{top_result['finish_position']} — the gap between predicted "
                     "confidence and actual result (see Top contenders above for "
                     "who did win)."
                 )

@@ -169,6 +169,21 @@ def hit_miss_badge(hit: bool | None) -> None:
         st.badge("Model missed the winner", icon=":material/close:", color="orange")
 
 
+def hit_miss_detail(hit: bool | None, result: dict) -> None:
+    """hit_miss_badge, plus how wrong the miss actually was ("Predicted P1
+    -> Finished P4") instead of a bare binary badge -- result is a
+    metadata.actual_result() dict ({} when unavailable)."""
+    hit_miss_badge(hit)
+    if hit is None or hit:
+        return
+    if not result:
+        st.caption("Predicted P1 → result unavailable (display metadata not loaded).")
+    elif result["dnf"]:
+        st.caption(f"Predicted P1 → retired ({result.get('status', 'DNF')})")
+    else:
+        st.caption(f"Predicted P1 → Finished P{result['finish_position']}")
+
+
 def confidence_bar(probability: float, label: str = "Confidence") -> None:
     """0-1 probability rendered as a progress bar + percentage caption —
     the storytelling-friendly stand-in for exposing raw/calibrated model
