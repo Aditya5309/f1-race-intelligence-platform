@@ -189,6 +189,120 @@ def circuit_dnf_rate(race_id: int, lookback_years: int = _DNF_LOOKBACK_YEARS) ->
     }
 
 
+def _parse_laptime(value: str) -> float | None:
+    """'M:SS.sss' fastestLapTime string -> total seconds. None on anything
+    that doesn't match (every fastestLapTime value in this dataset matches
+    'M:SS.sss', checked directly; this guard is for genuinely malformed
+    input, not an expected case)."""
+    if not isinstance(value, str) or ":" not in value:
+        return None
+    minutes, _, seconds = value.partition(":")
+    try:
+        return int(minutes) * 60 + float(seconds)
+    except ValueError:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def circuit_catalog() -> pd.DataFrame:
+    """circuitId, name, country, location + races_held count, for the
+    Circuit Explorer picker. Empty frame when circuits.csv is absent."""
+    circuits = _read_csv("circuits.csv")
+    if circuits.empty:
+        return pd.DataFrame()
+    catalog = race_catalog()
+    counts = (
+        catalog.groupby("circuitId")["raceId"].nunique().rename("races_held")
+        if not catalog.empty else pd.Series(dtype=int, name="races_held")
+    )
+    out = circuits[["circuitId", "name", "country", "location"]].merge(
+        counts, on="circuitId", how="left")
+    out["races_held"] = out["races_held"].fillna(0).astype(int)
+    return out.sort_values("name")
+
+
+_POSITION_CHANGE_MIN_RACES = 3   # below this, an average is noise, not signal
+
+
+@st.cache_data(show_spinner=False)
+def circuit_stats(circuit_id: int) -> dict:
+    """All-time stats for one circuit -- races held, years active, DNF rate,
+    average grid->finish position change, fastest recorded race lap, and
+    win-count leaders. Every number here needs the caveats shown alongside
+    it in the UI (see app/views/circuit_explorer.py): comparing across
+    every year a circuit has run conflates car-performance evolution and
+    (for position change) strategy/reliability/grid-penalty effects with
+    genuine circuit character -- these are real, computed numbers, not
+    invented "difficulty" scores, but they are proxies, not direct
+    measurements. {} when there's no race history for this circuit."""
+    catalog = race_catalog()
+    if catalog.empty:
+        return {}
+    races_here = catalog[catalog["circuitId"] == circuit_id]
+    if races_here.empty:
+        return {}
+    stats: dict = {
+        "races_held": int(races_here["raceId"].nunique()),
+        "first_year": int(races_here["year"].min()),
+        "last_year": int(races_here["year"].max()),
+    }
+    results = _read_csv("results.csv")
+    if results.empty:
+        return stats
+    r = results.merge(races_here[["raceId", "year"]], on="raceId", how="inner")
+    if r.empty:
+        return stats
+
+    stats["dnf_rate"] = float(r["position"].isna().mean())
+
+    valid = r[(r["grid"] > 0) & r["position"].notna()]
+    if len(valid) >= _POSITION_CHANGE_MIN_RACES:
+        stats["avg_position_change"] = float(
+            (valid["grid"] - pd.to_numeric(valid["position"])).mean())
+
+    laps = r.dropna(subset=["fastestLapTime"]).copy()
+    if len(laps):
+        laps["_seconds"] = laps["fastestLapTime"].map(_parse_laptime)
+        laps = laps.dropna(subset=["_seconds"])
+        if len(laps):
+            row = laps.loc[laps["_seconds"].idxmin()]
+            drivers = _read_csv("drivers.csv")
+            driver_name = None
+            if not drivers.empty:
+                d = drivers[drivers["driverId"] == row["driverId"]]
+                if len(d):
+                    driver_name = f"{d.iloc[0]['forename']} {d.iloc[0]['surname']}"
+            stats["fastest_lap"] = {
+                "time": row["fastestLapTime"], "year": int(row["year"]),
+                "driver": driver_name or f"driver {int(row['driverId'])}",
+            }
+
+    winners = r[pd.to_numeric(r["position"], errors="coerce") == 1].copy()
+    if len(winners):
+        drivers = _read_csv("drivers.csv")
+        if not drivers.empty:
+            names = drivers.assign(
+                driver=drivers["forename"].astype(str) + " " + drivers["surname"].astype(str)
+            )[["driverId", "driver"]]
+            winners = winners.merge(names, on="driverId", how="left")
+        else:
+            winners["driver"] = winners["driverId"].astype(str)
+        constructors = _read_csv("constructors.csv")
+        if not constructors.empty:
+            cnames = constructors.rename(columns={"name": "constructor"})[
+                ["constructorId", "constructor"]]
+            winners = winners.merge(cnames, on="constructorId", how="left")
+        stats["winners_by_year"] = winners[
+            ["year", "driver", "constructor"] if "constructor" in winners.columns
+            else ["year", "driver"]
+        ].sort_values("year", ascending=False).reset_index(drop=True)
+        stats["most_wins"] = (
+            winners.groupby("driver").size().rename("wins")
+            .sort_values(ascending=False).head(5).reset_index()
+        )
+    return stats
+
+
 @st.cache_data(show_spinner=False)
 def race_facts(race_id: int) -> dict:
     """Whatever display facts exist for a race: grand_prix, circuit, country,
