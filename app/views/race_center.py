@@ -28,6 +28,7 @@ from app.views.components import (
     favorite_card,
     hit_miss_badge,
     page_header,
+    podium_row,
     race_header,
     reason_badges,
     stat_row,
@@ -122,6 +123,7 @@ def render() -> None:
             if rank_before is not None:
                 trend_by[p["driver_id"]] = int(rank_before) - int(p["predicted_rank"])
 
+    # --- Hero: headline answer, dominant on page load, no scrolling needed.
     col_hero, col_outcome = st.columns([3, 1])
     with col_hero:
         favorite_card(preds[0], body["year"], body["round"], subtitle="Model favorite")
@@ -129,6 +131,9 @@ def render() -> None:
         st.write("")
         st.write("")
         hit_miss_badge(body["model_top1_hit"])
+
+    st.caption("🥇🥈🥉 Predicted podium")
+    podium_row(preds, winner_id)
 
     st.subheader("🏁 Top contenders")
     cols = st.columns(min(5, len(preds)))

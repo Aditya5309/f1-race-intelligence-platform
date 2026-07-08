@@ -87,16 +87,36 @@ def constructor_dot(name: str | None) -> str:
     return "🏎"
 
 
+# (threshold, label, stars out of 5) — descending threshold order; the last
+# tuple's threshold is unreachable and only carries the below-all-thresholds
+# label/stars. Single source of truth for confidence_label/confidence_stars
+# so wording and star count can't drift apart.
+_CONFIDENCE_TIERS = (
+    (0.50, "Strong favorite", 5),
+    (0.30, "Clear favorite", 4),
+    (0.20, "Slight edge", 3),
+    (0.0, "Wide open", 2),
+)
+
+
+def confidence_tier(probability: float) -> tuple[str, int]:
+    """(fan-friendly label, star count 1-5) for a win share — storytelling
+    stand-in for raw calibrated probabilities on user-facing pages."""
+    for threshold, label, stars in _CONFIDENCE_TIERS:
+        if probability >= threshold:
+            return label, stars
+    return _CONFIDENCE_TIERS[-1][1], _CONFIDENCE_TIERS[-1][2]
+
+
 def confidence_label(probability: float) -> str:
-    """Fan-friendly wording for a win share — storytelling stand-in for raw
-    calibrated probabilities on user-facing pages."""
-    if probability >= 0.50:
-        return "Strong favorite"
-    if probability >= 0.30:
-        return "Clear favorite"
-    if probability >= 0.20:
-        return "Slight edge"
-    return "Wide open"
+    """Fan-friendly wording for a win share — see confidence_tier()."""
+    return confidence_tier(probability)[0]
+
+
+def confidence_stars(probability: float) -> str:
+    """'★★★★☆'-style star rating for a win share — see confidence_tier()."""
+    stars = confidence_tier(probability)[1]
+    return "★" * stars + "☆" * (5 - stars)
 
 
 def page_header(title: str, icon: str, subtitle: str | None = None) -> None:
@@ -177,7 +197,8 @@ def favorite_card(prediction: dict, year: int, round_: int,
         if team:
             st.caption(f"{constructor_dot(team)} {team}")
         confidence_bar(prediction["win_probability"], label="Win share")
-        st.caption(f"Confidence: **{confidence_label(prediction['win_probability'])}**")
+        label, stars = confidence_tier(prediction["win_probability"])
+        st.caption(f"Confidence: {'★' * stars}{'☆' * (5 - stars)} **{label}**")
 
 
 def driver_card(prediction: dict, grid: int | None = None,
