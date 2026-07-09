@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.api import create_app
 from app.config import Settings
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
-from src.models.serving_bundle import bundle_dir_for_alias
+from src.models.serving_bundle import DEFAULT_FEATURES_ARTIFACT, bundle_dir_for_alias
 from src.models.splits import temporal_split
 from src.models.train import register_model
 from tests.conftest import set_tmp_experiment
@@ -303,6 +303,77 @@ def test_simulate_grid_forward_holdout_409(client):
     resp = client.get(f"/predictions/{HOLDOUT_RACE}/simulate/1",
                       params={"grid_position": 1})
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Regression: simulate() at a driver's REAL grid position must exactly
+# reproduce the real prediction — the whole "freeze the rest of the
+# qualifying group" design (app/api.py's ADJUSTABLE_GRID_FEATURES) depends
+# on the override being a true no-op when it matches what actually happened.
+# Runs against the ACTUAL committed serving bundle + features snapshot
+# (artifacts/serving/staging, artifacts/features.parquet — Decision 029:
+# committed to git, unlike the gitignored data/ tree), not the synthetic
+# fixture used by every other test in this file, so this is a genuine
+# regression check against real 2024 races. Two races are covered: one
+# where the model's favorite actually started on pole (real grid == 1,
+# the trivial case) and one where it didn't (real grid != 1, the case
+# where grid position and predicted rank diverge) — both are asserted
+# explicitly below so a data change would fail loudly instead of silently
+# testing the wrong scenario.
+# ---------------------------------------------------------------------------
+
+_REAL_GRID_REGRESSION_CASES = {
+    1121: 1.0,   # 2024 Bahrain (round 1): favorite started on pole
+    1129: 2.0,   # 2024 round 9: favorite did NOT start on pole
+}
+
+
+@pytest.fixture(scope="module")
+def real_client():
+    with TestClient(create_app()) as c:      # default Settings -> real artifacts/
+        yield c
+
+
+@pytest.fixture(scope="module")
+def real_features() -> pd.DataFrame:
+    return pd.read_parquet(DEFAULT_FEATURES_ARTIFACT)
+
+
+@pytest.mark.parametrize("race_id", sorted(_REAL_GRID_REGRESSION_CASES))
+def test_simulate_at_real_grid_exactly_reproduces_real_prediction(
+    real_client, real_features, race_id,
+):
+    real = real_client.get(f"/predictions/{race_id}")
+    assert real.status_code == 200, real.text
+    real_body = real.json()
+    top = real_body["predictions"][0]
+    driver_id = top["driver_id"]
+
+    row = real_features.loc[
+        (real_features["raceId"] == race_id) & (real_features["driverId"] == driver_id)
+    ].iloc[0]
+    real_grid = float(row["grid_adjusted"])
+    assert real_grid == _REAL_GRID_REGRESSION_CASES[race_id], (
+        f"raceId {race_id}'s favorite's real grid position moved — update "
+        "_REAL_GRID_REGRESSION_CASES (the pole-vs-not-pole split this test "
+        "covers depends on it)."
+    )
+    assert not bool(row["pit_lane_start"])
+
+    sim = real_client.get(
+        f"/predictions/{race_id}/simulate/{driver_id}",
+        params={"grid_position": int(real_grid)},
+    )
+    assert sim.status_code == 200, sim.text
+    sim_body = sim.json()
+
+    assert sim_body["real_grid_position"] == real_grid
+    assert sim_body["simulated_grid_position"] == real_grid
+    # Hard equality, not pytest.approx: the route is supposed to reproduce
+    # the real row exactly (same features in, same predict_proba call out)
+    # when the override matches what actually happened.
+    assert sim_body["simulated_win_probability"] == sim_body["real_win_probability"]
+    assert sim_body["simulated_win_probability"] == top["win_probability"]
 
 
 # ---------------------------------------------------------------------------
