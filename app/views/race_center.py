@@ -348,5 +348,79 @@ def render() -> None:
             frame[[*table_columns, "win_probability_raw", "is_winner"]],
             hide_index=True, width="stretch", column_config=column_config,
         )
+
+    _grid_simulator_section(race["race_id"], preds, grid_by)
+
     st.caption(f"prediction_id: `{body['prediction_id']}` · generated "
                f"{body['generated_at']} · model v{body['model']['version']}")
+
+
+def _grid_simulator_section(race_id: int, preds: list[dict],
+                            grid_by: dict[int, int]) -> None:
+    """Phase 3 Item 1 — Prediction Simulator, grid/qualifying group only.
+
+    Only the starting grid slot is adjustable; the driver's real qualifying
+    times/gap-to-pole and all 21 historical form/circuit/standings features
+    stay locked to what actually happened for this race (backend enforces
+    this — see app/api.py's ADJUSTABLE_GRID_FEATURES). This is deliberately
+    NOT a general what-if tool."""
+    st.divider()
+    st.subheader("🎛️ What if? Grid Position Simulator")
+    st.caption(
+        "Move one driver's starting grid slot and see their win share "
+        "change. Everything else — recent form, circuit history, "
+        "championship standing, even the rest of that driver's real "
+        "qualifying session — stays locked to what actually happened. "
+        "Grid position can genuinely differ from qualifying pace in real F1 "
+        "(penalties, reshuffles) — that's exactly the scenario simulated "
+        "here, not a fabricated qualifying lap."
+    )
+
+    driver_ids = [p["driver_id"] for p in preds]
+    label_by_id = {p["driver_id"]: driver_label(p) for p in preds}
+    sim_driver = st.selectbox(
+        "Driver", driver_ids, index=0, format_func=lambda did: label_by_id[did],
+        key="sim_driver_select",
+    )
+    field_size = len(preds)
+    default_grid = grid_by.get(sim_driver) or 1
+    default_grid = min(max(int(default_grid), 1), field_size)
+
+    col_slider, col_pit = st.columns([3, 1])
+    with col_slider:
+        sim_grid_position = st.slider(
+            "Starting grid position", min_value=1, max_value=field_size,
+            value=default_grid, key="sim_grid_slider",
+        )
+    with col_pit:
+        st.write("")
+        sim_pit_lane = st.checkbox("Pit lane start", key="sim_pit_lane")
+
+    params = {"pit_lane": True} if sim_pit_lane else {"grid_position": sim_grid_position}
+    sim_body = api_get_or_stop(
+        f"/predictions/{race_id}/simulate/{sim_driver}", params=params)
+
+    col_real, col_sim, col_grid = st.columns(3)
+    with col_real:
+        st.metric("Real win share", f"{sim_body['real_win_probability']:.1%}")
+    with col_sim:
+        sim_label = "Pit lane" if sim_pit_lane else f"P{sim_grid_position}"
+        delta = sim_body["simulated_win_probability"] - sim_body["real_win_probability"]
+        st.metric(f"Simulated win share ({sim_label})",
+                  f"{sim_body['simulated_win_probability']:.1%}", delta=f"{delta:+.1%}")
+    with col_grid:
+        real_grid = sim_body["real_grid_position"]
+        st.metric("Real starting grid",
+                  f"P{int(real_grid)}" if real_grid is not None else "—")
+
+    st.caption(f"🔒 Locked for this simulation: {sim_body['driver_name'] or 'this driver'}'s "
+              f"real qualifying times/gap-to-pole ({len(sim_body['locked_qualifying_features'])} "
+              f"fields) and all {len(sim_body['locked_features'])} historical "
+              "form/circuit-history/standings features — only the grid slot moves.")
+
+    sim_frame = pd.DataFrame(sim_body["field"])
+    sim_frame["label"] = [driver_label(p) for p in sim_body["field"]]
+    win_share_bar(sim_frame.sort_values("predicted_rank").head(10), winner_id=None)
+    st.caption("Only the simulated driver's underlying model output actually "
+              "changes — everyone else's bar shifts a little because shares "
+              "are renormalized to sum to 100% within the race.")

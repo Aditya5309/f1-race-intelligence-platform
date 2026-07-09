@@ -218,6 +218,94 @@ def test_debug_features_respects_holdout(debug_client):
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 Item 1 — Prediction Simulator (/predictions/{race_id}/simulate/{driver_id})
+#
+# _synthetic_features bakes a deterministic relationship into the fixture:
+# winner == 1 iff grid_adjusted == 1 (see the module docstring above), with
+# every other feature pure noise. The fitted logreg therefore keys almost
+# entirely off grid_adjusted, which makes "simulated P1 clearly beats
+# simulated last" a real assertion about the model's behavior, not a
+# tautology about the endpoint's plumbing.
+# ---------------------------------------------------------------------------
+
+def test_simulate_grid_p1_beats_back_of_grid(client):
+    p1 = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                    params={"grid_position": 1}).json()
+    last = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                      params={"grid_position": 5}).json()
+    assert p1["simulated_grid_position"] == 1.0
+    assert last["simulated_grid_position"] == 5.0
+    assert p1["simulated_win_probability"] > last["simulated_win_probability"]
+    assert p1["field_size"] == 5
+    assert p1["driver_id"] == 1
+
+
+def test_simulate_grid_pit_lane(client):
+    body = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                      params={"pit_lane": True}).json()
+    assert body["pit_lane_start"] is True
+    assert body["simulated_grid_position"] == 6.0        # field_size + 1
+    p1 = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                    params={"grid_position": 1}).json()
+    assert body["simulated_win_probability"] < p1["simulated_win_probability"]
+
+
+def test_simulate_grid_locked_feature_lists(client):
+    body = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                      params={"grid_position": 2}).json()
+    # The 3 literally-overridden fields are never reported as locked.
+    for adjustable in ("grid_adjusted", "grid_position_norm", "pit_lane_start"):
+        assert adjustable not in body["locked_qualifying_features"]
+        assert adjustable not in body["locked_features"]
+    # The rest of the qualifying group is frozen (not fabricated), not adjustable.
+    assert set(body["locked_qualifying_features"]) == {
+        "qualifying_position", "q1_sec", "q2_sec", "q3_sec",
+        "reached_q2", "reached_q3", "qualifying_gap_to_pole_pct",
+    }
+    # All 21 historical/standings aggregates are locked.
+    assert len(body["locked_features"]) == 21
+    assert "driver_wins_last_5" in body["locked_features"]
+    assert "constructor_standing_position_prev" in body["locked_features"]
+
+
+def test_simulate_grid_field_renormalizes_but_others_raw_unchanged(client):
+    real = client.get(f"/predictions/{IN_WINDOW_RACE}").json()
+    sim = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                     params={"grid_position": 5}).json()
+    real_raw = {p["driver_id"]: p["win_probability_raw"] for p in real["predictions"]}
+    sim_raw = {p["driver_id"]: p["win_probability_raw"] for p in sim["field"]}
+    # Only the overridden driver's raw model output changes.
+    for driver_id, raw in sim_raw.items():
+        if driver_id == 1:
+            continue
+        assert raw == pytest.approx(real_raw[driver_id])
+    assert sum(p["win_probability"] for p in sim["field"]) == pytest.approx(1.0)
+
+
+def test_simulate_grid_unknown_driver_404(client):
+    resp = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/999999",
+                      params={"grid_position": 1})
+    assert resp.status_code == 404
+
+
+def test_simulate_grid_out_of_range_422(client):
+    resp = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1",
+                      params={"grid_position": 99})
+    assert resp.status_code == 422
+
+
+def test_simulate_grid_missing_input_422(client):
+    resp = client.get(f"/predictions/{IN_WINDOW_RACE}/simulate/1")
+    assert resp.status_code == 422
+
+
+def test_simulate_grid_forward_holdout_409(client):
+    resp = client.get(f"/predictions/{HOLDOUT_RACE}/simulate/1",
+                      params={"grid_position": 1})
+    assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # Reserved POST /predict (design §5 amendment)
 # ---------------------------------------------------------------------------
 

@@ -23,10 +23,18 @@ concept of experiments or registry aliases; that machinery lives entirely
 on the training side (src/models/train.py).
 
 Endpoints (design §5):
-    GET  /health                    liveness + serving model metadata
-    GET  /model                     full ModelInfo
-    GET  /races?year=               races available to score (<= serve_max_year)
-    GET  /predictions/{race_id}     per-race-normalized field predictions
+    GET  /health                              liveness + serving model metadata
+    GET  /model                               full ModelInfo
+    GET  /races?year=                         races available to score (<= serve_max_year)
+    GET  /predictions/{race_id}               per-race-normalized field predictions
+    GET  /predictions/{race_id}/simulate/{driver_id}
+                                              Phase 3 Item 1 (Prediction Simulator):
+                                              re-score one driver with an overridden
+                                              grid/qualifying position, everything
+                                              else held at real values — see
+                                              ADJUSTABLE_GRID_FEATURES below for why
+                                              only 3 of the 10 qualifying-group
+                                              features actually move.
     GET  /debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
                                     the exact feature vectors fed to the model
     POST /predict                   RESERVED for Phase 8 upcoming-race scoring;
@@ -53,10 +61,26 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import Settings
+from src.features.qualifying import QUALIFYING_FEATURES
 from src.models.predict import load_model, predict_race
 from src.models.registry import training_schema
 
 logger = logging.getLogger("f1.api")
+
+# Phase 3 Item 1 (Prediction Simulator) — of the 10 QUALIFYING_FEATURES, only
+# these 3 are literally overridden by a grid-position "what if". The other 7
+# (qualifying_position, q1/q2/q3_sec, reached_q2/q3, qualifying_gap_to_pole_pct)
+# stay FROZEN at the driver's real values for the race, rather than being
+# fabricated to match the new grid slot. This is a deliberate "freeze, don't
+# interpolate" choice: grid position legitimately diverges from qualifying
+# pace in real F1 (grid penalties, pit-lane starts, grid reshuffles) — the
+# training data already contains this pattern, so the model is calibrated for
+# it. Interpolating a fake q3_sec/gap-to-pole for the new slot would fabricate
+# a lap the driver never set, which this project avoids everywhere else (see
+# the no-weather-data / no-fake-timeline decisions).
+ADJUSTABLE_GRID_FEATURES: tuple[str, ...] = (
+    "grid_adjusted", "grid_position_norm", "pit_lane_start",
+)
 
 # Single-source version (Decision 020): pyproject.toml is the only place the
 # version is defined; the fallback covers running from a checkout that was
@@ -131,6 +155,24 @@ class FeatureDebugResponse(BaseModel):
     model: ModelInfoSchema
     feature_names: list[str]
     rows: list[FeatureDebugRow]
+
+
+class SimulateGridResponse(BaseModel):
+    """Phase 3 Item 1 — one driver's win share re-scored under an overridden
+    grid/qualifying position, everything else held at real values."""
+    race_id: int
+    driver_id: int
+    driver_name: str | None = None
+    field_size: int
+    real_grid_position: float | None    # driver's actual grid_adjusted, for the slider default
+    simulated_grid_position: float      # field_size + 1 when pit_lane_start=True
+    pit_lane_start: bool
+    real_win_probability: float         # driver's actual per-race-normalized share
+    simulated_win_probability: float    # share under the override
+    field: list[DriverPrediction]       # full field re-normalized under the override
+    locked_qualifying_features: list[str]   # frozen (not fabricated) qualifying-group fields
+    locked_features: list[str]              # historical/aggregate features — never adjustable
+    model: ModelInfoSchema
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +273,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return rows
 
+    def _driver_predictions(scored: pd.DataFrame) -> list[DriverPrediction]:
+        """predict_race() output -> DriverPrediction list, with display-name
+        enrichment. Shared by /predictions and /simulate so the two routes
+        can never drift in how a scored frame is rendered."""
+        return [
+            DriverPrediction(
+                driver_id=int(r.driverId),
+                driver_name=app.state.driver_names.get(int(r.driverId)),
+                constructor_id=(int(r.constructorId)
+                                if hasattr(r, "constructorId") else None),
+                constructor_name=app.state.constructor_names.get(
+                    int(r.constructorId)) if hasattr(r, "constructorId") else None,
+                predicted_rank=int(r.predicted_rank),
+                win_probability=float(r.win_probability),
+                win_probability_raw=float(r.win_probability_raw),
+            )
+            for r in scored.itertuples()
+        ]
+
+    def _actual_winner(rows: pd.DataFrame) -> int | None:
+        if "winner" in rows.columns and rows["winner"].notna().all():
+            winners = rows.loc[rows["winner"] == 1, "driverId"]
+            return int(winners.iloc[0]) if len(winners) == 1 else None
+        return None
+
     # --- routes ------------------------------------------------------------
 
     @app.get("/health", response_model=HealthResponse)
@@ -284,10 +351,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             rows = _race_rows(race_id)
             scored = predict_race(app.state.model, rows)
 
-            winner_id = None
-            if "winner" in rows.columns and rows["winner"].notna().all():
-                winners = rows.loc[rows["winner"] == 1, "driverId"]
-                winner_id = int(winners.iloc[0]) if len(winners) == 1 else None
+            winner_id = _actual_winner(rows)
             top_pick = int(scored.iloc[0]["driverId"])
 
             response = PredictionResponse(
@@ -297,20 +361,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 round=int(rows["round"].iloc[0]),
                 generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
                 model=_model_schema(),
-                predictions=[
-                    DriverPrediction(
-                        driver_id=int(r.driverId),
-                        driver_name=app.state.driver_names.get(int(r.driverId)),
-                        constructor_id=(int(r.constructorId)
-                                        if hasattr(r, "constructorId") else None),
-                        constructor_name=app.state.constructor_names.get(
-                            int(r.constructorId)) if hasattr(r, "constructorId") else None,
-                        predicted_rank=int(r.predicted_rank),
-                        win_probability=float(r.win_probability),
-                        win_probability_raw=float(r.win_probability_raw),
-                    )
-                    for r in scored.itertuples()
-                ],
+                predictions=_driver_predictions(scored),
                 actual_winner_driver_id=winner_id,
                 model_top1_hit=(winner_id == top_pick) if winner_id is not None else None,
             )
@@ -328,6 +379,92 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             len(response.predictions), cache_hit, latency_ms,
         )
         return response
+
+    @app.get("/predictions/{race_id}/simulate/{driver_id}",
+             response_model=SimulateGridResponse)
+    def simulate_grid(race_id: int, driver_id: int,
+                      grid_position: int | None = None, pit_lane: bool = False):
+        """Phase 3 Item 1 — Prediction Simulator (grid/qualifying group only).
+
+        Re-scores ONE driver's row with `grid_adjusted`/`grid_position_norm`/
+        `pit_lane_start` overridden (see ADJUSTABLE_GRID_FEATURES); every
+        other feature — including the rest of the qualifying group and all
+        21 historical/standings aggregates — is held at the driver's real
+        value for this race. Rescoring the whole field (not just the one
+        row) means the returned `field` reflects the real, sum-normalization
+        redistribution: the target driver's `win_probability_raw` is the
+        only one that changes, but every driver's normalized `win_probability`
+        shifts a little to keep the race summing to 1 — that redistribution
+        IS the "other drivers' context" the simulator provides, at the cost
+        of one extra predict_proba call already this cheap for a single race.
+        """
+        _require_ready()
+        rows = _race_rows(race_id)
+        if driver_id not in set(rows["driverId"]):
+            raise HTTPException(
+                404, detail=f"driverId {driver_id} not in race {race_id}.")
+        if not pit_lane and grid_position is None:
+            raise HTTPException(
+                422, detail="Provide grid_position (1..field size) or set pit_lane=true.")
+
+        field_size = len(rows)
+        if not pit_lane and not (1 <= grid_position <= field_size):
+            raise HTTPException(
+                422,
+                detail=f"grid_position must be between 1 and {field_size} for "
+                       f"this race ({field_size} entries) — or set pit_lane=true.",
+            )
+
+        real_row = rows.loc[rows["driverId"] == driver_id].iloc[0]
+        mask = rows["driverId"] == driver_id
+        modified = rows.copy()
+        # Normalize to float64 up front — ColumnGuard casts the whole design
+        # matrix to float64 at score time anyway (registry.py), so this loses
+        # nothing, and it avoids a pandas dtype-mismatch warning when writing
+        # a Python bool into what may be a bool- or float-dtyped column
+        # depending on the source frame.
+        for col in ADJUSTABLE_GRID_FEATURES:
+            modified[col] = modified[col].astype(float)
+        if pit_lane:
+            modified.loc[mask, "pit_lane_start"] = 1.0
+            modified.loc[mask, "grid_adjusted"] = float(field_size + 1)
+            modified.loc[mask, "grid_position_norm"] = 1.0
+            sim_grid = float(field_size + 1)
+        else:
+            modified.loc[mask, "pit_lane_start"] = 0.0
+            modified.loc[mask, "grid_adjusted"] = float(grid_position)
+            modified.loc[mask, "grid_position_norm"] = float(grid_position) / field_size
+            sim_grid = float(grid_position)
+
+        real_scored = predict_race(app.state.model, rows)
+        sim_scored = predict_race(app.state.model, modified)
+        real_prob = float(
+            real_scored.loc[real_scored["driverId"] == driver_id, "win_probability"].iloc[0])
+        sim_prob = float(
+            sim_scored.loc[sim_scored["driverId"] == driver_id, "win_probability"].iloc[0])
+
+        schema = training_schema(app.state.model)["feature_names"]
+        qualifying_in_schema = [f for f in QUALIFYING_FEATURES if f in schema]
+        locked_qualifying = [f for f in qualifying_in_schema
+                             if f not in ADJUSTABLE_GRID_FEATURES]
+        locked_other = [f for f in schema if f not in qualifying_in_schema]
+
+        real_grid = real_row.get("grid_adjusted")
+        return SimulateGridResponse(
+            race_id=race_id,
+            driver_id=driver_id,
+            driver_name=app.state.driver_names.get(driver_id),
+            field_size=field_size,
+            real_grid_position=(float(real_grid) if pd.notna(real_grid) else None),
+            simulated_grid_position=sim_grid,
+            pit_lane_start=bool(pit_lane),
+            real_win_probability=real_prob,
+            simulated_win_probability=sim_prob,
+            field=_driver_predictions(sim_scored),
+            locked_qualifying_features=locked_qualifying,
+            locked_features=locked_other,
+            model=_model_schema(),
+        )
 
     @app.get("/debug/features/{race_id}", response_model=FeatureDebugResponse)
     def debug_features(race_id: int):
