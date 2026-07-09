@@ -349,10 +349,63 @@ def render() -> None:
             hide_index=True, width="stretch", column_config=column_config,
         )
 
+    _qualifying_impact_section(race["race_id"], winner_id)
     _grid_simulator_section(race["race_id"], preds, grid_by)
 
     st.caption(f"prediction_id: `{body['prediction_id']}` · generated "
                f"{body['generated_at']} · model v{body['model']['version']}")
+
+
+def _qualifying_impact_section(race_id: int, winner_id: int | None) -> None:
+    """Phase 3 Item 2 — how much of the model's pick is 'just pole position'
+    vs. the rest of the model (form/circuit history/standings). Grounded
+    entirely in real, already-registered artifacts: the calibrated model and
+    MODEL_ZOO['pole_baseline'] (design Section 9.1's grid-only heuristic) —
+    no fabricated FP1-FP3 progression, per the Phase 3 investigation."""
+    st.divider()
+    st.subheader("🧮 Qualifying Impact: model vs. pole-only baseline")
+    st.caption(
+        "Left: the full model (recent form + circuit history + championship "
+        "standings + qualifying). Right: a heuristic that knows nothing but "
+        "who's on pole — the bar every trained model has to beat. Comparing "
+        "them shows how much of the model's pick is really just qualifying."
+    )
+    vs_body = api_get_or_stop(f"/predictions/{race_id}/vs-baseline")
+
+    model_field = vs_body["model_predictions"]
+    baseline_field = vs_body["baseline_predictions"]
+    model_frame = pd.DataFrame(model_field)
+    model_frame["label"] = [driver_label(p) for p in model_field]
+    baseline_frame = pd.DataFrame(baseline_field)
+    baseline_frame["label"] = [driver_label(p) for p in baseline_field]
+
+    col_model, col_base = st.columns(2)
+    with col_model:
+        st.markdown("**Full model**")
+        win_share_bar(model_frame.sort_values("predicted_rank").head(8),
+                     winner_id=winner_id, height=320)
+    with col_base:
+        st.markdown("**Pole-only baseline**")
+        win_share_bar(baseline_frame.sort_values("predicted_rank").head(8),
+                     winner_id=winner_id, height=320)
+        st.caption("100% for the pole sitter, 0% for everyone else — that's "
+                   "the whole rule.")
+
+    agree = model_field[0]["driver_id"] == baseline_field[0]["driver_id"]
+    if agree:
+        st.caption("✅ Same top pick as the pole-only baseline this race — "
+                   f"no extra edge from form/history/standings at the very "
+                   f"top here. {ERA_CAVEAT_SHORT}")
+    else:
+        st.caption(
+            f"🔀 The full model backs **{driver_label(model_field[0])}** "
+            f"over the pole-only pick **{driver_label(baseline_field[0])}** "
+            "— form, circuit history, or standings are doing real work here."
+        )
+    if vs_body["actual_winner_driver_id"] is not None:
+        model_mark = "✅ hit" if vs_body["model_top1_hit"] else "❌ missed"
+        baseline_mark = "✅ hit" if vs_body["baseline_top1_hit"] else "❌ missed"
+        st.caption(f"Result: model {model_mark} · pole-only baseline {baseline_mark}")
 
 
 def _grid_simulator_section(race_id: int, preds: list[dict],

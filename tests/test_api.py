@@ -306,6 +306,41 @@ def test_simulate_grid_forward_holdout_409(client):
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 Item 2 — Qualifying Impact (/predictions/{race_id}/vs-baseline)
+# ---------------------------------------------------------------------------
+
+def test_vs_baseline_picks_the_pole_sitter(client, serving_stack):
+    _, frame = serving_stack
+    body = client.get(f"/predictions/{IN_WINDOW_RACE}/vs-baseline").json()
+    race_rows = frame[frame["raceId"] == IN_WINDOW_RACE]
+    pole_driver = int(
+        race_rows.loc[race_rows["grid_adjusted"] == 1, "driverId"].iloc[0])
+    assert body["baseline_name"] == "pole_baseline"
+    assert "pole" in body["baseline_description"].lower()
+    assert body["baseline_predictions"][0]["driver_id"] == pole_driver
+    assert body["baseline_predictions"][0]["predicted_rank"] == 1
+
+
+def test_vs_baseline_model_predictions_match_plain_endpoint(client):
+    plain = client.get(f"/predictions/{IN_WINDOW_RACE}").json()
+    vs = client.get(f"/predictions/{IN_WINDOW_RACE}/vs-baseline").json()
+    plain_probs = {p["driver_id"]: p["win_probability"] for p in plain["predictions"]}
+    vs_probs = {p["driver_id"]: p["win_probability"] for p in vs["model_predictions"]}
+    assert plain_probs == pytest.approx(vs_probs)
+    assert vs["model_top1_hit"] == plain["model_top1_hit"]
+    assert vs["actual_winner_driver_id"] == plain["actual_winner_driver_id"]
+
+
+def test_vs_baseline_unknown_race_404(client):
+    assert client.get("/predictions/999999/vs-baseline").status_code == 404
+
+
+def test_vs_baseline_forward_holdout_409(client):
+    resp = client.get(f"/predictions/{HOLDOUT_RACE}/vs-baseline")
+    assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # Reserved POST /predict (design §5 amendment)
 # ---------------------------------------------------------------------------
 

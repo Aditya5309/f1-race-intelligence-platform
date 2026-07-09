@@ -35,6 +35,10 @@ Endpoints (design §5):
                                               ADJUSTABLE_GRID_FEATURES below for why
                                               only 3 of the 10 qualifying-group
                                               features actually move.
+    GET  /predictions/{race_id}/vs-baseline   Phase 3 Item 2 (Qualifying Impact):
+                                              the calibrated model's predictions next
+                                              to MODEL_ZOO["pole_baseline"]'s (grid-
+                                              only heuristic) for the same race.
     GET  /debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
                                     the exact feature vectors fed to the model
     POST /predict                   RESERVED for Phase 8 upcoming-race scoring;
@@ -42,7 +46,9 @@ Endpoints (design §5):
 
 Degraded-start policy (§7): if the model or features cannot be loaded, the
 app still starts and reports the failure via 503s — starting-and-reporting
-beats crash-looping under a scheduler.
+beats crash-looping under a scheduler. The pole-baseline model (used only by
+/predictions/{race_id}/vs-baseline) degrades independently of the main
+model — a failure there doesn't take down the rest of the API.
 """
 
 from __future__ import annotations
@@ -61,9 +67,10 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import Settings
+from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.features.qualifying import QUALIFYING_FEATURES
 from src.models.predict import load_model, predict_race
-from src.models.registry import training_schema
+from src.models.registry import MODEL_ZOO, get_model, training_schema
 
 logger = logging.getLogger("f1.api")
 
@@ -157,6 +164,22 @@ class FeatureDebugResponse(BaseModel):
     rows: list[FeatureDebugRow]
 
 
+class BaselineComparisonResponse(BaseModel):
+    """Phase 3 Item 2 — the calibrated model vs. the grid-only heuristic
+    baseline (MODEL_ZOO["pole_baseline"]) for the same race and driver set."""
+    race_id: int
+    year: int
+    round: int
+    model: ModelInfoSchema
+    baseline_name: str
+    baseline_description: str
+    model_predictions: list[DriverPrediction]
+    baseline_predictions: list[DriverPrediction]
+    actual_winner_driver_id: int | None = None
+    model_top1_hit: bool | None = None
+    baseline_top1_hit: bool | None = None
+
+
 class SimulateGridResponse(BaseModel):
     """Phase 3 Item 1 — one driver's win share re-scored under an overridden
     grid/qualifying position, everything else held at real values."""
@@ -213,6 +236,8 @@ async def _lifespan(app: FastAPI):
     app.state.load_error = None
     app.state.prediction_cache = OrderedDict()   # (model_version, race_id) -> resp
     app.state.driver_names, app.state.constructor_names = {}, {}
+    app.state.baseline_model = None
+    app.state.baseline_load_error = None
 
     try:
         model, info = load_model(settings.serving_bundle_path)
@@ -226,6 +251,23 @@ async def _lifespan(app: FastAPI):
             "serving model=%s v%s alias=%s calibration=%s | %d feature rows",
             info.name, info.version, info.alias, info.calibration, len(features),
         )
+
+        # Phase 3 Item 2 (vs-baseline): MODEL_ZOO["pole_baseline"] fit once at
+        # startup against the full frozen feature snapshot. "Fit" is a no-op
+        # here — PoleSitterBaseline.fit() only records classes_=[0,1] and
+        # never looks at X or y (the rule is the fixed "grid_adjusted==1"
+        # heuristic) — so this isn't training on serving data, just wiring
+        # the ColumnGuard so predict_race() can validate/score it exactly
+        # like the real model. Wrapped in its own try/except so a failure
+        # here degrades only /vs-baseline, not the whole API.
+        try:
+            baseline = get_model("pole_baseline", features[TARGET_COLUMN])
+            baseline.fit(features.loc[:, list(FEATURE_COLUMNS)], features[TARGET_COLUMN])
+            app.state.baseline_model = baseline
+        except Exception as exc:                                # noqa: BLE001
+            app.state.baseline_load_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("pole-baseline model unavailable — /vs-baseline "
+                           "will 503: %s", app.state.baseline_load_error)
     except Exception as exc:                                    # noqa: BLE001
         # Degraded start (design §7): report via /health + 503s.
         app.state.load_error = f"{type(exc).__name__}: {exc}"
@@ -275,8 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def _driver_predictions(scored: pd.DataFrame) -> list[DriverPrediction]:
         """predict_race() output -> DriverPrediction list, with display-name
-        enrichment. Shared by /predictions and /simulate so the two routes
-        can never drift in how a scored frame is rendered."""
+        enrichment. Shared by /predictions, /simulate, and /vs-baseline so
+        the three routes can never drift in how a scored frame is rendered."""
         return [
             DriverPrediction(
                 driver_id=int(r.driverId),
@@ -464,6 +506,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             locked_qualifying_features=locked_qualifying,
             locked_features=locked_other,
             model=_model_schema(),
+        )
+
+    @app.get("/predictions/{race_id}/vs-baseline",
+             response_model=BaselineComparisonResponse)
+    def predictions_vs_baseline(race_id: int):
+        """Phase 3 Item 2 — Qualifying Impact: the calibrated model next to
+        MODEL_ZOO["pole_baseline"] (P(win)=1 iff grid_adjusted==1) for the
+        same race and driver set — "here's what qualifying position alone
+        predicts vs. what the full model predicts," grounded entirely in
+        artifacts that already exist (no fabricated FP1-FP3 narrative)."""
+        _require_ready()
+        if app.state.baseline_model is None:
+            raise HTTPException(
+                503,
+                detail="Baseline model not available: "
+                       f"{app.state.baseline_load_error or 'not loaded'}",
+            )
+        rows = _race_rows(race_id)
+        model_scored = predict_race(app.state.model, rows)
+        baseline_scored = predict_race(app.state.baseline_model, rows)
+
+        winner_id = _actual_winner(rows)
+        model_top1 = int(model_scored.iloc[0]["driverId"])
+        baseline_top1 = int(baseline_scored.iloc[0]["driverId"])
+        spec = MODEL_ZOO["pole_baseline"]
+
+        return BaselineComparisonResponse(
+            race_id=race_id,
+            year=int(rows["year"].iloc[0]),
+            round=int(rows["round"].iloc[0]),
+            model=_model_schema(),
+            baseline_name=spec.name,
+            baseline_description=spec.description,
+            model_predictions=_driver_predictions(model_scored),
+            baseline_predictions=_driver_predictions(baseline_scored),
+            actual_winner_driver_id=winner_id,
+            model_top1_hit=(winner_id == model_top1) if winner_id is not None else None,
+            baseline_top1_hit=(winner_id == baseline_top1) if winner_id is not None else None,
         )
 
     @app.get("/debug/features/{race_id}", response_model=FeatureDebugResponse)
