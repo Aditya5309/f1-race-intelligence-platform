@@ -23,6 +23,8 @@ fallback string, and the pages render without metadata rather than crash.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import streamlit as st
 
@@ -200,6 +202,25 @@ def _parse_laptime(value: str) -> float | None:
     try:
         return int(minutes) * 60 + float(seconds)
     except ValueError:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def circuit_layout(circuit_id: int) -> dict | None:
+    """
+    Track-outline geometry for one circuit, from the OpenStreetMap backfill
+    (scripts/backfill_circuit_layouts.py, Phase 4 Tranche A) — a GeoJSON
+    Feature with a LineString geometry (`coordinates`: [[lon, lat], ...])
+    and an `attribution` property. None when the file is absent (most
+    circuits: OSM data didn't cleanly assemble, or this circuit isn't one
+    of the 35 backfilled) — same degrade-gracefully discipline as every
+    other loader here.
+    """
+    path = _settings.data_dir / "circuit_layouts" / f"{circuit_id}.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
         return None
 
 

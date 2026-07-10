@@ -10,11 +10,17 @@ use_container_width=True).
 
 from __future__ import annotations
 
+from math import cos, radians
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from app.views.components import OTHER_COLOR, WINNER_COLOR, constructor_color
+
+#: Meters per degree of latitude (~constant); longitude is scaled by
+#: cos(latitude) at plot time so the track outline isn't stretched.
+_METERS_PER_DEGREE = 111_320
 
 
 def win_share_bar(frame: pd.DataFrame, winner_id: int | None = None,
@@ -96,6 +102,38 @@ def standings_bar(frame: pd.DataFrame, name_col: str, value_col: str,
     fig.update_layout(
         height=height, showlegend=False, xaxis_title=value_col.capitalize(),
         margin=dict(l=10, r=48, t=10, b=10),
+    )
+    st.plotly_chart(fig, width="stretch")
+
+
+def circuit_layout_map(layout: dict, height: int = 320) -> None:
+    """
+    Track outline from OpenStreetMap (scripts/backfill_circuit_layouts.py,
+    Phase 4 Tranche A). `layout` is the GeoJSON Feature dict returned by
+    app.views.metadata.circuit_layout() — a LineString of [lon, lat] pairs.
+
+    Coordinates are projected to a local equirectangular meter grid (lon
+    scaled by cos(latitude)) before plotting, then locked to an equal x/y
+    scale, so the shape isn't stretched — an uncorrected lat/lon plot would
+    distort every circuit except ones exactly on the equator.
+    """
+    coordinates = layout["geometry"]["coordinates"]
+    lons = [c[0] for c in coordinates]
+    lats = [c[1] for c in coordinates]
+    mean_lat_rad = radians(sum(lats) / len(lats))
+    x_m = [lon * _METERS_PER_DEGREE * cos(mean_lat_rad) for lon in lons]
+    y_m = [lat * _METERS_PER_DEGREE for lat in lats]
+
+    fig = go.Figure(go.Scatter(
+        x=x_m, y=y_m, mode="lines",
+        line=dict(color=OTHER_COLOR, width=3),
+        hoverinfo="skip",
+    ))
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
+    fig.update_layout(
+        height=height, showlegend=False, margin=dict(l=10, r=10, t=10, b=10),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
     )
     st.plotly_chart(fig, width="stretch")
 
