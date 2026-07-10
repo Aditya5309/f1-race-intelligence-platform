@@ -58,6 +58,7 @@ STABLE_FEATURES: tuple[str, ...] = (
     "pit_lane_start",
     "grid_adjusted",
     "grid_position_norm",
+    "grid_penalty_applied",
     "driver_experience_races",
     "driver_avg_finish_last_5",
     "driver_dnf_rate_last_5",

@@ -261,6 +261,7 @@ def test_simulate_grid_locked_feature_lists(client):
     assert set(body["locked_qualifying_features"]) == {
         "qualifying_position", "q1_sec", "q2_sec", "q3_sec",
         "reached_q2", "reached_q3", "qualifying_gap_to_pole_pct",
+        "grid_penalty_applied",
     }
     # All 21 historical/standings aggregates are locked.
     assert len(body["locked_features"]) == 21

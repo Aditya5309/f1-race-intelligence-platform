@@ -298,8 +298,10 @@ def test_classification_partitions_feature_columns():
     assert all_classified == set(FEATURE_COLUMNS)
     assert len(STABLE_FEATURES) + len(ERA_SENSITIVE_FEATURES) + len(EXPERIMENTAL_FEATURES) \
         == len(FEATURE_COLUMNS)
+    # Decision 013 counts (12, 12, 7) + Phase 4 Tranche A: grid_penalty_applied,
+    # classified stable.
     assert (len(STABLE_FEATURES), len(ERA_SENSITIVE_FEATURES), len(EXPERIMENTAL_FEATURES)) \
-        == (12, 12, 7)   # Decision 013 counts
+        == (13, 12, 7)
 
 
 def test_classification_dict_consistent_with_tuples():

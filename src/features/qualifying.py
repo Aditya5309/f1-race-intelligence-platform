@@ -35,7 +35,15 @@ QUALIFYING_FEATURES: tuple[str, ...] = (
     "reached_q2", "reached_q3",
     "qualifying_gap_to_pole_pct",
     "pit_lane_start", "grid_adjusted", "grid_position_norm",
+    "grid_penalty_applied",
 )
+
+# Smallest standard FIA grid-penalty tier (e.g. an unscheduled gearbox
+# change) is a 3-place drop; 1-2 place effects are dominated by ordinary
+# qualifying-to-grid noise (another driver's own penalty reshuffling the
+# grid), so 3+ isolates genuine penalty events rather than incidental
+# reshuffling.
+GRID_PENALTY_THRESHOLD = 3
 
 # Ergast qualifying times are "M:SS.sss" strings; a bare "SS.sss" (no minutes)
 # is accepted defensively. Anything else parses to NaN rather than raising —
@@ -88,5 +96,9 @@ def add_qualifying_features(df: pd.DataFrame) -> pd.DataFrame:
     adjusted = grid.mask(pit_lane, field_size + 1)
     out["grid_adjusted"] = adjusted
     out["grid_position_norm"] = adjusted / field_size
+
+    quali_pos = out["qualifying_position"].astype("Float64")
+    penalty = (adjusted - quali_pos) > GRID_PENALTY_THRESHOLD
+    out["grid_penalty_applied"] = penalty.fillna(False).astype(bool)
 
     return out
