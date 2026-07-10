@@ -59,7 +59,7 @@ from sklearn.model_selection import ParameterSampler
 from sklearn.pipeline import Pipeline
 
 from src.features.metadata import FEATURE_CLASSIFICATION
-from src.features.pipeline import FEATURES_PATH
+from src.features.pipeline import FEATURES_PATH, MASTER_DATASET_PATH
 from src.models.evaluate import (
     calibration_table,
     evaluate_all,
@@ -98,6 +98,25 @@ def data_fingerprint(path: Path = FEATURES_PATH) -> str:
     return f"{n_rows}rows-{digest}"
 
 
+def load_position_order(master_path: Path = MASTER_DATASET_PATH) -> pd.Series:
+    """
+    `positionOrder` indexed by (raceId, driverId), for the Spearman metric
+    (evaluate.spearman_rank_correlation). This is an EVALUATION-TIME join
+    from master_dataset.parquet, never a model feature — positionOrder stays
+    excluded from FEATURE_COLUMNS via POST_RACE_OUTCOME_COLUMNS regardless.
+    """
+    master = pd.read_parquet(master_path, columns=["raceId", "driverId", "positionOrder"])
+    return master.set_index(["raceId", "driverId"])["positionOrder"]
+
+
+def _align_position_order(df: pd.DataFrame, position_order: pd.Series | None) -> np.ndarray | None:
+    """Reindex `position_order` to df's (raceId, driverId) row order."""
+    if position_order is None:
+        return None
+    index = pd.MultiIndex.from_frame(df[["raceId", "driverId"]])
+    return position_order.reindex(index).to_numpy(dtype=float)
+
+
 def check_tripwire(metrics: dict[str, float], context: str) -> None:
     """Design Section 11.6 — top-1 above 70% is a leakage alarm, not a win."""
     top1 = metrics.get("top1_accuracy", 0.0)
@@ -113,13 +132,20 @@ def check_tripwire(metrics: dict[str, float], context: str) -> None:
 
 def _fit_and_score(
     pipeline: Pipeline, train_df: pd.DataFrame, eval_df: pd.DataFrame,
+    position_order: pd.Series | None = None,
 ) -> tuple[Pipeline, dict[str, float], np.ndarray]:
-    """Fit on train_df, evaluate on eval_df; returns (pipeline, metrics, probs)."""
+    """Fit on train_df, evaluate on eval_df; returns (pipeline, metrics, probs).
+
+    `position_order` (see load_position_order), if given, is aligned to
+    eval_df's row order and threaded into evaluate_all for the Spearman
+    metric.
+    """
     X_tr, y_tr, _ = to_xy(train_df)
     X_ev, y_ev, races_ev = to_xy(eval_df)
     pipeline.fit(X_tr, y_tr)
     y_prob = pipeline.predict_proba(X_ev)[:, 1]
-    return pipeline, evaluate_all(y_ev, y_prob, races_ev), y_prob
+    po = _align_position_order(eval_df, position_order)
+    return pipeline, evaluate_all(y_ev, y_prob, races_ev, position_order=po), y_prob
 
 
 def run_cv(
@@ -191,14 +217,19 @@ def feature_importance_frame(pipeline: Pipeline) -> pd.DataFrame | None:
 
 def _log_evaluation_artifacts(
     pipeline: Pipeline, y_true, y_prob, race_ids, years, prefix: str,
+    position_order=None,
 ) -> None:
-    """Per-season CSV, per-race CSV, calibration table + plot, importances."""
+    """Per-season CSV, per-race CSV, calibration table + plot, importances.
+
+    `position_order`, if given, adds the Spearman metric/column to both CSVs
+    (see evaluate.evaluate_by_season / per_race_table).
+    """
     mlflow.log_text(
-        evaluate_by_season(y_true, y_prob, race_ids, years).to_csv(),
+        evaluate_by_season(y_true, y_prob, race_ids, years, position_order=position_order).to_csv(),
         f"{prefix}/metrics_by_season.csv",
     )
     mlflow.log_text(
-        per_race_table(y_true, y_prob, race_ids).to_csv(index=False),
+        per_race_table(y_true, y_prob, race_ids, position_order=position_order).to_csv(index=False),
         f"{prefix}/per_race_metrics.csv",
     )
 
@@ -254,12 +285,18 @@ def train_candidate(
     n_folds: int = DEFAULT_N_FOLDS,
     params: dict | None = None,
     stage: str = "default",
+    position_order: pd.Series | None = None,
 ) -> dict[str, float]:
     """
     CV on the training split -> refit on the full training split -> score
     validation. Logs one MLflow parent run with per-fold child runs. Never
     sees test data (Section 11.3 — the signature makes it impossible).
     Returns the logged metrics (cv_* aggregates + val_*).
+
+    `position_order` (see load_position_order), if given, adds val_* Spearman
+    reporting only — CV fold metrics (run_cv) deliberately do not thread it
+    through, to keep this addition contained to the val/test reporting the
+    metric was asked for.
     """
     with mlflow.start_run(run_name=f"{name}-{stage}"):
         _log_common(name, fingerprint, stage)
@@ -280,7 +317,9 @@ def train_candidate(
         pipeline = get_model(name, y_tr)
         if params:
             pipeline.set_params(**params)
-        pipeline, val_metrics, y_prob = _fit_and_score(pipeline, train_df, val_df)
+        pipeline, val_metrics, y_prob = _fit_and_score(
+            pipeline, train_df, val_df, position_order=position_order
+        )
         val_named = {f"val_{k}": v for k, v in val_metrics.items()}
 
         mlflow.log_metrics({**cv_agg, **val_named})
@@ -289,7 +328,8 @@ def train_candidate(
 
         _, y_val, races_val = to_xy(val_df)
         _log_evaluation_artifacts(
-            pipeline, y_val, y_prob, races_val, val_df["year"], prefix="val"
+            pipeline, y_val, y_prob, races_val, val_df["year"], prefix="val",
+            position_order=_align_position_order(val_df, position_order),
         )
 
         check_tripwire(val_metrics, context=f"{name} validation")
@@ -366,6 +406,7 @@ def final_test(
     split: TemporalSplit,
     fingerprint: str = "unfingerprinted",
     params: dict | None = None,
+    position_order: pd.Series | None = None,
 ) -> dict[str, float]:
     """
     THE one-time 2024 evaluation (design Sections 4 and 11.3). Fits the
@@ -373,6 +414,9 @@ def final_test(
     and scores the test split once. Tags the run final=true. Callable only
     from the --final-test CLI path — nothing else in this module touches
     split.test.
+
+    `position_order` (see load_position_order), if given, adds test_*
+    Spearman reporting.
     """
     with mlflow.start_run(run_name=f"{name}-FINAL-TEST"):
         _log_common(name, fingerprint, stage="final-test")
@@ -384,13 +428,16 @@ def final_test(
         pipeline = get_model(name, y_tr)
         if params:
             pipeline.set_params(**params)
-        pipeline, test_metrics, y_prob = _fit_and_score(pipeline, split.train, split.test)
+        pipeline, test_metrics, y_prob = _fit_and_score(
+            pipeline, split.train, split.test, position_order=position_order
+        )
         mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items()})
         mlflow.log_dict(training_schema(pipeline), "training_schema.json")
 
         _, y_te, races_te = to_xy(split.test)
         _log_evaluation_artifacts(
-            pipeline, y_te, y_prob, races_te, split.test["year"], prefix="test"
+            pipeline, y_te, y_prob, races_te, split.test["year"], prefix="test",
+            position_order=_align_position_order(split.test, position_order),
         )
         check_tripwire(test_metrics, context=f"{name} FINAL TEST")
         return {f"test_{k}": v for k, v in test_metrics.items()}
@@ -572,8 +619,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Data: {fingerprint} | train {len(split.train)} / val {len(split.val)} "
           f"/ test {len(split.test)} rows")
 
+    # positionOrder for the Spearman metric — an evaluation-time join from
+    # master_dataset.parquet, not a feature. Optional: data/ is gitignored
+    # (Decision 016) and legitimately absent in some environments (fresh
+    # clones, CI), so degrade to no Spearman reporting rather than error.
+    position_order = (
+        load_position_order() if MASTER_DATASET_PATH.exists() else None
+    )
+    if position_order is None:
+        print(f"NOTE: {MASTER_DATASET_PATH} not found — Spearman metric skipped.")
+
     if args.final_test:
-        metrics = final_test(args.model, split, fingerprint, params=params)
+        metrics = final_test(args.model, split, fingerprint, params=params,
+                             position_order=position_order)
         print(f"FINAL TEST {args.model}: " + ", ".join(
             f"{k}={v:.4f}" for k, v in sorted(metrics.items()) if k != "test_n_rows"))
         return 0
@@ -619,14 +677,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  --params '{json.dumps(reusable)}'")
         # Score the tuned finalist on validation via the standard path.
         train_candidate(args.model, split.train, split.val, fingerprint,
-                        n_folds=args.n_folds, params=best_params, stage="finalist")
+                        n_folds=args.n_folds, params=best_params, stage="finalist",
+                        position_order=position_order)
         return 0
 
     names = sorted(MODEL_ZOO) if args.model == "all" else [args.model]
     summary = {}
     for name in names:
         metrics = train_candidate(name, split.train, split.val, fingerprint,
-                                  n_folds=args.n_folds, params=params)
+                                  n_folds=args.n_folds, params=params,
+                                  position_order=position_order)
         summary[name] = metrics
         print(f"{name:<15} cv_top1={metrics['cv_top1_accuracy_mean']:.4f} "
               f"val_top1={metrics['val_top1_accuracy']:.4f} "

@@ -25,6 +25,7 @@ from src.models.evaluate import (
     expected_calibration_error,
     log_loss_score,
     per_race_table,
+    spearman_rank_correlation,
     top1_accuracy,
     top3_recall,
     winner_mrr,
@@ -216,6 +217,81 @@ def test_evaluate_by_season_rejects_race_spanning_years():
 def test_evaluate_by_season_length_mismatch_raises():
     with pytest.raises(ValueError, match="Length mismatch"):
         evaluate_by_season([1, 0], [0.9, 0.1], [1, 1], [2020])
+
+
+# ---------------------------------------------------------------------------
+# Spearman rank correlation (Phase 4 Tranche A item 3): predicted probability
+# ranking vs. actual full-field positionOrder, per race then averaged.
+#   Race 1: position_order = [1,2,3,4] exactly matches the prob-descending
+#            ranking -> spearman = +1.0
+#   Race 2: position_order = [2,1,3,4] (top two swapped) -> spearman = +0.8
+#            (hand: d = [-1,1,0,0], rho = 1 - 6*2/(4*15) = 0.8)
+#   Race 3: position_order = [4,3,2,1] (fully inverted) -> spearman = -1.0
+#   Mean = (1.0 + 0.8 - 1.0) / 3
+# ---------------------------------------------------------------------------
+
+def _three_races_position_order():
+    return [1, 2, 3, 4, 2, 1, 3, 4, 4, 3, 2, 1]
+
+
+def test_spearman_hand_computed_per_race():
+    y_true, y_prob, race_ids = _three_races()
+    position_order = _three_races_position_order()
+    table = per_race_table(y_true, y_prob, race_ids, position_order=position_order)
+    table = table.set_index("race_id")
+    assert table.loc[1, "spearman_corr"] == pytest.approx(1.0)
+    assert table.loc[2, "spearman_corr"] == pytest.approx(0.8)
+    assert table.loc[3, "spearman_corr"] == pytest.approx(-1.0)
+
+
+def test_spearman_rank_correlation_aggregate():
+    y_true, y_prob, race_ids = _three_races()
+    position_order = _three_races_position_order()
+    corr = spearman_rank_correlation(y_true, y_prob, race_ids, position_order)
+    assert corr == pytest.approx((1.0 + 0.8 - 1.0) / 3)
+
+
+def test_spearman_degenerate_race_excluded_as_nan():
+    # A race where every driver has the same positionOrder (degenerate field)
+    # gets NaN, and is excluded from the aggregate mean rather than poisoning it.
+    y_true = [1, 0, 1, 0]
+    y_prob = [0.9, 0.1, 0.6, 0.4]
+    race_ids = [1, 1, 2, 2]
+    position_order = [1, 2, 5, 5]
+    table = per_race_table(y_true, y_prob, race_ids, position_order=position_order)
+    table = table.set_index("race_id")
+    assert table.loc[1, "spearman_corr"] == pytest.approx(1.0)
+    assert np.isnan(table.loc[2, "spearman_corr"])
+    corr = spearman_rank_correlation(y_true, y_prob, race_ids, position_order)
+    assert corr == pytest.approx(1.0)
+
+
+def test_per_race_table_without_position_order_has_no_spearman_column():
+    y_true, y_prob, race_ids = _three_races()
+    table = per_race_table(y_true, y_prob, race_ids)
+    assert "spearman_corr" not in table.columns
+
+
+def test_evaluate_all_position_order_optional():
+    y_true, y_prob, race_ids = _three_races()
+    position_order = _three_races_position_order()
+
+    without = evaluate_all(y_true, y_prob, race_ids)
+    assert "spearman_corr" not in without
+
+    with_po = evaluate_all(y_true, y_prob, race_ids, position_order=position_order)
+    assert with_po["spearman_corr"] == pytest.approx((1.0 + 0.8 - 1.0) / 3)
+
+
+def test_evaluate_by_season_threads_position_order():
+    y_true = [1, 0, 0, 1]
+    y_prob = [0.9, 0.1, 0.8, 0.2]
+    race_ids = [1, 1, 2, 2]
+    years = [2020, 2020, 2021, 2021]
+    position_order = [1, 2, 2, 1]
+    by_season = evaluate_by_season(y_true, y_prob, race_ids, years, position_order=position_order)
+    assert by_season.loc[2020, "spearman_corr"] == pytest.approx(1.0)
+    assert by_season.loc[2021, "spearman_corr"] == pytest.approx(-1.0)
 
 
 # ---------------------------------------------------------------------------
