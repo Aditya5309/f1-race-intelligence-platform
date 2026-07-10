@@ -27,7 +27,12 @@ circuit's (lat, lng), then stitches the returned way segments into a single
 closed outline by matching shared endpoint node IDs (`_stitch_segments`).
 Circuits where the geometry can't be cleanly closed are skipped and
 reported — not every one of the 35 needs to succeed for this to be worth
-running.
+running. A ring that DOES close but comes out implausibly short is also
+skipped (MIN_PLAUSIBLE_PERIMETER_M). A small number of circuits with
+multiple overlapping official layouts are excluded outright
+(KNOWN_AMBIGUOUS_CONFIGURATIONS) because the assembly heuristic has no way
+to tell which configuration it found — those need manual verification, not
+an automated guess.
 
 Paced a few seconds between requests (Overpass usage-policy courtesy; this
 is a one-time 35-circuit run, not a recurring job) with a descriptive
@@ -77,6 +82,26 @@ RETRY_BACKOFF_SECONDS = 10.0
 # offer for them. This floor turns all of the above into honest skips
 # instead of a malformed "successful" outline.
 MIN_PLAUSIBLE_PERIMETER_M = 3200.0
+
+# Circuits where the pipeline DOES assemble a plausible-length closed loop,
+# but manual review couldn't confirm it's the specific Grand Prix
+# configuration rather than a different official layout sharing the same
+# OSM tarmac/tagging (both circuits below have multiple overlapping
+# configurations, and the assembled ring came out longer than the real GP
+# lap — 6.31km vs ~5.41km for Bahrain, 4.70km vs ~4.30km for Rodríguez). The
+# "longest closed cycle" heuristic has no way to tell configurations apart,
+# so rather than ship that ambiguity silently, these are excluded pending
+# manual verification. Revisit only with a specific fix in hand (e.g. a
+# tighter search radius, or manually identifying the GP-specific way IDs) —
+# don't just delete this entry to "make it succeed" again.
+KNOWN_AMBIGUOUS_CONFIGURATIONS: dict[int, str] = {
+    3: "returned geometry likely doesn't match the specific GP "
+       "configuration (Bahrain has 4 overlapping official layouts) — "
+       "needs manual verification before shipping",
+    32: "returned geometry likely doesn't match the specific GP "
+        "configuration (Autódromo Hermanos Rodríguez's stadium section has "
+        "multiple layouts) — needs manual verification before shipping",
+}
 
 QUERY_TEMPLATE = """
 [out:json][timeout:25];
@@ -356,6 +381,10 @@ def backfill_circuit_layouts(
     ) as client:
         for row in circuits.itertuples():
             label = f"{row.circuitId} {row.circuitRef} ({row.name})"
+            if row.circuitId in KNOWN_AMBIGUOUS_CONFIGURATIONS:
+                print(f"SKIP {label}: {KNOWN_AMBIGUOUS_CONFIGURATIONS[row.circuitId]}")
+                skipped.append(row.circuitRef)
+                continue
             if pd.isna(row.lat) or pd.isna(row.lng):
                 print(f"SKIP {label}: no lat/lng in circuits.csv")
                 skipped.append(row.circuitRef)
