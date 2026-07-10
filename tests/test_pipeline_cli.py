@@ -55,7 +55,10 @@ class TestFeaturesPipelineCLI:
             lambda: (pd.DataFrame(), pd.DataFrame()),
         )
         monkeypatch.setattr(
-            pipeline_mod, "build_features", lambda m, ds, cs: features
+            pipeline_mod, "load_race_weather", lambda: pd.DataFrame(),
+        )
+        monkeypatch.setattr(
+            pipeline_mod, "build_features", lambda m, ds, cs, weather: features
         )
         monkeypatch.setattr(
             pipeline_mod, "validate_features",

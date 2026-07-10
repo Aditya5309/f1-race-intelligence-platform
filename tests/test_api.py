@@ -263,8 +263,8 @@ def test_simulate_grid_locked_feature_lists(client):
         "reached_q2", "reached_q3", "qualifying_gap_to_pole_pct",
         "grid_penalty_applied",
     }
-    # All 24 historical/standings/teammate aggregates are locked.
-    assert len(body["locked_features"]) == 24
+    # All 28 historical/standings/teammate/weather aggregates are locked.
+    assert len(body["locked_features"]) == 28
     assert "driver_wins_last_5" in body["locked_features"]
     assert "constructor_standing_position_prev" in body["locked_features"]
 

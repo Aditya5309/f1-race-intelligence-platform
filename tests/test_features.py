@@ -45,6 +45,7 @@ from src.features.pipeline import (
 )
 from src.features.qualifying import add_qualifying_features, parse_qualifying_time
 from src.features.standings import add_standings_features, build_prev_race_map
+from src.features.weather import WEATHER_CSV_PATH, WEATHER_FEATURES, add_weather_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 # ---------------------------------------------------------------------------
@@ -98,6 +99,13 @@ def _season(driver_id=1, year=2020, n_races=4, winner_all=False, **overrides):
     ]
 
 
+def _empty_weather() -> pd.DataFrame:
+    """No weather rows -- add_weather_features left-joins, so every row just
+    gets NaN weather columns. Fine for tests that don't care about weather
+    values, matching how a race missing from race_weather.csv behaves."""
+    return pd.DataFrame(columns=["raceId", *WEATHER_FEATURES])
+
+
 # ---------------------------------------------------------------------------
 # 6.1 — post-race outcome columns are never features
 # ---------------------------------------------------------------------------
@@ -117,7 +125,7 @@ def test_validate_features_rejects_post_race_column():
     master = pd.DataFrame(_season(winner_all=True))
     ds = pd.DataFrame([_driver_standing(1, 1, 25, 1, 1)])
     cs = pd.DataFrame([_constructor_standing(1, 1, 25, 1, 1)])
-    features = build_features(master, ds, cs)
+    features = build_features(master, ds, cs, _empty_weather())
     poisoned = features.assign(position=1)
     result = validate_features(poisoned, expected_row_count=len(master))
     assert not result.passed
@@ -447,6 +455,42 @@ def test_sprint_features_deferred():
 
 
 # ---------------------------------------------------------------------------
+# Weather (Phase 4 Tranche B): per-race left-join, missing raceId -> NaN
+# ---------------------------------------------------------------------------
+
+def test_weather_broadcasts_to_every_driver_in_the_race():
+    master = pd.DataFrame(_two_car_team(1, 1, winner_driver=1))
+    weather = pd.DataFrame([{
+        "raceId": 1, "race_precip_mm": 2.5, "race_temp_c": 18.0,
+        "quali_precip_mm": 0.0, "conditions_changed": True,
+    }])
+    out = add_weather_features(master, weather)
+    assert len(out) == len(master)
+    assert (out["race_precip_mm"] == 2.5).all()
+    assert (out["conditions_changed"] == True).all()  # noqa: E712
+
+
+def test_weather_missing_raceid_is_nan_not_an_error():
+    master = pd.DataFrame(_two_car_team(1, 1, winner_driver=1))
+    out = add_weather_features(master, _empty_weather())
+    assert len(out) == len(master)
+    for col in WEATHER_FEATURES:
+        assert out[col].isna().all()
+
+
+def test_weather_merge_rejects_duplicate_raceid():
+    master = pd.DataFrame(_two_car_team(1, 1, winner_driver=1))
+    dup_weather = pd.DataFrame([
+        {"raceId": 1, "race_precip_mm": 0.0, "race_temp_c": 20.0,
+         "quali_precip_mm": None, "conditions_changed": None},
+        {"raceId": 1, "race_precip_mm": 5.0, "race_temp_c": 15.0,
+         "quali_precip_mm": None, "conditions_changed": None},
+    ])
+    with pytest.raises(Exception, match="many_to_one|Merge keys"):
+        add_weather_features(master, dup_weather)
+
+
+# ---------------------------------------------------------------------------
 # Pipeline composition and validation
 # ---------------------------------------------------------------------------
 
@@ -467,7 +511,7 @@ def _small_universe():
 
 def test_build_features_schema_and_row_count():
     master, ds, cs = _small_universe()
-    features = build_features(master, ds, cs)
+    features = build_features(master, ds, cs, _empty_weather())
     assert list(features.columns) == list(FEATURES_DATASET_COLUMNS)
     assert len(features) == len(master)
     result = validate_features(features, expected_row_count=len(master))
@@ -476,7 +520,7 @@ def test_build_features_schema_and_row_count():
 
 def test_validate_features_catches_duplicates_and_row_count():
     master, ds, cs = _small_universe()
-    features = build_features(master, ds, cs)
+    features = build_features(master, ds, cs, _empty_weather())
 
     duplicated = pd.concat([features, features.iloc[[0]]], ignore_index=True)
     result = validate_features(duplicated, expected_row_count=len(master))
@@ -494,12 +538,18 @@ def test_validate_features_catches_duplicates_and_row_count():
     not MASTER_DATASET_PATH.exists(),
     reason="master_dataset.parquet not built (run src.pipelines.build_dataset)",
 )
+@pytest.mark.skipif(
+    not WEATHER_CSV_PATH.exists(),
+    reason="race_weather.csv not built (run scripts/backfill_weather.py)",
+)
 def test_end_to_end_smoke_real_data():
     from src.features.standings import load_standings
+    from src.features.weather import load_race_weather
 
     master = pd.read_parquet(MASTER_DATASET_PATH)
     ds, cs = load_standings()
-    features = build_features(master, ds, cs)
+    weather = load_race_weather()
+    features = build_features(master, ds, cs, weather)
 
     assert len(features) == len(master)
     assert list(features.columns) == list(FEATURES_DATASET_COLUMNS)

@@ -58,6 +58,7 @@ from src.features.teammate_form import (
     TEAMMATE_FORM_FEATURES,
     add_teammate_form_features,
 )
+from src.features.weather import WEATHER_FEATURES, add_weather_features, load_race_weather
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -80,6 +81,7 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     + TEAMMATE_FORM_FEATURES
     + CIRCUIT_HISTORY_FEATURES
     + STANDINGS_FEATURES
+    + WEATHER_FEATURES
 )
 
 FEATURES_DATASET_COLUMNS: tuple[str, ...] = (
@@ -100,13 +102,14 @@ def build_features(
     master: pd.DataFrame,
     driver_standings: pd.DataFrame,
     constructor_standings: pd.DataFrame,
+    weather: pd.DataFrame,
 ) -> pd.DataFrame:
     """
     Build the feature matrix from the master dataset.
 
     Applies the feature groups in order (qualifying -> driver form ->
     constructor form -> teammate form -> circuit history -> lagged
-    standings), then selects
+    standings -> weather), then selects
     FEATURES_DATASET_COLUMNS. Returns one row per (raceId, driverId), sorted
     chronologically; row count equals the input's.
     """
@@ -118,6 +121,7 @@ def build_features(
     df = add_teammate_form_features(df)
     df = add_circuit_history_features(df)
     df = add_standings_features(df, driver_standings, constructor_standings)
+    df = add_weather_features(df, weather)
 
     if len(df) != expected_rows:
         raise ValueError(
@@ -174,7 +178,8 @@ def validate_features(df: pd.DataFrame, expected_row_count: int) -> ValidationRe
             if n:
                 errors.append(f"Column '{col}' has {n:,} null value(s).")
 
-    for col in ("driver_standing_position_prev", "qualifying_gap_to_pole_pct"):
+    for col in ("driver_standing_position_prev", "qualifying_gap_to_pole_pct",
+                "quali_precip_mm", "conditions_changed"):
         if col in df.columns and len(df):
             null_pct = df[col].isnull().mean() * 100
             if null_pct > 60:
@@ -210,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Loaded master dataset: {len(master):,} rows x {master.shape[1]} cols")
 
     driver_standings, constructor_standings = load_standings()
-    features = build_features(master, driver_standings, constructor_standings)
+    weather = load_race_weather()
+    features = build_features(master, driver_standings, constructor_standings, weather)
     print(f"Built feature matrix: {len(features):,} rows x {features.shape[1]} cols")
 
     result = validate_features(features, expected_row_count=len(master))

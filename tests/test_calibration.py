@@ -44,6 +44,13 @@ from tests.conftest import set_tmp_experiment
 
 def _synthetic_features(years, races_per_year=6, n_drivers=6, seed=0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
+    # Independent stream for the uninformative noise columns: FEATURE_COLUMNS
+    # grows over time (new feature tranches), and drawing its noise from the
+    # SAME rng as the structural grid/pole-win logic below would shift every
+    # subsequent structural draw whenever a feature is added, silently
+    # changing this fixture's win pattern. Keeping them separate means adding
+    # features never perturbs the pole/grid scenario this test is built on.
+    noise_rng = np.random.default_rng(seed + 1_000_000)
     rows = []
     for year in years:
         for rnd in range(1, races_per_year + 1):
@@ -53,7 +60,7 @@ def _synthetic_features(years, races_per_year=6, n_drivers=6, seed=0) -> pd.Data
             pole_wins = rng.random() < 0.7
             winner_grid = 1 if pole_wins else int(rng.integers(2, n_drivers + 1))
             for driver in range(n_drivers):
-                row = {c: float(rng.normal()) for c in FEATURE_COLUMNS}
+                row = {c: float(noise_rng.normal()) for c in FEATURE_COLUMNS}
                 row["grid_adjusted"] = float(grid[driver])
                 row["grid_position_norm"] = float(grid[driver]) / n_drivers
                 row.update({
