@@ -54,7 +54,10 @@ from src.features.standings import (
     add_standings_features,
     load_standings,
 )
-from src.features.teammate_form import TEAMMATE_FORM_FEATURES, add_teammate_form_features
+from src.features.teammate_form import (
+    TEAMMATE_FORM_FEATURES,
+    add_teammate_form_features,
+)
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
