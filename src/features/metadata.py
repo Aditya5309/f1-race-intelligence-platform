@@ -35,6 +35,7 @@ from src.features.qualifying import QUALIFYING_FEATURES
 from src.features.standings import STANDINGS_FEATURES
 from src.features.teammate_form import TEAMMATE_FORM_FEATURES
 from src.features.weather import WEATHER_FEATURES
+from src.features.wet_form import WET_FORM_FEATURES
 
 # ---------------------------------------------------------------------------
 # Grouping by source module (execution order of the feature pipeline).
@@ -48,6 +49,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "circuit_history": CIRCUIT_HISTORY_FEATURES,
     "standings": STANDINGS_FEATURES,
     "weather": WEATHER_FEATURES,
+    "wet_form": WET_FORM_FEATURES,
 }
 
 # ---------------------------------------------------------------------------
@@ -103,6 +105,11 @@ EXPERIMENTAL_FEATURES: tuple[str, ...] = (
     "race_temp_c",
     "quali_precip_mm",
     "conditions_changed",
+    # Same rationale — driver_wet_dry_delta/constructor_wet_dry_delta are
+    # brand-new, never-before-assessed signals derived from the weather
+    # features above; explicit keep-or-drop decision pending too.
+    "driver_wet_dry_delta",
+    "constructor_wet_dry_delta",
 )
 
 FEATURE_CLASSES: tuple[str, ...] = ("stable", "era_sensitive", "experimental")

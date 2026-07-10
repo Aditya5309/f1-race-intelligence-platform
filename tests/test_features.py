@@ -46,6 +46,7 @@ from src.features.pipeline import (
 from src.features.qualifying import add_qualifying_features, parse_qualifying_time
 from src.features.standings import add_standings_features, build_prev_race_map
 from src.features.weather import WEATHER_CSV_PATH, WEATHER_FEATURES, add_weather_features
+from src.features.wet_form import SHRINKAGE_K, add_wet_form_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 # ---------------------------------------------------------------------------
@@ -488,6 +489,121 @@ def test_weather_merge_rejects_duplicate_raceid():
     ])
     with pytest.raises(Exception, match="many_to_one|Merge keys"):
         add_weather_features(master, dup_weather)
+
+
+# ---------------------------------------------------------------------------
+# Wet-condition form (Phase 4 Tranche B item 2): shrunk wet-minus-dry delta
+# ---------------------------------------------------------------------------
+
+def _solo_driver_race(race_id, rnd, driver_id, position_order, precip_mm, year=2020):
+    """One row: driver is their own single-car constructor (id == driverId),
+    so constructor-level wet-form collapses to the single-car case and
+    doesn't complicate verifying the driver-level math."""
+    return _entry(
+        raceId=race_id, round=rnd, year=year, driverId=driver_id,
+        constructorId=driver_id, positionOrder=position_order,
+        race_precip_mm=precip_mm, race_temp_c=20.0,
+        quali_precip_mm=None, conditions_changed=None,
+    )
+
+
+def test_wet_dry_delta_hand_computed():
+    # Driver A: much better in the wet (finish 1) than the dry (finish 10).
+    # Driver B: no difference at all (finish 5 in both). Same 4 races, so
+    # field_wide_delta (pooled across A and B) is checkable independently.
+    rows = []
+    for r, (precip, order_a, order_b) in enumerate(
+        [(1.0, 1, 5), (0.0, 10, 5), (1.0, 1, 5), (0.0, 10, 5)], start=1
+    ):
+        rows.append(_solo_driver_race(r, r, driver_id=1, position_order=order_a, precip_mm=precip))
+        rows.append(_solo_driver_race(r, r, driver_id=2, position_order=order_b, precip_mm=precip))
+    out = add_wet_form_features(pd.DataFrame(rows)).set_index(["raceId", "driverId"])
+
+    # Races 1-2: driver A/B each have at most one of (wet, dry) history ->
+    # raw delta undefined for both -> shrinkage collapses to field_wide_delta,
+    # which is itself undefined (no driver has a defined raw delta yet) -> NaN.
+    assert pd.isna(out.loc[(1, 1), "driver_wet_dry_delta"])
+    assert pd.isna(out.loc[(2, 1), "driver_wet_dry_delta"])
+
+    # Race 3: A's raw = wet_avg(1) - dry_avg(10) = -9, wet_n=1.
+    # B's raw = wet_avg(5) - dry_avg(5) = 0, wet_n=1.
+    # field_wide_delta = mean(-9, 0) = -4.5. weight = 1/(1+K).
+    weight = 1.0 / (1.0 + SHRINKAGE_K)
+    expected_a = weight * -9.0 + (1 - weight) * -4.5
+    expected_b = weight * 0.0 + (1 - weight) * -4.5
+    assert out.loc[(3, 1), "driver_wet_dry_delta"] == pytest.approx(expected_a)
+    assert out.loc[(3, 2), "driver_wet_dry_delta"] == pytest.approx(expected_b)
+
+
+def test_wet_dry_delta_zero_wet_history_equals_field_average():
+    # Driver C never races in the wet at all (n_wet stays 0 forever) while
+    # A/B (same fixture as above) do -- C's delta must equal field_wide_delta
+    # exactly (weight=0), not 0.0 and not NaN, once the field has any signal.
+    rows = []
+    for r, (precip, order_a, order_b) in enumerate(
+        [(1.0, 1, 5), (0.0, 10, 5), (1.0, 1, 5), (0.0, 10, 5)], start=1
+    ):
+        rows.append(_solo_driver_race(r, r, driver_id=1, position_order=order_a, precip_mm=precip))
+        rows.append(_solo_driver_race(r, r, driver_id=2, position_order=order_b, precip_mm=precip))
+        # Driver C only ever races in the dry.
+        rows.append(_solo_driver_race(r, r, driver_id=3, position_order=6, precip_mm=0.0))
+    out = add_wet_form_features(pd.DataFrame(rows)).set_index(["raceId", "driverId"])
+
+    # Expected field_wide_delta at race 4, from A/B's own raw deltas at that
+    # row (both wet_n=2 by then).
+    weight_ab = 2.0 / (2.0 + SHRINKAGE_K)
+    # A: wet_avg([1,1])=1, dry_avg([10])=10 -> raw=-9. B: wet_avg([5,5])=5, dry_avg([5])=5 -> raw=0.
+    field_wide = (-9.0 + 0.0) / 2
+    assert out.loc[(4, 1), "driver_wet_dry_delta"] == pytest.approx(
+        weight_ab * -9.0 + (1 - weight_ab) * field_wide
+    )
+    # Driver C: n_wet=0 forever -> weight=0 -> delta collapses exactly to
+    # the field-wide prior, not 0.0 and not NaN.
+    assert out.loc[(4, 3), "driver_wet_dry_delta"] == pytest.approx(field_wide)
+    assert out.loc[(4, 3), "driver_wet_dry_delta"] != 0.0
+
+
+def test_wet_form_missing_precip_excluded_from_both_averages():
+    # A race with unknown precipitation (NaN) must contribute to NEITHER the
+    # wet nor the dry running average for that driver -- not silently "dry".
+    rows = [
+        _solo_driver_race(1, 1, driver_id=1, position_order=1, precip_mm=1.0),   # wet
+        _solo_driver_race(2, 2, driver_id=1, position_order=99, precip_mm=None),  # unknown -- must be ignored
+        _solo_driver_race(3, 3, driver_id=1, position_order=10, precip_mm=0.0),  # dry
+        _solo_driver_race(4, 4, driver_id=1, position_order=2, precip_mm=1.0),   # wet again
+    ]
+    out = add_wet_form_features(pd.DataFrame(rows)).set_index("raceId")
+    # At race 4: prior wet=[1] (race 1 only; race 2's NaN excluded), avg=1.
+    # prior dry=[10] (race 3), avg=10. raw = 1 - 10 = -9, wet_n=1.
+    weight = 1.0 / (1.0 + SHRINKAGE_K)
+    # Single driver here -> field_wide_delta == the driver's own raw delta.
+    assert out.loc[4, "driver_wet_dry_delta"] == pytest.approx(-9.0)
+
+
+def test_constructor_wet_form_excludes_teammate_same_race():
+    # Two cars, same constructor: teammate's SAME-RACE finish must never
+    # appear in either car's own row for that race.
+    rows = []
+    for r, (precip, order_1, order_2) in enumerate(
+        [(1.0, 1, 2), (0.0, 10, 11), (1.0, 3, 4), (0.0, 12, 13)], start=1
+    ):
+        rows.append(_entry(raceId=r, round=r, driverId=1, constructorId=1,
+                           positionOrder=order_1, race_precip_mm=precip,
+                           race_temp_c=20.0, quali_precip_mm=None, conditions_changed=None))
+        rows.append(_entry(raceId=r, round=r, driverId=2, constructorId=1,
+                           positionOrder=order_2, race_precip_mm=precip,
+                           race_temp_c=20.0, quali_precip_mm=None, conditions_changed=None))
+    out = add_wet_form_features(pd.DataFrame(rows))
+    # Races 1-2 are before the constructor has BOTH a prior wet and a prior
+    # dry race on record -> undefined raw delta, no other constructor to
+    # pool a field-wide prior from either -> NaN, not a leaked same-race value.
+    assert out.loc[out["raceId"].isin([1, 2]), "constructor_wet_dry_delta"].isna().all()
+    # From race 3 on (1+ prior race of each type exists), both teammates
+    # share one identical, non-NaN constructor-level value per race.
+    for race_id in (3, 4):
+        vals = out.loc[out["raceId"] == race_id, "constructor_wet_dry_delta"]
+        assert vals.notna().all()
+        assert vals.nunique() == 1
 
 
 # ---------------------------------------------------------------------------

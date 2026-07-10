@@ -59,6 +59,7 @@ from src.features.teammate_form import (
     add_teammate_form_features,
 )
 from src.features.weather import WEATHER_FEATURES, add_weather_features, load_race_weather
+from src.features.wet_form import WET_FORM_FEATURES, add_wet_form_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +83,7 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     + CIRCUIT_HISTORY_FEATURES
     + STANDINGS_FEATURES
     + WEATHER_FEATURES
+    + WET_FORM_FEATURES
 )
 
 FEATURES_DATASET_COLUMNS: tuple[str, ...] = (
@@ -109,9 +111,10 @@ def build_features(
 
     Applies the feature groups in order (qualifying -> driver form ->
     constructor form -> teammate form -> circuit history -> lagged
-    standings -> weather), then selects
+    standings -> weather -> wet form), then selects
     FEATURES_DATASET_COLUMNS. Returns one row per (raceId, driverId), sorted
-    chronologically; row count equals the input's.
+    chronologically; row count equals the input's. wet_form must run AFTER
+    weather — it reads race_precip_mm off the already-merged frame.
     """
     expected_rows = len(master)
 
@@ -122,6 +125,7 @@ def build_features(
     df = add_circuit_history_features(df)
     df = add_standings_features(df, driver_standings, constructor_standings)
     df = add_weather_features(df, weather)
+    df = add_wet_form_features(df)
 
     if len(df) != expected_rows:
         raise ValueError(
