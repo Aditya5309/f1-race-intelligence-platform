@@ -54,6 +54,7 @@ from src.features.standings import (
     add_standings_features,
     load_standings,
 )
+from src.features.teammate_form import TEAMMATE_FORM_FEATURES, add_teammate_form_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +74,7 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     QUALIFYING_FEATURES
     + DRIVER_FORM_FEATURES
     + CONSTRUCTOR_FORM_FEATURES
+    + TEAMMATE_FORM_FEATURES
     + CIRCUIT_HISTORY_FEATURES
     + STANDINGS_FEATURES
 )
@@ -100,7 +102,8 @@ def build_features(
     Build the feature matrix from the master dataset.
 
     Applies the feature groups in order (qualifying -> driver form ->
-    constructor form -> circuit history -> lagged standings), then selects
+    constructor form -> teammate form -> circuit history -> lagged
+    standings), then selects
     FEATURES_DATASET_COLUMNS. Returns one row per (raceId, driverId), sorted
     chronologically; row count equals the input's.
     """
@@ -109,6 +112,7 @@ def build_features(
     df = add_qualifying_features(master)
     df = add_driver_form_features(df)
     df = add_constructor_form_features(df)
+    df = add_teammate_form_features(df)
     df = add_circuit_history_features(df)
     df = add_standings_features(df, driver_standings, constructor_standings)
 

@@ -298,10 +298,11 @@ def test_classification_partitions_feature_columns():
     assert all_classified == set(FEATURE_COLUMNS)
     assert len(STABLE_FEATURES) + len(ERA_SENSITIVE_FEATURES) + len(EXPERIMENTAL_FEATURES) \
         == len(FEATURE_COLUMNS)
-    # Decision 013 counts (12, 12, 7) + Phase 4 Tranche A: grid_penalty_applied,
-    # classified stable.
+    # Decision 013 counts (12, 12, 7) + Phase 4 Tranche A: grid_penalty_applied
+    # (item 2) and qualifying_gap_to_teammate_current, qualifying_gap_to_teammate,
+    # race_pace_delta_to_teammate (item 1) — all classified stable.
     assert (len(STABLE_FEATURES), len(ERA_SENSITIVE_FEATURES), len(EXPERIMENTAL_FEATURES)) \
-        == (13, 12, 7)
+        == (16, 12, 7)
 
 
 def test_classification_dict_consistent_with_tuples():
@@ -317,5 +318,6 @@ def test_groups_cover_feature_columns():
     grouped = {f for group in FEATURE_GROUPS.values() for f in group}
     assert grouped == set(FEATURE_COLUMNS)
     assert list(FEATURE_GROUPS) == [
-        "qualifying", "driver_form", "constructor_form", "circuit_history", "standings",
+        "qualifying", "driver_form", "constructor_form", "teammate_form",
+        "circuit_history", "standings",
     ]

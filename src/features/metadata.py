@@ -33,6 +33,7 @@ from src.features.driver_form import DRIVER_FORM_FEATURES
 from src.features.pipeline import FEATURE_COLUMNS
 from src.features.qualifying import QUALIFYING_FEATURES
 from src.features.standings import STANDINGS_FEATURES
+from src.features.teammate_form import TEAMMATE_FORM_FEATURES
 
 # ---------------------------------------------------------------------------
 # Grouping by source module (execution order of the feature pipeline).
@@ -42,6 +43,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "qualifying": QUALIFYING_FEATURES,
     "driver_form": DRIVER_FORM_FEATURES,
     "constructor_form": CONSTRUCTOR_FORM_FEATURES,
+    "teammate_form": TEAMMATE_FORM_FEATURES,
     "circuit_history": CIRCUIT_HISTORY_FEATURES,
     "standings": STANDINGS_FEATURES,
 }
@@ -64,6 +66,9 @@ STABLE_FEATURES: tuple[str, ...] = (
     "driver_dnf_rate_last_5",
     "driver_standing_position_prev",
     "constructor_standing_position_prev",
+    "qualifying_gap_to_teammate_current",
+    "qualifying_gap_to_teammate",
+    "race_pace_delta_to_teammate",
 )
 
 ERA_SENSITIVE_FEATURES: tuple[str, ...] = (
