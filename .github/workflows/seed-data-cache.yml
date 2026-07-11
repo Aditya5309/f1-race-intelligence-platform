@@ -1,0 +1,66 @@
+# One-off cache seeding for the scheduled retrain workflow (Phase 4
+# Tranche D). workflow_dispatch only — never runs on a schedule. Run this
+# ONCE before the first real run of retrain.yml, and again any time you
+# want to replace the cached data/ tree with a fresh manual snapshot (e.g.
+# after a cache eviction, or a large manual data/ rebuild locally).
+#
+# Reads data/ from a GitHub Release asset (tag: DATA_RELEASE_TAG below),
+# never from a committed branch — data/ stays gitignored (Decision 002)
+# and never touches ANY branch's git history, main or otherwise. See
+# docs/retrain_workflow_setup.md for the exact commands to create/update
+# that release asset from your local data/ tree before running this.
+
+name: Seed data/ cache
+
+on:
+  workflow_dispatch: {}
+
+env:
+  DATA_RELEASE_TAG: data-seed
+  DATA_ASSET_NAME: data-seed.tar.gz
+
+jobs:
+  seed:
+    name: Download data/ snapshot and populate the retrain cache
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # gh is preinstalled on GitHub-hosted runners; GH_TOKEN authorizes it.
+      - name: Download data/ snapshot from the release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$DATA_RELEASE_TAG" \
+            --pattern "$DATA_ASSET_NAME" \
+            --repo "${{ github.repository }}"
+
+      - name: Extract
+        run: tar -xzf "$DATA_ASSET_NAME"
+
+      - name: Sanity-check the extracted data/ tree
+        run: |
+          for f in races results qualifying drivers constructors circuits \
+                   driver_standings constructor_standings status; do
+            if [ ! -f "data/$f.csv" ]; then
+              echo "::error::data/$f.csv missing from the extracted snapshot — $DATA_ASSET_NAME is incomplete or was built wrong."
+              exit 1
+            fi
+          done
+          echo "data/ snapshot looks complete:"
+          wc -l data/*.csv
+
+      # Same CACHE KEY SCHEME as retrain.yml (read the note at the top of
+      # that file first): a unique key so this save always succeeds
+      # (never tries to overwrite an existing, immutable cache entry),
+      # sharing retrain.yml's "f1-data-" prefix so ITS very first
+      # restore-keys lookup finds this entry.
+      - name: Save to the shared data/ cache
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: f1-data-seed-${{ github.run_id }}

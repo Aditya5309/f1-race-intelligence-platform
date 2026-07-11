@@ -11,14 +11,25 @@
 # already be present (it only backfills races MISSING from them — it is
 # not a full-history bootstrap, and a full historical pull would need
 # ~4,700 jolpica-f1 requests against its 200/hour unauthenticated rate
-# limit, over 24 hours, wildly impractical for a weekly job). This
-# workflow persists data/ across runs via actions/cache under a STABLE key
-# (not tied to a commit SHA) so each run only needs to fetch the delta.
-# THE CACHE MUST BE SEEDED ONCE, MANUALLY, before the first scheduled run
-# can succeed — this workflow cannot bootstrap that itself. See the
-# "Confirm data/ was restored" step below, which fails loudly and
-# explains this rather than letting ingestion crash with a confusing
-# FileNotFoundError.
+# limit, over 24 hours, wildly impractical for a weekly job). THE CACHE
+# MUST BE SEEDED ONCE before the first run can succeed — see
+# .github/workflows/seed-data-cache.yml and docs/retrain_workflow_setup.md.
+# This workflow cannot bootstrap that itself; the "Confirm data/ was
+# restored" step below fails loudly and explains this rather than letting
+# ingestion crash with a confusing FileNotFoundError.
+#
+# CACHE KEY SCHEME (read this before touching either cache step below):
+# GitHub Actions cache entries are IMMUTABLE once created under an exact
+# key — actions/cache/save silently no-ops (does not update, does not
+# error the job) if that exact key already exists. A single fixed key used
+# for both restore AND save would therefore only ever really populate ONCE
+# and never grow again. Instead: every run's OWN save key is unique
+# (f1-data-<run id>, which by definition cannot already exist), while
+# restore uses restore-keys with just the "f1-data-" PREFIX, which matches
+# and returns the MOST RECENT entry sharing that prefix — i.e. last week's
+# run. seed-data-cache.yml's one-off seed entry (f1-data-seed-<run id>)
+# shares the same prefix, so it is exactly what the very first scheduled
+# run's restore-keys lookup finds.
 
 name: Scheduled Retrain
 
@@ -56,17 +67,18 @@ jobs:
       - name: Install dependencies
         run: pip install -e .[dev]
 
-      # See the KNOWN GAP note above the job definition. restore-keys with
-      # no commit-SHA/hash component means every run reuses (and, below,
-      # re-saves) the SAME cache entry, growing incrementally.
+      # See the CACHE KEY SCHEME note above the job definition. The `key`
+      # here (this run's own id) is guaranteed not to exist yet, so this
+      # always falls through to `restore-keys`' prefix match against the
+      # most recent previous entry (last week's run, or the one-off seed).
       - name: Restore data/ cache
         id: data-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/
-          key: f1-data-v1
+          key: f1-data-${{ github.run_id }}
           restore-keys: |
-            f1-data-v1
+            f1-data-
 
       - name: Confirm data/ was restored
         run: |
@@ -91,13 +103,15 @@ jobs:
 
       # Always re-save, even if a later step fails — the ingestion delta
       # this run fetched should not be re-fetched next week just because
-      # promotion was refused.
+      # promotion was refused. key is this run's own unique id (see the
+      # CACHE KEY SCHEME note above), so this save always succeeds — it is
+      # never trying to overwrite an existing, immutable cache entry.
       - name: Save data/ cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: data/
-          key: f1-data-v1
+          key: f1-data-${{ github.run_id }}
 
       # Never lets a refusal fail the JOB — captured explicitly so the
       # steps below can react (PR vs. clean "nothing to review" stop)
@@ -158,6 +172,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: scheduled retrain — promote new candidate to Staging"
           branch: scheduled-retrain/staging
+          base: main
           delete-branch: true
           title: "Scheduled retrain: new candidate promoted to Staging"
           add-paths: artifacts/
