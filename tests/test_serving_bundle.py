@@ -157,6 +157,20 @@ def test_load_bundle_defaults_metrics_for_legacy_manifest(tmp_path, fitted_model
     assert info.metrics == {}
 
 
+def test_load_bundle_defaults_baseline_bootstrapped_for_legacy_manifest(tmp_path, fitted_model, sample_info):
+    """Same degrade-gracefully discipline as metrics above, for the field
+    added alongside --force-baseline (Phase 4 Tranche D post-mortem)."""
+    bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
+    manifest_path = bundle_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert "baseline_bootstrapped" in manifest   # written by export_bundle by default
+    del manifest["baseline_bootstrapped"]
+    manifest_path.write_text(json.dumps(manifest))
+
+    _, info = load_bundle(bundle_dir)
+    assert info.baseline_bootstrapped is False
+
+
 def test_load_bundle_missing_directory_raises(tmp_path):
     with pytest.raises(FileNotFoundError, match="No serving bundle"):
         load_bundle(tmp_path / "does-not-exist")

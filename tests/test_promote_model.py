@@ -112,7 +112,8 @@ def _register(env, split=None, alias="Staging", name="logreg"):
     )
 
 
-def _promote_args(env, alias="Staging", version=None, allowed_model_modules=None):
+def _promote_args(env, alias="Staging", version=None, allowed_model_modules=None,
+                  force_baseline=False):
     args = [
         "--alias", alias,
         "--tracking-uri", env["tracking_uri"],
@@ -124,6 +125,8 @@ def _promote_args(env, alias="Staging", version=None, allowed_model_modules=None
         args += ["--version", str(version)]
     if allowed_model_modules is not None:
         args += ["--allowed-model-modules", allowed_model_modules]
+    if force_baseline:
+        args.append("--force-baseline")
     return args
 
 
@@ -387,6 +390,64 @@ def test_promote_refuses_when_served_bundle_has_no_metrics(env):
 
     assert rc == 1
     assert (served_dir / "manifest.json").read_text() == served_manifest_before
+
+
+def test_promote_force_baseline_bootstraps_when_no_metrics(env):
+    """--force-baseline is the deliberate escape hatch for the case above:
+    same no-metrics legacy bundle, but this time the operator explicitly
+    opts in. Must succeed, and must record baseline_bootstrapped=true so
+    this promotion is distinguishable later from one that passed a real
+    comparison."""
+    X, y, _ = to_xy(env["split"].train)
+    legacy_model = get_model("logreg", y).fit(X, y)
+    legacy_info = ModelInfo(
+        name="f1-winner", version="1", alias="Staging", run_id="legacy",
+        trained_at="2026-07-03T18:25:30+00:00", calibration="none",
+        model_class="Pipeline",
+    )
+    served_dir = export_bundle(legacy_model, legacy_info, bundle_root=env["bundle_root"])
+    backup_dir = env["tmp_path"] / "legacy_backup2"
+    shutil.copytree(served_dir, backup_dir)
+
+    version = _register(env)
+    shutil.rmtree(served_dir)
+    shutil.copytree(backup_dir, served_dir)
+
+    rc = promote_model.main(_promote_args(env, version=version, force_baseline=True))
+
+    assert rc == 0
+    _, info = load_bundle(served_dir)
+    assert info.baseline_bootstrapped is True
+    assert info.version == str(version)
+    assert info.metrics   # the candidate's own metrics ARE recorded, just uncompared
+
+
+def test_promote_force_baseline_does_not_bypass_real_regression_check(env, served):
+    """--force-baseline must have NO effect once a real baseline exists —
+    it means "allow bootstrapping when there's nothing to compare against",
+    not "skip the check whenever asked". A genuinely bad candidate must
+    still be refused even with the flag passed."""
+    good_version, served_dir, backup_dir = served
+    good_manifest = (served_dir / "manifest.json").read_text()
+
+    bad_train = env["split"].train.copy()
+    rng = np.random.default_rng(1)
+    bad_train[TARGET_COLUMN] = (
+        bad_train.groupby("raceId")[TARGET_COLUMN]
+        .transform(lambda s: s.sample(frac=1.0, random_state=rng.integers(1 << 31)).to_numpy())
+    )
+    bad_split = TemporalSplit(train=bad_train, val=env["split"].val,
+                              test=env["split"].test, strategy=env["split"].strategy)
+    bad_version = _register(env, split=bad_split)
+    assert bad_version != good_version
+    _restore_served(served_dir, backup_dir)
+
+    rc = promote_model.main(
+        _promote_args(env, version=bad_version, force_baseline=True)
+    )
+
+    assert rc == 1
+    assert (served_dir / "manifest.json").read_text() == good_manifest
 
 
 def test_promote_missing_features_source_returns_1(env, capsys):

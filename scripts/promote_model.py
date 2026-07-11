@@ -20,6 +20,7 @@ whether that version is allowed to become the live serving bundle.
     python scripts/promote_model.py --alias Staging
     python scripts/promote_model.py --alias Staging --version 3
     python scripts/promote_model.py --alias Production --top1-tolerance 0.02
+    python scripts/promote_model.py --alias Staging --force-baseline   # bootstrap only — see Check 4
 
 Checks, in order (all against the CANDIDATE, none of them retrain anything):
 
@@ -71,9 +72,20 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      no bundle exists at all -> genuinely nothing to compare, skip is safe
      (first-ever promotion for an alias). A bundle EXISTS but its manifest
      has no metrics recorded (e.g. a legacy bundle predating Tranche C)
-     -> REFUSE — a real served model is out there, we just don't know its
-     numbers, and silently letting anything through uncompared is exactly
-     the failure mode this gate exists to prevent.
+     -> REFUSE by default — a real served model is out there, we just
+     don't know its numbers, and silently letting anything through
+     uncompared is exactly the failure mode this gate exists to prevent.
+
+     --force-baseline deliberately bootstraps this second case ONLY: it
+     skips the regression comparison (checks 1-3 above still run
+     normally), prints a loud warning, and records
+     baseline_bootstrapped=true permanently in the promoted manifest —
+     never silent, never the default. It has NO effect if the served
+     bundle already has real metrics; a real comparison is always enforced
+     when one is actually possible. Use it exactly once per genuine gap
+     (e.g. right after this project's own metrics field was added and
+     nothing had been re-registered yet) — every promotion after that
+     should have a real baseline again and never need the flag.
 
      Default tolerances: 0.03 (top1_accuracy) / 0.015 (spearman_corr),
      both measured on THIS gate's own val-split comparison (see above —
@@ -287,6 +299,19 @@ def main(argv: list[str] | None = None) -> int:
                              "permissive, no live deployment is constrained "
                              "yet). E.g. 'sklearn' for a minimal Lambda "
                              "build with no xgboost/lightgbm installed.")
+    parser.add_argument("--force-baseline", action="store_true",
+                        help="Bootstrap: allow promotion when the served "
+                             "bundle exists but has NO metrics recorded, "
+                             "skipping ONLY the regression comparison (the "
+                             "model-class and smoke checks still run "
+                             "normally). Has NO effect if the served bundle "
+                             "already has real metrics — regression is "
+                             "still enforced in that case exactly as "
+                             "without this flag. Recorded permanently in "
+                             "the promoted bundle's own manifest.json "
+                             "(baseline_bootstrapped: true) so this is "
+                             "never silent. See PromotionRefused's message "
+                             "for when this is needed.")
     args = parser.parse_args(argv)
     allowed_model_modules = {m.strip() for m in args.allowed_model_modules.split(",") if m.strip()}
 
@@ -298,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mlflow.set_tracking_uri(args.tracking_uri)
     client = mlflow.MlflowClient()
+    bootstrapped = False
 
     try:
         version = resolve_version(client, args.version)
@@ -340,28 +366,39 @@ def main(argv: list[str] | None = None) -> int:
             # have its metrics on record (e.g. a legacy bundle exported
             # before Tranche C added metrics to the manifest). Silently
             # skipping here would mean literally any candidate, however
-            # bad, sails through uncompared — exactly what let a
-            # spearman_corr=0.59 candidate promote past a served baseline
-            # historically measured at 0.749, undetected, in the first
-            # real automated run of this gate. Refuse instead: no metrics
-            # baseline means no comparison is possible, not that none is
-            # needed.
-            raise PromotionRefused(
-                f"Bundle at {bundle_dir} exists but its manifest has no "
-                "recorded metrics — cannot check for regression against "
-                "an unknown baseline. Establish a real baseline first "
-                "(re-register the currently-served model so its metrics "
-                "get recorded, e.g. `python -m src.models.train --register "
-                f"{args.alias} --calibrate --params-file "
-                "config/registered_model_params.json`) before promoting "
-                "anything through this gate."
-            )
+            # bad, sails through uncompared — exactly what let a candidate
+            # promote uncompared in the first real automated run of this
+            # gate (see PR #1's post-mortem). Refuse UNLESS the operator
+            # explicitly opts into bootstrapping via --force-baseline — no
+            # metrics baseline means no comparison is possible, and that
+            # must be a deliberate, loud, recorded choice, never a default.
+            if not args.force_baseline:
+                raise PromotionRefused(
+                    f"Bundle at {bundle_dir} exists but its manifest has no "
+                    "recorded metrics — cannot check for regression against "
+                    "an unknown baseline. Either establish a real baseline "
+                    "first (re-register the currently-served model so its "
+                    "metrics get recorded) or, to deliberately bootstrap "
+                    "one now, re-run with --force-baseline."
+                )
+            bootstrapped = True
+            print(f"[3/3] WARNING: --force-baseline used — bundle at "
+                  f"{bundle_dir} had no recorded metrics, so the regression "
+                  "check was SKIPPED, not passed. This candidate's own "
+                  "metrics become the new baseline for future promotions. "
+                  "Recorded as baseline_bootstrapped=true in the promoted "
+                  "manifest.")
         else:
+            # A real baseline exists — --force-baseline has NO effect here.
+            # It means "allow bootstrapping when there's nothing to compare
+            # against", not "skip the check on request"; a real comparison
+            # is always enforced when one is actually possible.
             check_regression(candidate_metrics, served_metrics,
                              args.top1_tolerance, args.spearman_tolerance)
-        print(f"[3/3] Metric non-regression PASS "
-              f"(candidate top1_accuracy={candidate_metrics['top1_accuracy']:.4f}, "
-              f"spearman_corr={candidate_metrics.get('spearman_corr', float('nan')):.4f})")
+        if not bootstrapped:
+            print(f"[3/3] Metric non-regression PASS "
+                  f"(candidate top1_accuracy={candidate_metrics['top1_accuracy']:.4f}, "
+                  f"spearman_corr={candidate_metrics.get('spearman_corr', float('nan')):.4f})")
 
     except PromotionRefused as exc:
         print(f"PROMOTION REFUSED: {exc}", file=sys.stderr)
@@ -378,10 +415,12 @@ def main(argv: list[str] | None = None) -> int:
         calibration=getattr(model, "calibration", "none"),
         model_class=type(model).__name__,
         metrics=candidate_metrics,
+        baseline_bootstrapped=bootstrapped,
     )
     bundle_dir = export_bundle(model, info, bundle_root=args.bundle_root)
     export_features_snapshot(args.features_source, artifacts_root=args.artifacts_root)
-    print(f"PROMOTED {REGISTERED_MODEL_NAME} v{version} to @{args.alias} -> {bundle_dir}")
+    bootstrap_note = " (baseline_bootstrapped=true — no regression check was performed)" if bootstrapped else ""
+    print(f"PROMOTED {REGISTERED_MODEL_NAME} v{version} to @{args.alias} -> {bundle_dir}{bootstrap_note}")
     return 0
 
 

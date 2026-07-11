@@ -41,7 +41,11 @@ mlruns/, mlflow.db, reports/):
                                calibration, model_class, metrics — the
                                evaluate_all() dict this bundle's model
                                scored on the validation split, Phase 4
-                               Tranche C Item 1) plus a bundle format
+                               Tranche C Item 1 — and baseline_bootstrapped,
+                               True only if this bundle was promoted via
+                               `promote_model.py --force-baseline` with no
+                               prior baseline to compare against, Phase 4
+                               Tranche D post-mortem) plus a bundle format
                                version and the export timestamp.
                 feature_schema.json
                                A human-readable mirror of the ColumnGuard
@@ -98,7 +102,7 @@ _MANIFEST_FILENAME = "manifest.json"
 _FEATURE_SCHEMA_FILENAME = "feature_schema.json"
 _MODEL_INFO_FIELDS = (
     "name", "version", "alias", "run_id", "trained_at", "calibration", "model_class",
-    "metrics",
+    "metrics", "baseline_bootstrapped",
 )
 
 
@@ -119,6 +123,14 @@ class ModelInfo:
     #: see its manifest.get("metrics", {})) or when a caller has no honest
     #: held-out metrics to report.
     metrics: dict = field(default_factory=dict)
+    #: True only for a bundle promoted via `promote_model.py --force-baseline`
+    #: (Phase 4 Tranche D post-mortem) — i.e. this bundle's metrics were
+    #: recorded WITHOUT a regression check against a prior baseline, because
+    #: none existed yet. Distinguishes "passed a real comparison" from
+    #: "bootstrapped the first one" for anyone reading this manifest later.
+    #: False (the default) for every normal promotion and for bundles
+    #: exported before this field existed.
+    baseline_bootstrapped: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -207,11 +219,12 @@ def load_bundle(bundle_dir: Path | str):
             "to produce one."
         )
     manifest = json.loads(manifest_path.read_text())
-    # manifest.get("metrics", {}): older bundles (pre-Tranche-C) have no
-    # "metrics" key at all — degrade to {} rather than KeyError so existing
+    # Older bundles predate one or both of "metrics"/"baseline_bootstrapped"
+    # — degrade to their ModelInfo defaults rather than KeyError so existing
     # committed bundles keep loading unchanged.
+    _defaults = {"metrics": {}, "baseline_bootstrapped": False}
     info = ModelInfo(**{
-        f: (manifest.get(f, {}) if f == "metrics" else manifest[f])
+        f: manifest.get(f, _defaults[f]) if f in _defaults else manifest[f]
         for f in _MODEL_INFO_FIELDS
     })
     with model_pickle_path.open("rb") as f:
