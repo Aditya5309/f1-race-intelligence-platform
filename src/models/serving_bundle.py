@@ -30,9 +30,12 @@ mlruns/, mlflow.db, reports/):
                                fitted pipeline (ColumnGuard + preprocessing
                                + estimator, or the CalibratedModel wrapper
                                around it) in MLflow's own serialization
-                               format. Loaded via a local-path
-                               mlflow.sklearn.load_model() call — no
-                               tracking URI, no registry client, no network.
+                               format (cloudpickle). Written via
+                               mlflow.sklearn.save_model() but loaded via a
+                               plain stdlib pickle.load() on
+                               model/model.pkl (Phase 4 Tranche D Item 1b)
+                               — no MLflow import, tracking URI, registry
+                               client, or network needed to serve.
                 manifest.json  ModelInfo fields, frozen at export time
                                (name, version, alias, run_id, trained_at,
                                calibration, model_class, metrics — the
@@ -51,19 +54,21 @@ mlruns/, mlflow.db, reports/):
 
 This module has no opinion about experiments, aliases, or how the model was
 produced — export_bundle() takes an already-fitted model + ModelInfo built
-by the caller (train.py). Loading (used by predict.py) has no MLflow
-tracking/registry imports at all — just a filesystem read.
+by the caller (train.py). Loading (used by predict.py) needs no MLflow
+import at all (Item 1b) — plain stdlib json + pickle over a filesystem read.
+Only export_bundle() still imports mlflow, since writing still goes through
+mlflow.sklearn.save_model() (unchanged — this is a training/registration-side
+concern, not a serving one).
 """
 
 from __future__ import annotations
 
 import json
+import pickle
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-
-import mlflow
 
 from src.models.registry import training_schema
 
@@ -77,6 +82,18 @@ DEFAULT_BUNDLE_ROOT = DEFAULT_ARTIFACTS_ROOT / "serving"
 DEFAULT_FEATURES_ARTIFACT = DEFAULT_ARTIFACTS_ROOT / "features.parquet"
 
 _MODEL_SUBDIR = "model"
+#: mlflow.sklearn.save_model()'s own stable, hardcoded filename for its
+#: pickle/cloudpickle-format flavor (mlflow.sklearn.MODEL_PICKLE_FILE_NAME —
+#: unchanged across pickle vs cloudpickle serialization; verified directly
+#: against the real committed bundle). export_bundle() below is the only
+#: writer, via mlflow.sklearn.save_model(); load_bundle() reads this same
+#: fixed path with plain stdlib pickle — no mlflow import needed to load
+#: (Phase 4 Tranche D Item 1b). A cloudpickle-written stream is a valid
+#: standard pickle stream for objects with no closures/dynamic classes —
+#: true of every zoo pipeline/CalibratedModel here — confirmed byte-identical
+#: predict_proba() output against mlflow.sklearn.load_model() before this
+#: change shipped.
+_MODEL_PICKLE_FILENAME = "model.pkl"
 _MANIFEST_FILENAME = "manifest.json"
 _FEATURE_SCHEMA_FILENAME = "feature_schema.json"
 _MODEL_INFO_FIELDS = (
@@ -119,7 +136,16 @@ def export_bundle(model, info: ModelInfo, bundle_root: Path | None = None) -> Pa
     supersedes the old frozen artifact for that alias. Takes the model
     object directly (no MLflow reload): the caller (register_model) already
     has it fitted in memory.
+
+    mlflow is imported here, not at module level (Phase 4 Tranche D Item
+    1b): this is the ONLY function in this module that still needs it (to
+    write via mlflow.sklearn.save_model()) — a training/registration-side
+    concern. Serving (load_bundle, and everything predict.py/app/api.py
+    call) must be able to import this whole module without mlflow installed
+    at all.
     """
+    import mlflow
+
     bundle_dir = bundle_dir_for_alias(info.alias, bundle_root)
     model_path = bundle_dir / _MODEL_SUBDIR
     if model_path.exists():
@@ -163,19 +189,22 @@ def export_features_snapshot(source: Path | str, artifacts_root: Path | None = N
 def load_bundle(bundle_dir: Path | str):
     """Load a frozen bundle. Returns (model, ModelInfo).
 
-    No MLflow tracking URI, no registry client, no network — a plain local
-    filesystem read. Raises FileNotFoundError with a clear, actionable
-    message if the bundle is missing; app/api.py's degraded-start lifespan
-    catches this exactly like it caught a missing registry before.
+    No MLflow tracking URI, no registry client, no network, and (Phase 4
+    Tranche D Item 1b) no MLflow import at all — a plain local filesystem
+    read plus stdlib pickle. Raises FileNotFoundError with a clear,
+    actionable message if the bundle is missing; app/api.py's degraded-start
+    lifespan catches this exactly like it caught a missing registry before.
     """
     bundle_dir = Path(bundle_dir)
     model_path = bundle_dir / _MODEL_SUBDIR
+    model_pickle_path = model_path / _MODEL_PICKLE_FILENAME
     manifest_path = bundle_dir / _MANIFEST_FILENAME
-    if not model_path.exists() or not manifest_path.exists():
+    if not model_pickle_path.exists() or not manifest_path.exists():
         raise FileNotFoundError(
-            f"No serving bundle at {bundle_dir} (expected {_MODEL_SUBDIR}/ and "
-            f"{_MANIFEST_FILENAME}) — run `python -m src.models.train --register "
-            "<alias> --calibrate` to produce one."
+            f"No serving bundle at {bundle_dir} (expected {_MODEL_SUBDIR}/"
+            f"{_MODEL_PICKLE_FILENAME} and {_MANIFEST_FILENAME}) — run "
+            "`python -m src.models.train --register <alias> --calibrate` "
+            "to produce one."
         )
     manifest = json.loads(manifest_path.read_text())
     # manifest.get("metrics", {}): older bundles (pre-Tranche-C) have no
@@ -185,5 +214,6 @@ def load_bundle(bundle_dir: Path | str):
         f: (manifest.get(f, {}) if f == "metrics" else manifest[f])
         for f in _MODEL_INFO_FIELDS
     })
-    model = mlflow.sklearn.load_model(str(model_path))
+    with model_pickle_path.open("rb") as f:
+        model = pickle.load(f)
     return model, info
