@@ -1,0 +1,164 @@
+# Scheduled retrain (Phase 4 Tranche D, Part 3) — Decision-free automation
+# layered on top of the promotion gate (Tranche C) and the model-class gate
+# (Tranche D Item 1c). Separate from ci.yml on purpose: this workflow never
+# runs on push/PR, only on a schedule or manual dispatch, and it is the
+# only workflow in this repo allowed to open a PR against main.
+#
+# KNOWN GAP — read before relying on this in production (see also the final
+# Tranche D report): `data/` is entirely gitignored (Decision 002) and does
+# not exist on a fresh GitHub-hosted runner checkout, but
+# scripts/ingest_jolpica.py requires the existing data/*.csv files to
+# already be present (it only backfills races MISSING from them — it is
+# not a full-history bootstrap, and a full historical pull would need
+# ~4,700 jolpica-f1 requests against its 200/hour unauthenticated rate
+# limit, over 24 hours, wildly impractical for a weekly job). This
+# workflow persists data/ across runs via actions/cache under a STABLE key
+# (not tied to a commit SHA) so each run only needs to fetch the delta.
+# THE CACHE MUST BE SEEDED ONCE, MANUALLY, before the first scheduled run
+# can succeed — this workflow cannot bootstrap that itself. See the
+# "Confirm data/ was restored" step below, which fails loudly and
+# explains this rather than letting ingestion crash with a confusing
+# FileNotFoundError.
+
+name: Scheduled Retrain
+
+on:
+  schedule:
+    # Monday 06:00 UTC — after any race weekend (F1 races run Fri-Sun).
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+# Never run two retrains concurrently — both would fight over the same
+# data/ cache key and could open duplicate PRs.
+concurrency:
+  group: scheduled-retrain
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  retrain:
+    name: Ingest, retrain, gate, PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e .[dev]
+
+      # See the KNOWN GAP note above the job definition. restore-keys with
+      # no commit-SHA/hash component means every run reuses (and, below,
+      # re-saves) the SAME cache entry, growing incrementally.
+      - name: Restore data/ cache
+        id: data-cache
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: f1-data-v1
+          restore-keys: |
+            f1-data-v1
+
+      - name: Confirm data/ was restored
+        run: |
+          if [ ! -f data/races.csv ]; then
+            echo "::error::data/races.csv not found. The data/ cache (key f1-data-v1) has never been seeded — ingest_jolpica.py only backfills races MISSING from an EXISTING data/ tree, it cannot bootstrap full history. Seed the cache once with a manual data/ tree (matching this project's Ergast CSV schema) before re-running this workflow. See scripts/ingest_jolpica.py's module docstring."
+            exit 1
+          fi
+
+      # Snapshot the currently-served bundle's manifest BEFORE anything
+      # changes, so the PR body can show a real before/after metrics diff
+      # regardless of what promote_model.py does below.
+      - name: Snapshot currently-served metrics
+        run: |
+          if [ -f artifacts/serving/staging/manifest.json ]; then
+            cp artifacts/serving/staging/manifest.json /tmp/served_before.json
+          else
+            echo "{}" > /tmp/served_before.json
+          fi
+
+      - name: Ingest + rebuild + freeze (automated — registers only, does not export)
+        run: python scripts/refresh_and_freeze.py --automated
+
+      # Always re-save, even if a later step fails — the ingestion delta
+      # this run fetched should not be re-fetched next week just because
+      # promotion was refused.
+      - name: Save data/ cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: f1-data-v1
+
+      # Never lets a refusal fail the JOB — captured explicitly so the
+      # steps below can react (PR vs. clean "nothing to review" stop)
+      # rather than the job just going red with no explanation.
+      - name: Promote (gated — Tranche C metric-regression + Tranche D model-class checks)
+        run: |
+          set +e
+          python scripts/promote_model.py --alias Staging 2>&1 | tee /tmp/promote_output.txt
+          echo "PROMOTE_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Report refusal and stop (no PR)
+        if: env.PROMOTE_EXIT_CODE != '0'
+        run: |
+          echo "::warning::Promotion refused — see the reason below. No PR opened; artifacts/serving/ is untouched."
+          cat /tmp/promote_output.txt
+          exit 0
+
+      - name: Build metrics-diff summary
+        if: env.PROMOTE_EXIT_CODE == '0'
+        run: |
+          python - <<'PYEOF'
+          import json
+
+          before = json.load(open("/tmp/served_before.json"))
+          after = json.load(open("artifacts/serving/staging/manifest.json"))
+          before_metrics, after_metrics = before.get("metrics", {}), after.get("metrics", {})
+
+          keys = ["top1_accuracy", "top3_recall", "winner_mrr", "spearman_corr",
+                  "log_loss", "brier_score", "ece"]
+          lines = ["| Metric | Previously served | New candidate | Delta |",
+                   "|---|---|---|---|"]
+          for key in keys:
+              b, a = before_metrics.get(key), after_metrics.get(key)
+              if a is None:
+                  continue
+              b_str = f"{b:.4f}" if isinstance(b, (int, float)) else "—"
+              delta = f"{a - b:+.4f}" if isinstance(b, (int, float)) else "—"
+              lines.append(f"| {key} | {b_str} | {a:.4f} | {delta} |")
+
+          summary = "\n".join(lines)
+          print(summary)
+          with open("/tmp/metrics_diff.md", "w") as f:
+              f.write(summary)
+          PYEOF
+
+      # add-paths is deliberately just "artifacts/" (not narrowed to
+      # artifacts/serving/ alone) — step 5 (display refresh) writes
+      # artifacts/display/ on every run regardless of the promotion
+      # outcome, and Decision 030 wants the served model and display data
+      # traveling together in one reviewable unit, not two independently-
+      # drifting update paths (that's the bug Decision 030 fixed once
+      # already). data/ never appears here — it's gitignored, invisible to
+      # `git status`, so nothing further needs to exclude it explicitly.
+      - name: Open PR with the promoted candidate
+        if: env.PROMOTE_EXIT_CODE == '0'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: scheduled retrain — promote new candidate to Staging"
+          branch: scheduled-retrain/staging
+          delete-branch: true
+          title: "Scheduled retrain: new candidate promoted to Staging"
+          add-paths: artifacts/
+          body-path: /tmp/metrics_diff.md
