@@ -24,7 +24,16 @@ whether that version is allowed to become the live serving bundle.
 Checks, in order (all against the CANDIDATE, none of them retrain anything):
 
   1. Loads without error — mlflow.sklearn.load_model("models:/f1-winner/N").
-  2. ColumnGuard self-consistency + non-degenerate predictions — scores a
+  2. Model-class check (Phase 4 Tranche D Item 1c) — the candidate's actual
+     fitted estimator's module (e.g. 'sklearn', 'xgboost', 'lightgbm') must
+     be in --allowed-model-modules (default: permissive, all three — no
+     live deployment is constrained yet). Catches "an XGBoost/LightGBM
+     candidate was promoted but the serving environment only has
+     scikit-learn installed" HERE, as a clear pre-deploy refusal, instead
+     of as an unpickle-time ImportError at the deployed Lambda's cold
+     start. Project-native estimators (e.g. PoleSitterBaseline) are always
+     allowed — no third-party dependency to check.
+  3. ColumnGuard self-consistency + non-degenerate predictions — scores a
      handful of real, in-window races (drawn from --features-source) via
      src.models.predict.predict_race(), which routes through the
      candidate's own recorded training schema. predict_race() already
@@ -32,7 +41,7 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      normalization; this step additionally rejects a race where every
      driver gets an identical probability (a constant-output model would
      pass both of predict_race's own checks while being useless).
-  3. Metric non-regression — the candidate is scored fresh on the
+  4. Metric non-regression — the candidate is scored fresh on the
      Decision-008 validation split (2022-2023, ~44 races) via evaluate_all
      (the same evaluation code every other module in this project uses,
      including the Tranche A Spearman baseline) and compared against
@@ -100,6 +109,12 @@ DEFAULT_TOP1_TOLERANCE = 0.03
 DEFAULT_SPEARMAN_TOLERANCE = 0.015
 #: How many of the most recent real races to smoke-test predict_race() on.
 SMOKE_RACE_SAMPLE = 5
+#: Third-party ML library modules a deployment target may support serving.
+#: Permissive by default (Phase 4 Tranche D Item 1c) — no specific
+#: deployment is constrained to a subset yet; this exists so ONE becomes
+#: constrainable later (e.g. a minimal sklearn-only Lambda) without any
+#: candidate silently promoting into an environment that can't unpickle it.
+DEFAULT_ALLOWED_MODEL_MODULES = ("sklearn", "xgboost", "lightgbm")
 
 
 class PromotionRefused(Exception):
@@ -128,6 +143,39 @@ def load_candidate(client: mlflow.MlflowClient, version: str):
     except Exception as exc:
         raise PromotionRefused(f"Candidate v{version} failed to load: {exc}") from exc
     return model, mv
+
+
+def _underlying_estimator(model):
+    """The actual fitted estimator a candidate wraps: CalibratedModel's own
+    base_pipeline's 'model' step, or a bare zoo Pipeline's 'model' step."""
+    pipeline = getattr(model, "base_pipeline", model)
+    return pipeline.named_steps["model"]
+
+
+def check_model_class(model, allowed_modules: set[str]) -> None:
+    """Refuse a candidate whose fitted estimator comes from a third-party
+    library outside the deployment target's declared allowed set — e.g. an
+    XGBoost/LightGBM candidate promoted while the serving environment only
+    has scikit-learn installed. Without this, that mismatch surfaces as an
+    unpickle-time ImportError at the deployed Lambda's cold start instead of
+    here, at promotion time, where it's cheap and gets a clear message.
+
+    Project-native estimators (module prefix 'src', e.g. PoleSitterBaseline)
+    are always allowed — they carry no third-party dependency beyond what
+    every deployment target already needs (numpy/pandas), so there is
+    nothing environment-specific to check.
+    """
+    estimator = _underlying_estimator(model)
+    module_root = type(estimator).__module__.split(".")[0]
+    if module_root == "src":
+        return
+    if module_root not in allowed_modules:
+        raise PromotionRefused(
+            f"Candidate model class {type(estimator).__name__} (module "
+            f"'{module_root}') is not supported by this deployment target's "
+            f"allowed model modules {sorted(allowed_modules)} — install "
+            f"{module_root} there, or choose a different candidate."
+        )
 
 
 def check_schema_and_predictions(model, features: pd.DataFrame) -> None:
@@ -203,7 +251,16 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: data/processed/features.parquet).")
     parser.add_argument("--top1-tolerance", type=float, default=DEFAULT_TOP1_TOLERANCE)
     parser.add_argument("--spearman-tolerance", type=float, default=DEFAULT_SPEARMAN_TOLERANCE)
+    parser.add_argument("--allowed-model-modules",
+                        default=",".join(DEFAULT_ALLOWED_MODEL_MODULES),
+                        help="Comma-separated third-party ML modules this "
+                             "deployment target supports (default: "
+                             f"{','.join(DEFAULT_ALLOWED_MODEL_MODULES)} — "
+                             "permissive, no live deployment is constrained "
+                             "yet). E.g. 'sklearn' for a minimal Lambda "
+                             "build with no xgboost/lightgbm installed.")
     args = parser.parse_args(argv)
+    allowed_model_modules = {m.strip() for m in args.allowed_model_modules.split(",") if m.strip()}
 
     if not args.features_source.exists():
         print(f"ERROR: {args.features_source} not found — run "
@@ -220,9 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Candidate: {REGISTERED_MODEL_NAME} v{version} "
               f"({type(model).__name__}, run {mv.run_id})")
 
+        check_model_class(model, allowed_model_modules)
+        print(f"[1/3] Model-class check PASS "
+              f"(allowed: {sorted(allowed_model_modules)})")
+
         features = pd.read_parquet(args.features_source)
         check_schema_and_predictions(model, features)
-        print(f"[1/2] Smoke checks (load, schema, non-degenerate on "
+        print(f"[2/3] Smoke checks (load, schema, non-degenerate on "
               f"{SMOKE_RACE_SAMPLE} real races) PASS")
 
         split = temporal_split(features)
@@ -242,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"No existing bundle (or no recorded metrics) at {bundle_dir} — "
                   "regression check skipped.")
-        print(f"[2/2] Metric non-regression PASS "
+        print(f"[3/3] Metric non-regression PASS "
               f"(candidate top1_accuracy={candidate_metrics['top1_accuracy']:.4f}, "
               f"spearman_corr={candidate_metrics.get('spearman_corr', float('nan')):.4f})")
 

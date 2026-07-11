@@ -103,15 +103,15 @@ def env(tmp_mlflow, tmp_path):
     }
 
 
-def _register(env, split=None, alias="Staging"):
+def _register(env, split=None, alias="Staging", name="logreg"):
     return register_model(
-        "logreg", split or env["split"], alias=alias,
+        name, split or env["split"], alias=alias,
         bundle_root=env["bundle_root"], features_source=env["features_path"],
         artifacts_root=env["artifacts_root"],
     )
 
 
-def _promote_args(env, alias="Staging", version=None):
+def _promote_args(env, alias="Staging", version=None, allowed_model_modules=None):
     args = [
         "--alias", alias,
         "--tracking-uri", env["tracking_uri"],
@@ -121,6 +121,8 @@ def _promote_args(env, alias="Staging", version=None):
     ]
     if version is not None:
         args += ["--version", str(version)]
+    if allowed_model_modules is not None:
+        args += ["--allowed-model-modules", allowed_model_modules]
     return args
 
 
@@ -145,6 +147,40 @@ def test_resolve_version_empty_registry_refuses(env):
     client = mlflow.MlflowClient(tracking_uri=env["tracking_uri"])
     with pytest.raises(promote_model.PromotionRefused, match="No versions"):
         promote_model.resolve_version(client, None)
+
+
+# ---------------------------------------------------------------------------
+# check_model_class (Phase 4 Tranche D Item 1c)
+# ---------------------------------------------------------------------------
+
+def test_check_model_class_allows_permitted_module(env):
+    version = _register(env, name="logreg")
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    promote_model.check_model_class(model, {"sklearn"})  # no raise
+
+
+def test_check_model_class_refuses_disallowed_module(env):
+    version = _register(env, name="xgboost")
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    with pytest.raises(promote_model.PromotionRefused, match="xgboost"):
+        promote_model.check_model_class(model, {"sklearn"})
+
+
+def test_check_model_class_default_set_allows_all_zoo_families(env):
+    for name in ("logreg", "random_forest", "xgboost", "lightgbm", "pole_baseline"):
+        version = _register(env, name=name)
+        model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+        promote_model.check_model_class(
+            model, set(promote_model.DEFAULT_ALLOWED_MODEL_MODULES)
+        )  # no raise, any zoo family
+
+
+def test_check_model_class_always_allows_project_native_estimator(env):
+    """pole_baseline (PoleSitterBaseline, module 'src.*') has no third-party
+    dependency to check — always allowed, even under an empty allowed set."""
+    version = _register(env, name="pole_baseline")
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    promote_model.check_model_class(model, set())  # no raise
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +303,41 @@ def test_promote_succeeds_for_legitimate_candidate(env, served):
     _, info = load_bundle(served_dir)
     assert info.version == str(next_version)
     assert info.metrics   # populated, not the empty-dict legacy default
+
+
+def test_promote_refuses_disallowed_model_class_and_leaves_bundle_untouched(env, served):
+    """End-to-end mirror of the regression-refusal test above, but for the
+    model-class gate: a real xgboost candidate, refused because the
+    deployment target only allows sklearn, bundle byte-for-byte untouched."""
+    good_version, served_dir, backup_dir = served
+    good_manifest = (served_dir / "manifest.json").read_text()
+
+    xgb_version = _register(env, name="xgboost")
+    assert xgb_version != good_version
+    _restore_served(served_dir, backup_dir)   # undo register_model's own auto-export
+
+    rc = promote_model.main(
+        _promote_args(env, version=xgb_version, allowed_model_modules="sklearn")
+    )
+
+    assert rc == 1
+    assert (served_dir / "manifest.json").read_text() == good_manifest
+
+
+def test_promote_succeeds_disallowed_class_under_permissive_default(env, served):
+    """Same xgboost candidate, default --allowed-model-modules (permissive)
+    — succeeds, confirming the gate only blocks when actually configured to."""
+    good_version, served_dir, backup_dir = served
+
+    xgb_version = _register(env, name="xgboost")
+    assert xgb_version != good_version
+    _restore_served(served_dir, backup_dir)
+
+    rc = promote_model.main(_promote_args(env, version=xgb_version))
+
+    assert rc == 0
+    _, info = load_bundle(served_dir)
+    assert info.version == str(xgb_version)
 
 
 def test_promote_first_ever_promotion_has_no_baseline_to_compare(env):
