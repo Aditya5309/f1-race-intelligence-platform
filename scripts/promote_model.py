@@ -42,23 +42,51 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      driver gets an identical probability (a constant-output model would
      pass both of predict_race's own checks while being useless).
   4. Metric non-regression — the candidate is scored fresh on the
-     Decision-008 validation split (2022-2023, ~44 races) via evaluate_all
-     (the same evaluation code every other module in this project uses,
-     including the Tranche A Spearman baseline) and compared against
-     whatever's recorded in the CURRENTLY-SERVED bundle's manifest.json
-     (populated by register_model() since Tranche C Item 1). Refuses to
-     promote if top1_accuracy or spearman_corr regress by more than the
-     configured tolerance.
+     Decision-008 VALIDATION split (2022-2023, ~44 races) via evaluate_all
+     (the same evaluation code every other module in this project uses)
+     and compared against whatever's recorded in the CURRENTLY-SERVED
+     bundle's manifest.json (populated by register_model() since Tranche C
+     Item 1) — ALSO a val-split number, never test. Refuses to promote if
+     top1_accuracy or spearman_corr regress by more than the configured
+     tolerance.
 
-     Default tolerances: 0.03 (top1_accuracy) / 0.015 (spearman_corr). The
+     DO NOT compare either side of this check against "the 0.749 Spearman
+     baseline" quoted elsewhere in this project's docs/decision log — that
+     figure is explicitly, consistently the 2024 TEST split's score
+     (Section 11.3 test-set discipline: nothing outside `train.py
+     --final-test` may ever touch split.test, so this gate structurally
+     cannot use it). The currently-served v2 model's OWN val-split
+     spearman_corr, measured directly, is ~0.60 — a real, large, permanent
+     gap from the oft-quoted 0.749 that has nothing to do with any
+     regression; it is simply a different evaluation surface. A candidate
+     whose val spearman_corr looks alarming next to "0.749" may be
+     completely unremarkable next to the served bundle's ACTUAL val
+     spearman_corr — always compare against the manifest.json numbers this
+     gate itself prints, never against a remembered test-split figure.
+
+     No baseline to compare against is handled as TWO DIFFERENT cases, not
+     one (a bug found and fixed after the first real automated run let a
+     candidate promote with zero comparison, because both cases were
+     originally treated as "skip the check" — see PR #1's post-mortem):
+     no bundle exists at all -> genuinely nothing to compare, skip is safe
+     (first-ever promotion for an alias). A bundle EXISTS but its manifest
+     has no metrics recorded (e.g. a legacy bundle predating Tranche C)
+     -> REFUSE — a real served model is out there, we just don't know its
+     numbers, and silently letting anything through uncompared is exactly
+     the failure mode this gate exists to prevent.
+
+     Default tolerances: 0.03 (top1_accuracy) / 0.015 (spearman_corr),
+     both measured on THIS gate's own val-split comparison (see above —
+     not calibrated against the test-split 0.749 figure at all). The
      2022-2023 validation split is ~44 races (README §10), so one race
      flipping from a correct to incorrect top-1 pick moves top1_accuracy by
      ~1/44 ≈ 0.023 — the default tolerance covers a little more than one
      race of sampling noise without masking a real regression. Tranche B's
      genuine regressions (reports/phase4_tranche_b_retrain_findings.md)
-     moved spearman_corr by 0.017-0.021 on the 2024 test split; 0.015 would
-     have caught every one of those on this val-set analogue while
-     tolerating ordinary float-level noise.
+     moved spearman_corr by 0.017-0.021 on the 2024 test split; 0.015 is
+     carried over from that as a same-order-of-magnitude heuristic for the
+     val-split comparison actually performed here — it has not been
+     independently validated against real val-split regression sizes.
 
   Cheap by design: no retraining, no CV — just loading an already-fitted
   model, one predict_proba pass over the val split, and a handful of extra
@@ -291,18 +319,46 @@ def main(argv: list[str] | None = None) -> int:
         candidate_metrics = compute_candidate_metrics(model, split, position_order)
 
         bundle_dir = bundle_dir_for_alias(args.alias, args.bundle_root)
+        bundle_exists = True
         try:
             _, served_info = load_bundle(bundle_dir)
             served_metrics = served_info.metrics
         except FileNotFoundError:
+            bundle_exists = False
             served_metrics = {}
 
-        if served_metrics:
+        if not bundle_exists:
+            # Genuinely nothing to compare against — the only case where
+            # skipping the regression check is safe. Distinct from the
+            # elif below: a bundle that EXISTS but has no metrics recorded
+            # is NOT the same as no baseline at all, and must not be
+            # treated as one (see that branch's comment).
+            print(f"No existing bundle at {bundle_dir} — first-ever "
+                  "promotion for this alias, regression check skipped.")
+        elif not served_metrics:
+            # A real, currently-served model IS out there — we just don't
+            # have its metrics on record (e.g. a legacy bundle exported
+            # before Tranche C added metrics to the manifest). Silently
+            # skipping here would mean literally any candidate, however
+            # bad, sails through uncompared — exactly what let a
+            # spearman_corr=0.59 candidate promote past a served baseline
+            # historically measured at 0.749, undetected, in the first
+            # real automated run of this gate. Refuse instead: no metrics
+            # baseline means no comparison is possible, not that none is
+            # needed.
+            raise PromotionRefused(
+                f"Bundle at {bundle_dir} exists but its manifest has no "
+                "recorded metrics — cannot check for regression against "
+                "an unknown baseline. Establish a real baseline first "
+                "(re-register the currently-served model so its metrics "
+                "get recorded, e.g. `python -m src.models.train --register "
+                f"{args.alias} --calibrate --params-file "
+                "config/registered_model_params.json`) before promoting "
+                "anything through this gate."
+            )
+        else:
             check_regression(candidate_metrics, served_metrics,
                              args.top1_tolerance, args.spearman_tolerance)
-        else:
-            print(f"No existing bundle (or no recorded metrics) at {bundle_dir} — "
-                  "regression check skipped.")
         print(f"[3/3] Metric non-regression PASS "
               f"(candidate top1_accuracy={candidate_metrics['top1_accuracy']:.4f}, "
               f"spearman_corr={candidate_metrics.get('spearman_corr', float('nan')):.4f})")

@@ -29,8 +29,9 @@ import pandas as pd
 import pytest
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
-from src.models.serving_bundle import load_bundle
-from src.models.splits import TemporalSplit, temporal_split
+from src.models.registry import get_model
+from src.models.serving_bundle import ModelInfo, export_bundle, load_bundle
+from src.models.splits import TemporalSplit, temporal_split, to_xy
 from src.models.train import register_model
 from tests.conftest import set_tmp_experiment
 
@@ -350,6 +351,42 @@ def test_promote_first_ever_promotion_has_no_baseline_to_compare(env):
 
     assert rc == 0
     assert (env["bundle_root"] / "staging" / "manifest.json").exists()
+
+
+def test_promote_refuses_when_served_bundle_has_no_metrics(env):
+    """The bug found after the first real automated run: a served bundle
+    that EXISTS but has no metrics recorded (e.g. a legacy pre-Tranche-C
+    export — exactly the real committed artifacts/serving/staging/
+    manifest.json's actual shape, no "metrics" key at all) is NOT the same
+    as no baseline at all — it must refuse, not silently skip the
+    comparison and let anything through."""
+    X, y, _ = to_xy(env["split"].train)
+    legacy_model = get_model("logreg", y).fit(X, y)
+    legacy_info = ModelInfo(
+        name="f1-winner", version="1", alias="Staging", run_id="legacy",
+        trained_at="2026-07-03T18:25:30+00:00", calibration="none",
+        model_class="Pipeline",
+        # metrics deliberately omitted -> defaults to {} (ModelInfo's own
+        # default_factory), matching the real legacy manifest exactly.
+    )
+    served_dir = export_bundle(legacy_model, legacy_info, bundle_root=env["bundle_root"])
+    backup_dir = env["tmp_path"] / "legacy_backup"
+    shutil.copytree(served_dir, backup_dir)
+    served_manifest_before = (served_dir / "manifest.json").read_text()
+
+    version = _register(env)   # a real, perfectly fine candidate — but its
+                                # own register_model() call ALSO auto-exports
+                                # (unrelated to this gate), clobbering the
+                                # legacy bundle above; restore it, simulating
+                                # "this candidate was registered but never
+                                # promoted", same pattern as `served` fixture.
+    shutil.rmtree(served_dir)
+    shutil.copytree(backup_dir, served_dir)
+
+    rc = promote_model.main(_promote_args(env, version=version))
+
+    assert rc == 1
+    assert (served_dir / "manifest.json").read_text() == served_manifest_before
 
 
 def test_promote_missing_features_source_returns_1(env, capsys):
