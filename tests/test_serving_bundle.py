@@ -16,6 +16,7 @@ Coverage:
 """
 
 import json
+import sys
 
 import numpy as np
 import pandas as pd
@@ -110,6 +111,22 @@ def test_load_bundle_roundtrip(tmp_path, fitted_model, sample_info):
     model, info = load_bundle(bundle_dir)
 
     assert isinstance(info, ModelInfo)
+    assert info == sample_info
+    X, y, _ = to_xy(_synthetic_frame(seed=1))
+    np.testing.assert_array_equal(
+        model.predict_proba(X)[:, 1], fitted_model.predict_proba(X)[:, 1]
+    )
+
+
+def test_load_bundle_does_not_need_mlflow_importable(tmp_path, fitted_model, sample_info, monkeypatch):
+    """Phase 4 Tranche D Item 1b: load_bundle() (predict.py/app/api.py's
+    entire serving path) must not need mlflow installed at all — only
+    export_bundle() (training/registration-side) still does."""
+    bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
+
+    monkeypatch.setitem(sys.modules, "mlflow", None)
+    model, info = load_bundle(bundle_dir)
+
     assert info == sample_info
     X, y, _ = to_xy(_synthetic_frame(seed=1))
     np.testing.assert_array_equal(
