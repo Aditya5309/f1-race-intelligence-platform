@@ -12,6 +12,8 @@ Plus Decision-013 metadata integrity (single source of truth in
 src/features/metadata.py).
 """
 
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -90,6 +92,37 @@ def test_tuned_candidates_declare_distributions():
     for name in ("xgboost", "lightgbm", "logreg", "random_forest"):
         assert MODEL_ZOO[name].param_distributions, name
     assert MODEL_ZOO["pole_baseline"].param_distributions == {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Tranche D Item 1a — xgboost/lightgbm are imported lazily, only by
+# the specific candidate that needs them. Serving a non-boosted-trees model
+# (the currently-registered logreg) must not require either installed.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("blocked", ["xgboost", "lightgbm"])
+@pytest.mark.parametrize("name", ["logreg", "random_forest", "pole_baseline"])
+def test_get_model_unaffected_by_blocking_unrelated_booster(monkeypatch, blocked, name):
+    """sys.modules[blocked] = None makes `import blocked` raise ImportError —
+    the standard way to simulate "not installed" without actually
+    uninstalling anything. Building a candidate that never imports xgboost/
+    lightgbm must succeed regardless."""
+    monkeypatch.setitem(sys.modules, blocked, None)
+    X, y = _training_data()
+    pipeline = get_model(name, y)
+    pipeline.fit(X, y)
+    proba = pipeline.predict_proba(X)
+    assert proba.shape == (len(X), 2)
+
+
+@pytest.mark.parametrize("blocked,candidate", [("xgboost", "xgboost"), ("lightgbm", "lightgbm")])
+def test_get_model_raises_import_error_when_its_own_booster_is_blocked(monkeypatch, blocked, candidate):
+    """The flip side: actually requesting xgboost/lightgbm still needs it
+    installed — a clean ImportError, not a confusing failure elsewhere."""
+    monkeypatch.setitem(sys.modules, blocked, None)
+    _, y = _training_data()
+    with pytest.raises(ImportError):
+        get_model(candidate, y)
 
 
 # ---------------------------------------------------------------------------

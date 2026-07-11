@@ -37,7 +37,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMClassifier
 from scipy.stats import loguniform, randint, uniform
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.ensemble import RandomForestClassifier
@@ -45,7 +44,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from xgboost import XGBClassifier
 
 from src.features.pipeline import FEATURE_COLUMNS
 
@@ -235,6 +233,11 @@ def _build_random_forest(y_train: pd.Series) -> Pipeline:
 
 
 def _build_xgboost(y_train: pd.Series) -> Pipeline:
+    # Imported here, not at module level: serving a non-boosted-trees model
+    # (e.g. the registered logreg) must not require xgboost to be
+    # installed at all — only actually building/training THIS candidate does.
+    from xgboost import XGBClassifier
+
     return Pipeline([
         ("guard", ColumnGuard()),
         # No imputer: XGBoost handles NaN natively (missing-branch learning),
@@ -251,6 +254,9 @@ def _build_xgboost(y_train: pd.Series) -> Pipeline:
 
 
 def _build_lightgbm(y_train: pd.Series) -> Pipeline:
+    # See _build_xgboost's comment — same reasoning for lightgbm.
+    from lightgbm import LGBMClassifier
+
     return Pipeline([
         ("guard", ColumnGuard()),
         ("model", LGBMClassifier(
