@@ -85,6 +85,13 @@ DEFAULT_TRACKING_URI = f"sqlite:///{(_PROJECT_ROOT / 'mlflow.db').as_posix()}"
 TOP1_TRIPWIRE = 0.70           # design Section 11.6
 DEFAULT_TUNE_ITER = 40         # design Section 7
 SEED = 42
+#: Shared source of truth for retrain hyperparameters (Phase 4 Tranche D) —
+#: {"model", "calibrate", "params"}. Read by the manual `--params-file` CLI
+#: flag below AND by scripts/refresh_and_freeze.py's automated retrain path,
+#: so both cannot silently drift onto different configs. Update this file
+#: (after actually re-running --tune) whenever a real retune picks a new
+#: config — do not hand-edit the params without re-tuning.
+DEFAULT_PARAMS_CONFIG_PATH = _PROJECT_ROOT / "config" / "registered_model_params.json"
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +122,14 @@ def _align_position_order(df: pd.DataFrame, position_order: pd.Series | None) ->
         return None
     index = pd.MultiIndex.from_frame(df[["raceId", "driverId"]])
     return position_order.reindex(index).to_numpy(dtype=float)
+
+
+def load_registered_model_config(path: Path = DEFAULT_PARAMS_CONFIG_PATH) -> dict:
+    """Read {"model", "calibrate", "params"} from the shared retrain-config
+    file (Phase 4 Tranche D) — the source both the manual `--params-file`
+    CLI flag and scripts/refresh_and_freeze.py's automated retrain read, so
+    a real re-tune's chosen config only needs updating in one place."""
+    return json.loads(path.read_text())
 
 
 def check_tripwire(metrics: dict[str, float], context: str) -> None:
@@ -454,6 +469,7 @@ def register_model(
     features_source: Path = FEATURES_PATH,
     artifacts_root: Path | None = None,
     position_order: pd.Series | None = None,
+    export: bool = True,
 ) -> str:
     """
     Register a fitted pipeline as `f1-winner` and point `alias` at it.
@@ -497,6 +513,17 @@ def register_model(
     comparison against the currently-served bundle's manifest. Calling
     register_model() directly still works — it's what promote_model.py's
     own candidates are registered with — but bypasses that gate.
+
+    export=False (Phase 4 Tranche D): skip both the bundle export AND the
+    features snapshot freeze — only create the MLflow version/alias, touch
+    nothing under artifacts/. For automated pipelines (scripts/
+    refresh_and_freeze.py's scheduled-workflow path) that route the
+    resulting version through promote_model.py afterward: with the default
+    export=True, this function would ALREADY have overwritten
+    artifacts/serving/ before promote_model.py's gate ever runs, making the
+    gate a no-op. Manual/interactive use (the CLI's --register, ad-hoc
+    Tranche-B-style retrain sessions) keeps the default True — a human is
+    already about to inspect the result.
 
     Decision 029: registration ALSO freezes a runtime features snapshot
     (src.models.serving_bundle.export_features_snapshot) by copying
@@ -568,23 +595,24 @@ def register_model(
         position_order=_align_position_order(split.val, position_order),
     )
 
-    from src.models.serving_bundle import (
-        ModelInfo,
-        export_bundle,
-        export_features_snapshot,
-    )
-    bundle_info = ModelInfo(
-        name=REGISTERED_MODEL_NAME,
-        version=str(version),
-        alias=alias,
-        run_id=run_id,
-        trained_at=datetime.now(UTC).isoformat(timespec="seconds"),
-        calibration=calibration,
-        model_class=type(model_obj).__name__,
-        metrics=metrics,
-    )
-    export_bundle(model_obj, bundle_info, bundle_root=bundle_root)
-    export_features_snapshot(features_source, artifacts_root=artifacts_root)
+    if export:
+        from src.models.serving_bundle import (
+            ModelInfo,
+            export_bundle,
+            export_features_snapshot,
+        )
+        bundle_info = ModelInfo(
+            name=REGISTERED_MODEL_NAME,
+            version=str(version),
+            alias=alias,
+            run_id=run_id,
+            trained_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            calibration=calibration,
+            model_class=type(model_obj).__name__,
+            metrics=metrics,
+        )
+        export_bundle(model_obj, bundle_info, bundle_root=bundle_root)
+        export_features_snapshot(features_source, artifacts_root=artifacts_root)
 
     return str(version)
 
@@ -617,12 +645,26 @@ def main(argv: list[str] | None = None) -> int:
                         help="With --register: where to freeze the runtime "
                              "features snapshot (Decision 029). Default: "
                              "artifacts/ (writes artifacts/features.parquet).")
+    parser.add_argument("--no-export", action="store_true",
+                        help="With --register: create the MLflow version/"
+                             "alias only — skip the (unchecked) bundle/"
+                             "features-snapshot export (Phase 4 Tranche D). "
+                             "For automated pipelines that gate the export "
+                             "through scripts/promote_model.py afterward; "
+                             "manual use should omit this flag.")
     parser.add_argument("--params", default=None,
                         help="JSON dict of pipeline params (copy from --tune "
                              "output) applied to --final-test / --register / a "
                              "single-model run — e.g. '{\"model__C\": 0.5}'. "
                              "Without this, the selected configuration cannot "
                              "reach the test/registration steps.")
+    parser.add_argument("--params-file", type=Path, default=None,
+                        help="Read the 'params' dict from a JSON file "
+                             "instead of inlining it on the command line — "
+                             f"e.g. --params-file {DEFAULT_PARAMS_CONFIG_PATH} "
+                             "(Phase 4 Tranche D's shared retrain-config "
+                             "source of truth). Mutually exclusive with "
+                             "--params.")
     parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI)
     parser.add_argument("--experiment", default=EXPERIMENT_NAME)
     args = parser.parse_args(argv)
@@ -630,10 +672,13 @@ def main(argv: list[str] | None = None) -> int:
     single_model_actions = args.tune or args.final_test or args.register
     if single_model_actions and args.model == "all":
         parser.error("--tune / --final-test / --register need an explicit --model.")
-    if args.params and args.tune:
-        parser.error("--params cannot be combined with --tune (tuning produces params).")
-    if args.params and args.model == "all":
-        parser.error("--params needs an explicit --model.")
+    if args.params and args.params_file:
+        parser.error("--params and --params-file are mutually exclusive.")
+    if (args.params or args.params_file) and args.tune:
+        parser.error("--params/--params-file cannot be combined with --tune "
+                     "(tuning produces params).")
+    if (args.params or args.params_file) and args.model == "all":
+        parser.error("--params/--params-file needs an explicit --model.")
     if args.calibrate and not args.register:
         parser.error("--calibrate is only valid together with --register "
                      "(the calibrated wrapper is a registration-time artifact).")
@@ -646,6 +691,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--params is not valid JSON: {exc}")
         if not isinstance(params, dict):
             parser.error("--params must be a JSON object of pipeline params.")
+    elif args.params_file:
+        if not args.params_file.exists():
+            parser.error(f"--params-file {args.params_file} not found.")
+        try:
+            params = json.loads(args.params_file.read_text())["params"]
+        except (json.JSONDecodeError, KeyError) as exc:
+            parser.error(f"--params-file {args.params_file} must be JSON with "
+                         f"a 'params' key: {exc}")
+        if not isinstance(params, dict):
+            parser.error(f"--params-file {args.params_file}'s 'params' must be a JSON object.")
 
     if not FEATURES_PATH.exists():
         print(f"ERROR: {FEATURES_PATH} not found — run `python -m src.features.pipeline`.",
@@ -688,21 +743,27 @@ def main(argv: list[str] | None = None) -> int:
                                  bundle_root=args.bundle_root,
                                  features_source=FEATURES_PATH,
                                  artifacts_root=args.artifacts_root,
-                                 position_order=position_order)
+                                 position_order=position_order,
+                                 export=not args.no_export)
         suffix = " (isotonic-oof calibrated)" if args.calibrate else ""
-        from src.models.serving_bundle import (
-            DEFAULT_FEATURES_ARTIFACT,
-            bundle_dir_for_alias,
-        )
-        bundle_dir = bundle_dir_for_alias(args.register, args.bundle_root)
-        features_artifact = (
-            (args.artifacts_root / "features.parquet")
-            if args.artifacts_root else DEFAULT_FEATURES_ARTIFACT
-        )
         print(f"Registered {REGISTERED_MODEL_NAME} v{version} as "
               f"@{args.register}{suffix}.")
-        print(f"Serving bundle exported to {bundle_dir}")
-        print(f"Runtime features snapshot frozen to {features_artifact}")
+        if args.no_export:
+            print("--no-export: bundle/features snapshot NOT touched — "
+                  f"promote v{version} via `python scripts/promote_model.py "
+                  f"--alias {args.register} --version {version}`.")
+        else:
+            from src.models.serving_bundle import (
+                DEFAULT_FEATURES_ARTIFACT,
+                bundle_dir_for_alias,
+            )
+            bundle_dir = bundle_dir_for_alias(args.register, args.bundle_root)
+            features_artifact = (
+                (args.artifacts_root / "features.parquet")
+                if args.artifacts_root else DEFAULT_FEATURES_ARTIFACT
+            )
+            print(f"Serving bundle exported to {bundle_dir}")
+            print(f"Runtime features snapshot frozen to {features_artifact}")
         return 0
 
     if args.tune:

@@ -17,6 +17,7 @@ Plus: feature-importance frame with Decision-013 classes and missing-
 indicator mapping; tune_candidate selection; model registration + alias.
 """
 
+import json
 from pathlib import Path
 
 import mlflow
@@ -26,12 +27,13 @@ import pytest
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.evaluate import top1_accuracy
-from src.models.registry import get_model
+from src.models.registry import MODEL_ZOO, get_model
 from src.models.splits import temporal_split, to_xy
 from src.models.train import (
     check_tripwire,
     feature_importance_frame,
     final_test,
+    load_registered_model_config,
     main,
     register_model,
     run_cv,
@@ -306,6 +308,44 @@ def test_register_rejects_unknown_alias(tmp_mlflow):
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 Tranche D — register_model(export=False): version created, nothing
+# touched under artifacts/ (the automated-pipeline path that lets
+# promote_model.py be the only thing that writes the served bundle).
+# ---------------------------------------------------------------------------
+
+def test_register_model_export_false_creates_version_without_touching_bundle(tmp_mlflow, tmp_path):
+    split = temporal_split(_full_frame())
+    bundle_root, artifacts_root = tmp_path / "bundle", tmp_path / "artifacts"
+    version = register_model("pole_baseline", split, alias="Staging",
+                             bundle_root=bundle_root,
+                             features_source=_features_snapshot_source(tmp_path),
+                             artifacts_root=artifacts_root,
+                             export=False)
+
+    client = mlflow.MlflowClient()
+    resolved = client.get_model_version_by_alias("f1-winner", "Staging")
+    assert str(resolved.version) == str(version)   # MLflow version/alias still created
+    assert not bundle_root.exists()                 # but nothing exported
+    assert not artifacts_root.exists()
+
+
+def test_cli_register_no_export_skips_bundle(tmp_mlflow, monkeypatch, tmp_path, capsys):
+    _patch_features(monkeypatch, tmp_path)
+    rc = main(["--model", "logreg", "--register", "Staging", "--no-export",
+               "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
+               "--experiment", "cli-test",
+               "--bundle-root", str(tmp_path / "bundle"),
+               "--artifacts-root", str(tmp_path / "artifacts")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Registered f1-winner v1 as @Staging" in out
+    assert "--no-export" in out
+    assert "promote_model.py" in out
+    assert not (tmp_path / "bundle").exists()
+    assert not (tmp_path / "artifacts").exists()
+
+
+# ---------------------------------------------------------------------------
 # Phase 4 Tranche C Item 1 — manifest.json evaluation metrics
 # ---------------------------------------------------------------------------
 
@@ -405,10 +445,50 @@ def test_cli_rejects_bad_params_combinations():
         ["--params", '{"model__C": 1}'],                          # params + all
         ["--model", "logreg", "--params", "not-json"],            # invalid JSON
         ["--model", "logreg", "--params", "[1, 2]"],              # non-dict JSON
+        ["--model", "logreg", "--params", "{}", "--params-file", "x.json"],  # both
     ):
         with pytest.raises(SystemExit) as excinfo:
             main(flags)
         assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Tranche D — --params-file / load_registered_model_config
+# ---------------------------------------------------------------------------
+
+def test_load_registered_model_config_reads_the_real_committed_file():
+    """The actual config/registered_model_params.json this project ships —
+    both the manual --params-file flag and scripts/refresh_and_freeze.py
+    read this exact file."""
+    config = load_registered_model_config()
+    assert config["model"] in MODEL_ZOO
+    assert isinstance(config["params"], dict)
+    assert isinstance(config["calibrate"], bool)
+
+
+def test_cli_register_params_file(tmp_mlflow, monkeypatch, tmp_path, capsys):
+    _patch_features(monkeypatch, tmp_path)
+    params_file = tmp_path / "params.json"
+    params_file.write_text(json.dumps({"model": "logreg", "calibrate": True,
+                                       "params": {"model__C": 0.5}}))
+    rc = main(["--model", "logreg", "--register", "Staging",
+               "--params-file", str(params_file),
+               "--tracking-uri", f"sqlite:///{tmp_path / 'mlflow.db'}",
+               "--experiment", "cli-test",
+               "--bundle-root", str(tmp_path / "bundle"),
+               "--artifacts-root", str(tmp_path / "artifacts")])
+    assert rc == 0
+    version = mlflow.MlflowClient().get_model_version_by_alias("f1-winner", "Staging").version
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    assert model.named_steps["model"].get_params()["C"] == 0.5
+
+
+def test_cli_register_params_file_missing_returns_argparse_error(tmp_mlflow, monkeypatch, tmp_path):
+    _patch_features(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--model", "logreg", "--register", "Staging",
+              "--params-file", str(tmp_path / "does-not-exist.json")])
+    assert excinfo.value.code == 2
 
 
 def test_data_fingerprint_format():

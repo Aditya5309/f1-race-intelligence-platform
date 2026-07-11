@@ -230,8 +230,11 @@ mlflow ui                                       # browse experiments
 #     immediately overwrites artifacts/serving/staging/ + artifacts/features.parquet,
 #     unchecked. Fine for routine dev iteration; NOT the sanctioned path for
 #     a real promotion (see 4c and "Promotion & rollback" below).
+#     --params-file reads config/registered_model_params.json (Phase 4
+#     Tranche D's shared source of truth for the tuned config — also read
+#     by the scheduled retrain workflow, so both stay in sync).
 python -m src.models.train --model logreg --register Staging --calibrate \
-    --params '{"model__C": 0.01653693718282442}'
+    --params-file config/registered_model_params.json
 
 # 4c. Promote a registered candidate to the live serving bundle, gated
 #     (Phase 4 Tranche C) — smoke-tests the candidate on real races and

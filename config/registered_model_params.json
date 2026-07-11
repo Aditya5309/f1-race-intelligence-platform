@@ -1,0 +1,9 @@
+{
+  "model": "logreg",
+  "calibrate": true,
+  "params": {
+    "model__C": 0.01653693718282442
+  },
+  "updated_at": "2026-07-07",
+  "note": "Shared source of truth for retrain hyperparameters (Phase 4 Tranche D). Selected via `python -m src.models.train --model logreg --tune` (Decision 013/014's tuned finalist). Both the manual command in README's Quick Start (--params-file config/registered_model_params.json) and the scheduled retrain workflow (scripts/refresh_and_freeze.py) read this file. Update it — and re-run --tune first — whenever a real re-tune picks a new model/config; do not hand-edit the params without re-tuning, and do not let this go stale silently."
+}
