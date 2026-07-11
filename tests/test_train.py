@@ -305,6 +305,70 @@ def test_register_rejects_unknown_alias(tmp_mlflow):
         register_model("pole_baseline", split, alias="Canary")
 
 
+# ---------------------------------------------------------------------------
+# Phase 4 Tranche C Item 1 — manifest.json evaluation metrics
+# ---------------------------------------------------------------------------
+
+def test_register_model_records_val_metrics_in_manifest(tmp_mlflow, tmp_path):
+    from src.models.serving_bundle import load_bundle
+
+    split = temporal_split(_full_frame())
+    register_model("logreg", split, alias="Staging",
+                   bundle_root=tmp_path / "bundle",
+                   features_source=_features_snapshot_source(tmp_path),
+                   artifacts_root=tmp_path / "artifacts")
+    _, info = load_bundle(tmp_path / "bundle" / "staging")
+
+    assert info.metrics["top1_accuracy"] == pytest.approx(1.0)   # perfectly learnable signal
+    assert "n_races" in info.metrics and "log_loss" in info.metrics
+
+
+def test_register_model_production_metrics_use_train_only_refit(tmp_mlflow, tmp_path):
+    """Production's registered model_obj is fit on train+val, so scoring it
+    directly on val would leak (Section 11.3 discipline). The manifest's
+    metrics must instead match an independent train-only fit scored on val
+    — assert equality against that computation directly, rather than just
+    checking the metrics look plausible."""
+    from src.models.evaluate import evaluate_all
+    from src.models.serving_bundle import load_bundle
+
+    split = temporal_split(_full_frame())
+    register_model("logreg", split, alias="Production",
+                   bundle_root=tmp_path / "bundle",
+                   features_source=_features_snapshot_source(tmp_path),
+                   artifacts_root=tmp_path / "artifacts")
+    _, info = load_bundle(tmp_path / "bundle" / "production")
+
+    X_tr, y_tr, _ = to_xy(split.train)
+    expected_model = get_model("logreg", y_tr).fit(X_tr, y_tr)
+    X_val, y_val, races_val = to_xy(split.val)
+    expected = evaluate_all(y_val, expected_model.predict_proba(X_val)[:, 1], races_val)
+
+    assert info.metrics["top1_accuracy"] == pytest.approx(expected["top1_accuracy"])
+    assert info.metrics["log_loss"] == pytest.approx(expected["log_loss"])
+
+
+def test_register_model_staging_metrics_reuse_registered_model(tmp_mlflow, tmp_path):
+    """Staging's model_obj IS fit on train only, so it can safely be scored
+    on val directly — no extra fit needed. Assert the manifest metrics match
+    scoring the registered model itself."""
+    from src.models.evaluate import evaluate_all
+    from src.models.serving_bundle import load_bundle
+
+    split = temporal_split(_full_frame())
+    version = register_model("logreg", split, alias="Staging",
+                             bundle_root=tmp_path / "bundle",
+                             features_source=_features_snapshot_source(tmp_path),
+                             artifacts_root=tmp_path / "artifacts")
+    _, info = load_bundle(tmp_path / "bundle" / "staging")
+
+    registered_model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    X_val, y_val, races_val = to_xy(split.val)
+    expected = evaluate_all(y_val, registered_model.predict_proba(X_val)[:, 1], races_val)
+
+    assert info.metrics["top1_accuracy"] == pytest.approx(expected["top1_accuracy"])
+
+
 def test_tune_rejects_zero_iterations(tmp_mlflow):
     split = temporal_split(_full_frame())
     with pytest.raises(ValueError, match="n_iter"):

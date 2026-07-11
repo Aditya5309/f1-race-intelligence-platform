@@ -144,8 +144,9 @@ def test_model_info_is_json_ready(staging):
     _, info = staging
     d = info.to_dict()
     assert set(d) == {"name", "version", "alias", "run_id", "trained_at",
-                      "calibration", "model_class"}
-    assert all(isinstance(v, str) for v in d.values())
+                      "calibration", "model_class", "metrics"}
+    assert all(isinstance(v, str) for k, v in d.items() if k != "metrics")
+    assert isinstance(d["metrics"], dict)
 
 
 # ---------------------------------------------------------------------------

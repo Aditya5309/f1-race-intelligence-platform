@@ -85,6 +85,7 @@ def test_export_bundle_writes_model_manifest_and_schema(tmp_path, fitted_model, 
     assert manifest["run_id"] == "abc123"
     assert manifest["calibration"] == "none"
     assert manifest["model_class"] == "Pipeline"
+    assert manifest["metrics"] == {}
     assert manifest["bundle_format_version"] == 1
     assert manifest["exported_at"].startswith("20")
 
@@ -114,6 +115,29 @@ def test_load_bundle_roundtrip(tmp_path, fitted_model, sample_info):
     np.testing.assert_array_equal(
         model.predict_proba(X)[:, 1], fitted_model.predict_proba(X)[:, 1]
     )
+
+
+def test_load_bundle_roundtrips_metrics(tmp_path, fitted_model, sample_info):
+    info_with_metrics = ModelInfo(
+        **{**sample_info.to_dict(), "metrics": {"top1_accuracy": 0.682, "spearman_corr": 0.749}}
+    )
+    bundle_dir = export_bundle(fitted_model, info_with_metrics, bundle_root=tmp_path)
+    _, info = load_bundle(bundle_dir)
+    assert info.metrics == {"top1_accuracy": 0.682, "spearman_corr": 0.749}
+
+
+def test_load_bundle_defaults_metrics_for_legacy_manifest(tmp_path, fitted_model, sample_info):
+    """A manifest.json written before Tranche C has no "metrics" key at all
+    — load_bundle must degrade to {} rather than KeyError, so bundles
+    already committed to the repo keep loading unchanged."""
+    bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
+    manifest_path = bundle_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["metrics"]
+    manifest_path.write_text(json.dumps(manifest))
+
+    _, info = load_bundle(bundle_dir)
+    assert info.metrics == {}
 
 
 def test_load_bundle_missing_directory_raises(tmp_path):

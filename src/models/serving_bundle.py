@@ -35,8 +35,11 @@ mlruns/, mlflow.db, reports/):
                                tracking URI, no registry client, no network.
                 manifest.json  ModelInfo fields, frozen at export time
                                (name, version, alias, run_id, trained_at,
-                               calibration, model_class) plus a bundle
-                               format version and the export timestamp.
+                               calibration, model_class, metrics — the
+                               evaluate_all() dict this bundle's model
+                               scored on the validation split, Phase 4
+                               Tranche C Item 1) plus a bundle format
+                               version and the export timestamp.
                 feature_schema.json
                                A human-readable mirror of the ColumnGuard
                                schema (training_schema(model)) — NOT
@@ -56,7 +59,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -78,6 +81,7 @@ _MANIFEST_FILENAME = "manifest.json"
 _FEATURE_SCHEMA_FILENAME = "feature_schema.json"
 _MODEL_INFO_FIELDS = (
     "name", "version", "alias", "run_id", "trained_at", "calibration", "model_class",
+    "metrics",
 )
 
 
@@ -91,6 +95,13 @@ class ModelInfo:
     trained_at: str          # ISO-8601 UTC, frozen at export time
     calibration: str         # "isotonic-oof" | "none"
     model_class: str         # e.g. "CalibratedModel", "Pipeline"
+    #: evaluate_all() metrics for this bundle's own fitted model, scored on
+    #: the Decision-008 validation split (Phase 4 Tranche C, Item 1) — what
+    #: this bundle actually scored, not just what it is. {} for bundles
+    #: exported before this field existed (load_bundle degrades gracefully;
+    #: see its manifest.get("metrics", {})) or when a caller has no honest
+    #: held-out metrics to report.
+    metrics: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -167,6 +178,12 @@ def load_bundle(bundle_dir: Path | str):
             "<alias> --calibrate` to produce one."
         )
     manifest = json.loads(manifest_path.read_text())
-    info = ModelInfo(**{field: manifest[field] for field in _MODEL_INFO_FIELDS})
+    # manifest.get("metrics", {}): older bundles (pre-Tranche-C) have no
+    # "metrics" key at all — degrade to {} rather than KeyError so existing
+    # committed bundles keep loading unchanged.
+    info = ModelInfo(**{
+        f: (manifest.get(f, {}) if f == "metrics" else manifest[f])
+        for f in _MODEL_INFO_FIELDS
+    })
     model = mlflow.sklearn.load_model(str(model_path))
     return model, info

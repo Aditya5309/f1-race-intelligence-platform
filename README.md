@@ -226,10 +226,18 @@ python -m src.models.train                      # stage 1: full model zoo
 python -m src.models.train --model logreg --tune  # stage 2: randomized search
 mlflow ui                                       # browse experiments
 
-# 4b. Register + freeze runtime artifacts (Decision 026/027/029) — refreshes
-#     BOTH artifacts/serving/staging/ and artifacts/features.parquet
+# 4b. Register a candidate in MLflow (Decision 026/027/029) — this ALSO
+#     immediately overwrites artifacts/serving/staging/ + artifacts/features.parquet,
+#     unchecked. Fine for routine dev iteration; NOT the sanctioned path for
+#     a real promotion (see 4c and "Promotion & rollback" below).
 python -m src.models.train --model logreg --register Staging --calibrate \
     --params '{"model__C": 0.01653693718282442}'
+
+# 4c. Promote a registered candidate to the live serving bundle, gated
+#     (Phase 4 Tranche C) — smoke-tests the candidate on real races and
+#     refuses if top1_accuracy/spearman_corr regressed vs. what's currently
+#     served; only touches artifacts/serving/ on success.
+python scripts/promote_model.py --alias Staging
 
 # 5. Score a race directly from the committed runtime artifacts
 python -m src.models.predict --race-id 1120
@@ -304,6 +312,12 @@ The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic
 **Calibration impact** (validation): ECE 0.153 → **0.012**, log-loss 0.268 → **0.088**, Brier 0.088 → 0.026, with top-1 accuracy unchanged.
 
 **Honest limitation, stated by design:** the model's top-1 edge over the pole-sitter baseline is concentrated in dominance seasons (2023: 90.9% vs 63.6%). In competitive seasons it reaches pole-baseline parity on top-1 while still adding top-3 recall and far better probability quality. The 2024 test set was evaluated exactly once and is not reused for tuning.
+
+### Promotion & rollback
+
+`python -m src.models.train --register` creates a real MLflow registry version and alias (Staging/Production), but it also **unconditionally overwrites** `artifacts/serving/<alias>/` the moment it runs — no validation in between. Since the deployed API only ever reads that frozen bundle (Decision 026/027; it never resolves a live registry alias), the registry's version history and what's actually served can silently diverge. `scripts/promote_model.py` (Phase 4 Tranche C) is the sanctioned gate for changing what's actually served: it loads an already-registered candidate, smoke-tests it against real races, and refuses to promote if `top1_accuracy`/`spearman_corr` regress vs. the currently-served bundle's own recorded metrics — see the script's docstring for the full check list and tolerance justification. Only on success does it touch `artifacts/serving/`.
+
+**Rollback = `git revert` the commit that last changed `artifacts/serving/staging/*`.** This works because `artifacts/` is committed to git (Decision 029) — unlike `data/`, `mlflow.db`, and `mlruns/`, which are gitignored — so the previous bundle's exact bytes are one revert away. There is deliberately **no MLflow-native rollback** (e.g. "point the alias back at version N-1 and have serving pick it up"): serving never consults the registry at request time, so moving an alias in MLflow wouldn't change anything being served. This is a consequence of Decision 026/027, not a gap to be filled later.
 
 ---
 

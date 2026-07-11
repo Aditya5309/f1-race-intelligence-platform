@@ -453,6 +453,7 @@ def register_model(
     bundle_root: Path | None = None,
     features_source: Path = FEATURES_PATH,
     artifacts_root: Path | None = None,
+    position_order: pd.Series | None = None,
 ) -> str:
     """
     Register a fitted pipeline as `f1-winner` and point `alias` at it.
@@ -469,6 +470,17 @@ def register_model(
 
     Requires a registry-capable tracking store (the default sqlite URI is).
 
+    Phase 4 Tranche C Item 1: the manifest ALSO records honest evaluation
+    metrics (evaluate_all on split.val) — what this bundle's model actually
+    scored, not just identity fields. Scored on a model fit on split.train
+    ONLY, regardless of alias: for alias="Staging" that's model_obj itself
+    (fit_df == split.train, so scoring it on val is safe); for
+    alias="Production" (fit_df == train+val) model_obj has already seen val,
+    so scoring IT on val would leak — a throwaway train-only refit is used
+    for the metrics instead, never touching split.test (Section 11.3).
+    `position_order` (see load_position_order), if given, adds the Spearman
+    metric to that dict, same convention as train_candidate/final_test.
+
     Decision 026/027: registration ALSO exports a frozen serving bundle
     (src.models.serving_bundle) to bundle_root/alias.lower() — the SAME
     already-fitted in-memory model_obj, no extra MLflow round trip. This is
@@ -476,6 +488,15 @@ def register_model(
     never resolves a live registry alias at request time. bundle_root
     defaults to artifacts/serving/ — TESTS MUST pass an explicit tmp
     bundle_root or they will write into the real project directory.
+
+    NOTE (Phase 4 Tranche C): this export is UNCHECKED — it overwrites
+    whatever bundle_root/alias.lower() currently holds with zero validation.
+    For a real promotion (as opposed to a routine registration during
+    development), use `scripts/promote_model.py` instead, which gates the
+    same export_bundle() call behind smoke checks and a metric-regression
+    comparison against the currently-served bundle's manifest. Calling
+    register_model() directly still works — it's what promote_model.py's
+    own candidates are registered with — but bypasses that gate.
 
     Decision 029: registration ALSO freezes a runtime features snapshot
     (src.models.serving_bundle.export_features_snapshot) by copying
@@ -528,6 +549,25 @@ def register_model(
         REGISTERED_MODEL_NAME, alias, version
     )
 
+    if alias == "Staging":
+        eval_model = model_obj
+    elif calibrate:
+        from src.models.calibration import fit_calibrated_model
+        eval_model = fit_calibrated_model(name, train_df=split.train, fit_df=split.train, params=params)
+    else:
+        X_tr, y_tr, _ = to_xy(split.train)
+        eval_model = get_model(name, y_tr)
+        if params:
+            eval_model.set_params(**params)
+        eval_model.fit(X_tr, y_tr)
+
+    X_val, y_val, races_val = to_xy(split.val)
+    y_prob_val = eval_model.predict_proba(X_val)[:, 1]
+    metrics = evaluate_all(
+        y_val, y_prob_val, races_val,
+        position_order=_align_position_order(split.val, position_order),
+    )
+
     from src.models.serving_bundle import (
         ModelInfo,
         export_bundle,
@@ -541,6 +581,7 @@ def register_model(
         trained_at=datetime.now(UTC).isoformat(timespec="seconds"),
         calibration=calibration,
         model_class=type(model_obj).__name__,
+        metrics=metrics,
     )
     export_bundle(model_obj, bundle_info, bundle_root=bundle_root)
     export_features_snapshot(features_source, artifacts_root=artifacts_root)
@@ -646,7 +687,8 @@ def main(argv: list[str] | None = None) -> int:
                                  params=params, calibrate=args.calibrate,
                                  bundle_root=args.bundle_root,
                                  features_source=FEATURES_PATH,
-                                 artifacts_root=args.artifacts_root)
+                                 artifacts_root=args.artifacts_root,
+                                 position_order=position_order)
         suffix = " (isotonic-oof calibrated)" if args.calibrate else ""
         from src.models.serving_bundle import (
             DEFAULT_FEATURES_ARTIFACT,
