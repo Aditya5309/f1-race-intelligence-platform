@@ -1,5 +1,5 @@
 {
-  "n_features": 31,
+  "n_features": 41,
   "feature_names": [
     "qualifying_position",
     "q1_sec",
@@ -11,6 +11,7 @@
     "pit_lane_start",
     "grid_adjusted",
     "grid_position_norm",
+    "grid_penalty_applied",
     "driver_wins_last_3",
     "driver_wins_last_5",
     "driver_wins_last_10",
@@ -23,6 +24,9 @@
     "constructor_wins_last_5",
     "constructor_podiums_last_5",
     "constructor_dnf_rate_last_5",
+    "qualifying_gap_to_teammate_current",
+    "qualifying_gap_to_teammate",
+    "race_pace_delta_to_teammate",
     "driver_circuit_starts",
     "driver_circuit_wins",
     "driver_circuit_avg_finish",
@@ -31,7 +35,13 @@
     "driver_standing_points_prev",
     "driver_standing_wins_prev",
     "constructor_standing_position_prev",
-    "constructor_standing_points_prev"
+    "constructor_standing_points_prev",
+    "race_precip_mm",
+    "race_temp_c",
+    "quali_precip_mm",
+    "conditions_changed",
+    "driver_wet_dry_delta",
+    "constructor_wet_dry_delta"
   ],
   "feature_dtypes": {
     "qualifying_position": "Int64",
@@ -44,6 +54,7 @@
     "pit_lane_start": "bool",
     "grid_adjusted": "Float64",
     "grid_position_norm": "Float64",
+    "grid_penalty_applied": "bool",
     "driver_wins_last_3": "float64",
     "driver_wins_last_5": "float64",
     "driver_wins_last_10": "float64",
@@ -56,6 +67,9 @@
     "constructor_wins_last_5": "float64",
     "constructor_podiums_last_5": "float64",
     "constructor_dnf_rate_last_5": "float64",
+    "qualifying_gap_to_teammate_current": "Float64",
+    "qualifying_gap_to_teammate": "float64",
+    "race_pace_delta_to_teammate": "float64",
     "driver_circuit_starts": "int64",
     "driver_circuit_wins": "float64",
     "driver_circuit_avg_finish": "float64",
@@ -64,6 +78,12 @@
     "driver_standing_points_prev": "float64",
     "driver_standing_wins_prev": "float64",
     "constructor_standing_position_prev": "float64",
-    "constructor_standing_points_prev": "float64"
+    "constructor_standing_points_prev": "float64",
+    "race_precip_mm": "float64",
+    "race_temp_c": "float64",
+    "quali_precip_mm": "float64",
+    "conditions_changed": "float64",
+    "driver_wet_dry_delta": "float64",
+    "constructor_wet_dry_delta": "float64"
   }
 }

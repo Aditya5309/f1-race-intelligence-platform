@@ -6,7 +6,7 @@ flavors:
     loader_module: mlflow.sklearn
     model_path: model.pkl
     predict_fn: predict
-    python_version: 3.14.5
+    python_version: 3.11.15
   sklearn:
     code: null
     pickled_model: model.pkl
@@ -15,7 +15,7 @@ flavors:
     skops_trusted_types: null
 mlflow_version: 3.12.0
 model_id: null
-model_size_bytes: 5804
-model_uuid: f2545d68c6de4aec888c9e8e37174814
+model_size_bytes: 6972
+model_uuid: 4e20194d7a8245dd80cac0bdc69abd33
 prompts: null
-utc_time_created: '2026-07-07 10:47:12.717756'
+utc_time_created: '2026-07-11 19:48:45.223255'
