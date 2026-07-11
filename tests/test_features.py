@@ -45,7 +45,11 @@ from src.features.pipeline import (
 )
 from src.features.qualifying import add_qualifying_features, parse_qualifying_time
 from src.features.standings import add_standings_features, build_prev_race_map
-from src.features.weather import WEATHER_CSV_PATH, WEATHER_FEATURES, add_weather_features
+from src.features.weather import (
+    WEATHER_CSV_PATH,
+    WEATHER_FEATURES,
+    add_weather_features,
+)
 from src.features.wet_form import SHRINKAGE_K, add_wet_form_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
@@ -575,8 +579,9 @@ def test_wet_form_missing_precip_excluded_from_both_averages():
     out = add_wet_form_features(pd.DataFrame(rows)).set_index("raceId")
     # At race 4: prior wet=[1] (race 1 only; race 2's NaN excluded), avg=1.
     # prior dry=[10] (race 3), avg=10. raw = 1 - 10 = -9, wet_n=1.
-    weight = 1.0 / (1.0 + SHRINKAGE_K)
-    # Single driver here -> field_wide_delta == the driver's own raw delta.
+    # Single driver here -> field_wide_delta == the driver's own raw delta,
+    # so the shrinkage weight is a no-op regardless of its value (covered by
+    # test_wet_dry_delta_zero_wet_history_equals_field_average instead).
     assert out.loc[4, "driver_wet_dry_delta"] == pytest.approx(-9.0)
 
 

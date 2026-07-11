@@ -58,7 +58,11 @@ from src.features.teammate_form import (
     TEAMMATE_FORM_FEATURES,
     add_teammate_form_features,
 )
-from src.features.weather import WEATHER_FEATURES, add_weather_features, load_race_weather
+from src.features.weather import (
+    WEATHER_FEATURES,
+    add_weather_features,
+    load_race_weather,
+)
 from src.features.wet_form import WET_FORM_FEATURES, add_wet_form_features
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 
