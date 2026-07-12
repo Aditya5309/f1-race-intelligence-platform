@@ -101,6 +101,25 @@ jobs:
       - name: Ingest + rebuild + freeze (automated — registers only, does not export)
         run: python scripts/refresh_and_freeze.py --automated
 
+      # Part 2 (weekly ingestion visibility gap): the only prior visibility
+      # into what got ingested was trusting ingest_jolpica.py's own log
+      # lines — nothing genuinely inspectable survived the run. This
+      # uploads scripts/ingest_jolpica.py's own write_ingest_report() output
+      # (summary.json + the exact new rows fetched this run, per endpoint —
+      # never the accumulated data/ tree) as a downloadable CI artifact
+      # (`gh run download <run-id>`). if: always() + if-no-files-found: warn
+      # so this still captures what ingestion did even if a LATER step in
+      # the run above fails (build_dataset, season_tracking, promote, ...)
+      # — ingestion itself already completed and wrote its report before
+      # any of those could fail.
+      - name: Upload ingestion report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-report-${{ github.run_id }}
+          path: ingest_report/
+          if-no-files-found: warn
+
       # Always re-save, even if a later step fails — the ingestion delta
       # this run fetched should not be re-fetched next week just because
       # promotion was refused. key is this run's own unique id (see the

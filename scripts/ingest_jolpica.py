@@ -51,8 +51,10 @@ specific DNF *reason* loses granularity for 2025+ races.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -60,6 +62,15 @@ import pandas as pd
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = _PROJECT_ROOT / "data"
+#: Weekly-run inspection artifact (Part 2, retrain visibility gap): a
+#: structured summary + the exact new rows this run fetched, written
+#: regardless of --dry-run and regardless of whether the calling workflow
+#: goes on to promote anything — this is "what did ingestion actually do",
+#: entirely separate from any later step's outcome. NOT under artifacts/
+#: (that tree is the committed-runtime-artifact convention, Decision 029) —
+#: this is an ephemeral, gitignored, per-run diagnostic meant to be
+#: `actions/upload-artifact`-ed from CI, not committed.
+DEFAULT_REPORT_DIRNAME = "ingest_report"
 
 JOLPICA_BASE_URL = "https://api.jolpi.ca/ergast/f1"
 USER_AGENT = "f1-race-winner-prediction/1.0 (weekly retrain ingestion; github.com)"
@@ -320,6 +331,62 @@ def _append(csv_path: Path, new_rows: list[dict], columns: tuple[str, ...]) -> N
     frame.to_csv(csv_path, mode="a", header=False, index=False, na_rep=NA_TOKEN)
 
 
+def write_ingest_report(
+    report_dir: Path,
+    *,
+    dry_run: bool,
+    ingested: list[dict],
+    skipped: list[dict],
+    new_drivers: list[dict],
+    new_constructors: list[dict],
+    new_results_rows: list[dict],
+    new_qualifying_rows: list[dict],
+    new_driver_standings_rows: list[dict],
+    new_constructor_standings_rows: list[dict],
+) -> Path:
+    """Write summary.json + one CSV per endpoint of EXACTLY this run's new
+    rows (never the accumulated data/ tree) to report_dir, creating it if
+    needed. Always called — dry-run or not, whatever a later pipeline step
+    does — so this answers "what did ingestion actually fetch this run",
+    inspectable on its own via `gh run download` (no trust-the-log-line
+    required). A CSV is omitted (not written empty) when its list has zero
+    rows; summary.json's counts already say so.
+
+    Returns report_dir.
+    """
+    report_dir.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "dry_run": dry_run,
+        "ingested_races": ingested,
+        "skipped_races": skipped,
+        "totals": {
+            "races_ingested": len(ingested),
+            "races_skipped": len(skipped),
+            "results_rows": len(new_results_rows),
+            "qualifying_rows": len(new_qualifying_rows),
+            "driver_standings_rows": len(new_driver_standings_rows),
+            "constructor_standings_rows": len(new_constructor_standings_rows),
+            "new_drivers": len(new_drivers),
+            "new_constructors": len(new_constructors),
+        },
+    }
+    (report_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+
+    for filename, rows in (
+        ("new_results.csv", new_results_rows),
+        ("new_qualifying.csv", new_qualifying_rows),
+        ("new_driver_standings.csv", new_driver_standings_rows),
+        ("new_constructor_standings.csv", new_constructor_standings_rows),
+        ("new_drivers.csv", new_drivers),
+        ("new_constructors.csv", new_constructors),
+    ):
+        if rows:
+            pd.DataFrame(rows).to_csv(report_dir / filename, index=False, na_rep=NA_TOKEN)
+
+    return report_dir
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
@@ -328,11 +395,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--round", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true",
                         help="Fetch and report what would be ingested; write nothing.")
+    parser.add_argument("--report-dir", type=Path, default=None,
+                        help="Where to write this run's inspection report "
+                             "(summary.json + new-rows CSVs) — see "
+                             "write_ingest_report(). Default: "
+                             f"<--data-dir's parent>/{DEFAULT_REPORT_DIRNAME} "
+                             "(so hermetic runs with a tmp --data-dir get a "
+                             "hermetic report location for free). Always "
+                             "written, --dry-run or not.")
     args = parser.parse_args(argv)
     if (args.year is None) != (args.round is None):
         parser.error("--year and --round must be given together.")
 
     data_dir = args.data_dir
+    report_dir = args.report_dir or (data_dir.parent / DEFAULT_REPORT_DIRNAME)
     races = pd.read_csv(data_dir / "races.csv", na_values=[NA_TOKEN])
     results = pd.read_csv(data_dir / "results.csv", na_values=[NA_TOKEN])
     qualifying = pd.read_csv(data_dir / "qualifying.csv", na_values=[NA_TOKEN])
@@ -352,6 +428,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if targets.empty:
         print("Nothing to ingest — every scheduled race already has results.")
+        write_ingest_report(
+            report_dir, dry_run=args.dry_run, ingested=[], skipped=[],
+            new_drivers=[], new_constructors=[], new_results_rows=[],
+            new_qualifying_rows=[], new_driver_standings_rows=[],
+            new_constructor_standings_rows=[],
+        )
         return 0
 
     drivers = IdReconciler(drivers_df, "driverId", "driverRef")
@@ -370,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
             year, round_, race_id = race.year, race.round, race.raceId
             raw_results = fetch_results(client, year, round_)
             if raw_results is None:
-                skipped.append((year, round_, race.name))
+                skipped.append({"year": year, "round": round_, "name": race.name})
                 continue
 
             result_rows = build_results_rows(raw_results, race_id, next_result_id, drivers, constructors)
@@ -398,18 +480,31 @@ def main(argv: list[str] | None = None) -> int:
             next_constructor_standings_id += len(cs_rows)
             all_constructor_standings_rows += cs_rows
 
-            ingested.append((year, round_, race.name, len(result_rows), len(qualifying_rows)))
+            ingested.append({
+                "year": year, "round": round_, "name": race.name, "raceId": race_id,
+                "n_results": len(result_rows), "n_qualifying": len(qualifying_rows),
+                "n_driver_standings": len(ds_rows), "n_constructor_standings": len(cs_rows),
+            })
             print(f"Fetched {year} round {round_} ({race.name}): "
                   f"{len(result_rows)} results, {len(qualifying_rows)} qualifying, "
                   f"{len(ds_rows)} driver standings, {len(cs_rows)} constructor standings")
 
     print(f"\n{len(ingested)} race(s) ingested, {len(skipped)} skipped (no data yet at jolpica-f1):")
-    for year, round_, name in skipped:
-        print(f"  SKIP {year} round {round_} ({name}) — not run yet")
+    for s in skipped:
+        print(f"  SKIP {s['year']} round {s['round']} ({s['name']}) — not run yet")
     print(f"New drivers: {len(drivers.new_rows)}, new constructors: {len(constructors.new_rows)}")
 
+    report_dir = write_ingest_report(
+        report_dir, dry_run=args.dry_run, ingested=ingested, skipped=skipped,
+        new_drivers=drivers.new_rows, new_constructors=constructors.new_rows,
+        new_results_rows=all_results_rows, new_qualifying_rows=all_qualifying_rows,
+        new_driver_standings_rows=all_driver_standings_rows,
+        new_constructor_standings_rows=all_constructor_standings_rows,
+    )
+    print(f"Ingestion report: {report_dir}")
+
     if args.dry_run:
-        print("\n--dry-run: nothing written.")
+        print("\n--dry-run: nothing written to data/.")
         return 0
 
     _append(data_dir / "drivers.csv", drivers.new_rows,

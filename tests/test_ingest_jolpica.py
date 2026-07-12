@@ -14,6 +14,7 @@ so the module is loaded directly via importlib.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -228,3 +229,70 @@ def test_build_results_rows_positionorder_matches_array_order(drivers_df):
     )
     assert [r["positionOrder"] for r in rows] == [1, 2]
     assert [r["resultId"] for r in rows] == [500, 501]
+
+
+# ---------------------------------------------------------------------------
+# write_ingest_report — Part 2 weekly-verification artifact
+# ---------------------------------------------------------------------------
+
+def test_write_ingest_report_writes_summary_and_new_row_csvs(tmp_path):
+    report_dir = tmp_path / "ingest_report"
+    ingested = [{
+        "year": 2026, "round": 10, "name": "Test GP", "raceId": 9001,
+        "n_results": 2, "n_qualifying": 2, "n_driver_standings": 2,
+        "n_constructor_standings": 2,
+    }]
+    skipped = [{"year": 2026, "round": 11, "name": "Future GP"}]
+    new_results_rows = [{"resultId": 1, "raceId": 9001}, {"resultId": 2, "raceId": 9001}]
+    new_drivers = [{"driverId": 4, "driverRef": "piastri"}]
+
+    returned = ingest_jolpica.write_ingest_report(
+        report_dir, dry_run=False, ingested=ingested, skipped=skipped,
+        new_drivers=new_drivers, new_constructors=[],
+        new_results_rows=new_results_rows, new_qualifying_rows=[],
+        new_driver_standings_rows=[], new_constructor_standings_rows=[],
+    )
+
+    assert returned == report_dir
+    summary = json.loads((report_dir / "summary.json").read_text())
+    assert summary["dry_run"] is False
+    assert summary["ingested_races"] == ingested
+    assert summary["skipped_races"] == skipped
+    assert summary["totals"] == {
+        "races_ingested": 1, "races_skipped": 1, "results_rows": 2,
+        "qualifying_rows": 0, "driver_standings_rows": 0,
+        "constructor_standings_rows": 0, "new_drivers": 1, "new_constructors": 0,
+    }
+    assert "generated_at" in summary
+
+    assert (report_dir / "new_results.csv").exists()
+    assert len(pd.read_csv(report_dir / "new_results.csv")) == 2
+    assert (report_dir / "new_drivers.csv").exists()
+    # nothing new on these endpoints this run — no empty file clutter
+    assert not (report_dir / "new_qualifying.csv").exists()
+    assert not (report_dir / "new_constructors.csv").exists()
+
+
+def test_write_ingest_report_nothing_new_still_writes_summary(tmp_path):
+    report_dir = tmp_path / "ingest_report"
+    ingest_jolpica.write_ingest_report(
+        report_dir, dry_run=False, ingested=[], skipped=[],
+        new_drivers=[], new_constructors=[], new_results_rows=[],
+        new_qualifying_rows=[], new_driver_standings_rows=[],
+        new_constructor_standings_rows=[],
+    )
+    summary = json.loads((report_dir / "summary.json").read_text())
+    assert summary["totals"]["races_ingested"] == 0
+    assert list(report_dir.iterdir()) == [report_dir / "summary.json"]
+
+
+def test_write_ingest_report_creates_report_dir(tmp_path):
+    report_dir = tmp_path / "nested" / "ingest_report"
+    assert not report_dir.exists()
+    ingest_jolpica.write_ingest_report(
+        report_dir, dry_run=True, ingested=[], skipped=[],
+        new_drivers=[], new_constructors=[], new_results_rows=[],
+        new_qualifying_rows=[], new_driver_standings_rows=[],
+        new_constructor_standings_rows=[],
+    )
+    assert report_dir.exists()

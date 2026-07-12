@@ -5,6 +5,11 @@
 /data/
 /models/
 
+# --- Weekly ingestion inspection report (scripts/ingest_jolpica.py's
+# write_ingest_report) — ephemeral per-run diagnostic uploaded as a CI
+# artifact (retrain.yml), never committed.
+/ingest_report/
+
 # --- MLflow local tracking store
 mlruns/
 mlflow.db
