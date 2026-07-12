@@ -132,6 +132,60 @@ jobs:
           path: data/
           key: f1-data-${{ github.run_id }}
 
+      # Part 1 fix (display-data push gap post-mortem): this PR is
+      # DELIBERATELY separate from the model-promotion PR below and has NO
+      # `if:` condition tying it to promotion — display data, the runtime
+      # features snapshot, and the 2026 tracking set are all "current vs.
+      # stale" ground-truth data with no quality judgment involved (Decision
+      # 030 / Tranche D), refreshed unconditionally by refresh_and_freeze.py
+      # regardless of whether a candidate is promoted. Before this fix, the
+      # ONLY push mechanism in this workflow was the promotion-gated PR
+      # below, so on every refused promotion (the normal case) this
+      # refreshed data was silently discarded when the runner was torn
+      # down — confirmed against real run history (PR #1 was closed
+      # unmerged; the committed artifacts/display/ was 3 races stale,
+      # last touched by a manual, non-workflow commit).
+      #
+      # Still human-reviewed like everything else this project pushes to
+      # main (not auto-merged) — there is no automated correctness check on
+      # this data today (unlike the model bundle's 3 gate checks), so a
+      # human glance stays cheap insurance against a bad ingest silently
+      # reaching production.
+      #
+      # `base: main` is set explicitly on BOTH this step and the
+      # promotion-gated step below (not left to the action's "whatever's
+      # currently checked out" default) — per peter-evans/create-pull-
+      # request's own "Providing a consistent base" guidance, this removes
+      # any dependency on what running the action here first may do to the
+      # workspace's checked-out ref before the second one runs.
+      - name: "Open PR: refresh display data, features snapshot, tracking set (always, independent of promotion)"
+        id: data_refresh_pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          commit-message: "chore: scheduled data refresh — display data, features snapshot, season tracking"
+          branch: scheduled-retrain/data-refresh
+          delete-branch: true
+          title: "Scheduled data refresh: display data, features snapshot, season tracking"
+          add-paths: |
+            artifacts/display/
+            artifacts/features.parquet
+            artifacts/tracking/
+          body: |
+            Automated weekly refresh of ground-truth data — independent of
+            whether a new model candidate is promoted this run (see the
+            separate, gated PR for that, opened only when promotion
+            succeeds). No model-quality judgment involved here, only
+            "current vs. stale" (Decision 030 / Tranche D):
+
+            - `artifacts/display/` — dashboard names/results/standings
+            - `artifacts/features.parquet` — runtime feature snapshot (which
+              races/drivers exist; orthogonal to which model version serves
+              them)
+            - `artifacts/tracking/` — current-era continuous tracking set
+              (`src/models/season_tracking.py`)
+
       # Never lets a refusal fail the JOB — captured explicitly so the
       # steps below can react (PR vs. clean "nothing to review" stop)
       # rather than the job just going red with no explanation.
@@ -176,23 +230,30 @@ jobs:
               f.write(summary)
           PYEOF
 
-      # add-paths is deliberately just "artifacts/" (not narrowed to
-      # artifacts/serving/ alone) — step 5 (display refresh) writes
-      # artifacts/display/ on every run regardless of the promotion
-      # outcome, and Decision 030 wants the served model and display data
-      # traveling together in one reviewable unit, not two independently-
-      # drifting update paths (that's the bug Decision 030 fixed once
-      # already). data/ never appears here — it's gitignored, invisible to
-      # `git status`, so nothing further needs to exclude it explicitly.
+      # Part 1 fix: add-paths is now narrowed to JUST artifacts/serving/ —
+      # display data, the features snapshot, and the tracking set already
+      # traveled (unconditionally) in their own PR above, so this PR is
+      # purely the model-quality-gated artifact. This is a deliberate split
+      # from the single-PR "everything travels together" design Decision
+      # 030 originally shipped: that bug was a HUMAN forgetting to run one
+      # of two independent MANUAL commands together, a failure mode this
+      # fully-automated pipeline (refresh_and_freeze.py always runs both
+      # refreshes, every run, in the same process) cannot reproduce — only
+      # WHICH of the two deterministic outputs gets gated on push changes
+      # here, not whether both get produced. The genuine coupling Decision
+      # 030 cared about (a model bundle staying consistent with its own
+      # manifest/schema) lives entirely inside artifacts/serving/<alias>/,
+      # untouched by this split. `base: main` set explicitly — see the note
+      # on the PR step above.
       - name: Open PR with the promoted candidate
         if: env.PROMOTE_EXIT_CODE == '0'
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
           commit-message: "chore: scheduled retrain — promote new candidate to Staging"
           branch: scheduled-retrain/staging
-          base: main
           delete-branch: true
           title: "Scheduled retrain: new candidate promoted to Staging"
-          add-paths: artifacts/
+          add-paths: artifacts/serving/
           body-path: /tmp/metrics_diff.md

@@ -31,40 +31,60 @@ anyway" runner; everything after a failed step is left untouched):
                                         season_tracking.py's own module
                                         docstring is the structural
                                         guarantee, not just this comment).
-  6. scripts/export_display_data.py     ALWAYS runs — display data has no
+  6. scripts/refresh_features_snapshot.py  ALWAYS runs — freezes the
+                                        just-rebuilt data/processed/
+                                        features.parquet as artifacts/
+                                        features.parquet independent of
+                                        registration (Part 1 fix, post-
+                                        Tranche-D): this snapshot answers
+                                        "which races/drivers exist", which
+                                        src/models/serving_bundle.py's own
+                                        docstring already says is orthogonal
+                                        to which model version serves them.
+                                        train.py --register / promote_model.py
+                                        still ALSO refresh it (unchanged) —
+                                        this is additive, closing the gap
+                                        where it previously only updated on
+                                        a successful promotion.
+  7. scripts/export_display_data.py     ALWAYS runs — display data has no
                                         "good vs bad" concept to gate on,
                                         only "current vs stale" (Decision
                                         030); it must not be tied to
                                         whether the model registration
                                         below succeeds or is later promoted
-  7. src.models.train --model <from config> --register [--calibrate]
+  8. src.models.train --model <from config> --register [--calibrate]
      --params-file config/registered_model_params.json — model family,
      calibrate flag, and hyperparameters ALL read from the shared config
      file (Phase 4 Tranche D's source of truth), not hardcoded here
 
-    python scripts/refresh_and_freeze.py                  # manual mode (default): step 7 exports immediately
-    python scripts/refresh_and_freeze.py --automated       # step 7 registers only (export=False); a separate
+    python scripts/refresh_and_freeze.py                  # manual mode (default): step 8 exports immediately
+    python scripts/refresh_and_freeze.py --automated       # step 8 registers only (export=False); a separate
                                                             # `python scripts/promote_model.py` call is the gate
                                                             # that actually swaps the served bundle (Tranche C/D)
     python scripts/refresh_and_freeze.py --skip-ingest      # rebuild/freeze only, using data/ as-is
     python scripts/refresh_and_freeze.py --dry-run          # runs ingest_jolpica.py --dry-run, stops there
 
---tracking-uri/--bundle-root/--artifacts-root pass straight through to step
-7's `train.py --register` call (same flags, same meaning); --display-dest
-passes through to step 6's `export_display_data.py --dest`; --tracking-dir
-passes through to step 5's `season_tracking --tracking-dir` (default:
+--tracking-uri/--bundle-root pass straight through to step 8's
+`train.py --register` call (same flags, same meaning); --artifacts-root
+passes through to BOTH step 6 (`refresh_features_snapshot.py
+--artifacts-root`) and step 8 (`train.py --register --artifacts-root`) —
+the SAME artifacts/ tree, so a hermetic test pointing it at a tmp dir must
+redirect both writers, not just the gated one; --display-dest passes
+through to step 7's `export_display_data.py --dest`; --tracking-dir passes
+through to step 5's `season_tracking --tracking-dir` (default:
 artifacts/tracking/). Point ALL FIVE at tmp locations for a hermetic dry
 run of the whole sequence against real data — the default (manual mode, no
 override) WILL overwrite the real committed
-mlflow.db/artifacts/serving/artifacts/display/artifacts/tracking, same as
-`train.py --register`/`export_display_data.py` always have. Steps 5 and 6
-are NEVER gated (see above), so --tracking-dir/--display-dest matter even
-in --automated mode, unlike --bundle-root/--artifacts-root which
---automated already protects via --no-export. Step 5 also reads
---bundle-root (NOT --bundle-root's step-7 write target — the SAME flag,
-since tracking must score whatever bundle is currently sitting at that
-root, i.e. last week's served candidate, before step 7 potentially
-overwrites it).
+mlflow.db/artifacts/serving/artifacts/features.parquet/artifacts/display/
+artifacts/tracking, same as `train.py --register`/`export_display_data.py`
+always have. Steps 5, 6, and 7 are NEVER gated (see above), so
+--tracking-dir/--artifacts-root/--display-dest matter even in --automated
+mode, unlike --bundle-root which --automated already protects via
+--no-export (step 8 also reads --bundle-root, but only to know where to
+export TO if not automated — see step 8 below). Step 5 also reads
+--bundle-root (NOT step 8's write target — the SAME flag, since tracking
+must score whatever bundle is currently sitting at that root, i.e. last
+week's served candidate, before step 8 potentially overwrites it).
 
 --automated is what the scheduled retrain workflow (Phase 4 Tranche D Part
 3) uses: it never touches artifacts/serving/ itself, then calls
@@ -126,14 +146,22 @@ def main(argv: list[str] | None = None) -> int:
                              "dir for hermetic testing — otherwise a manual-"
                              "mode run WILL overwrite the real committed bundle.")
     parser.add_argument("--artifacts-root", type=Path, default=None,
-                        help="Passed through to `train.py --register` "
-                             "(default: artifacts/). Point at a tmp dir for "
-                             "hermetic testing, same caveat as --bundle-root.")
+                        help="Passed through to BOTH `scripts/"
+                             "refresh_features_snapshot.py --artifacts-root` "
+                             "(step 6, always runs) AND `train.py --register "
+                             "--artifacts-root` (step 8) — same tree, same "
+                             "flag (default: artifacts/). Point at a tmp dir "
+                             "for hermetic testing, same caveat as "
+                             "--bundle-root — otherwise step 6 WILL "
+                             "overwrite the real committed "
+                             "artifacts/features.parquet even in "
+                             "--automated mode (never gated, see the module "
+                             "docstring).")
     parser.add_argument("--display-dest", type=Path, default=None,
                         help="Passed through to `scripts/export_display_data.py "
                              "--dest` (default: artifacts/display/). Point at "
                              "a tmp dir for hermetic testing — otherwise step "
-                             "6 WILL overwrite the real committed display "
+                             "7 WILL overwrite the real committed display "
                              "data, even in --automated mode (display refresh "
                              "is never gated, see the module docstring).")
     parser.add_argument("--tracking-dir", type=Path, default=None,
@@ -148,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.dry_run and not args.params_file.exists():
         print(f"ERROR: --params-file {args.params_file} not found — checked "
-              "up front so a config typo doesn't waste time on steps 1-6 "
+              "up front so a config typo doesn't waste time on steps 1-7 "
               "before failing at registration.", file=sys.stderr)
         return 1
 
@@ -174,9 +202,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Score newly completed races with whatever bundle is CURRENTLY served
-    # at --bundle-root, BEFORE step 7 potentially overwrites it — tracks the
+    # at --bundle-root, BEFORE step 8 potentially overwrites it — tracks the
     # model that was actually in production, not this run's not-yet-vetted
-    # candidate. Always runs, regardless of --automated / whether step 7's
+    # candidate. Always runs, regardless of --automated / whether step 8's
     # candidate ends up promoted (src/models/season_tracking.py: read-only,
     # never a training input).
     tracking_cmd = [py, "-m", "src.models.season_tracking", "--alias", args.alias]
@@ -187,10 +215,24 @@ def main(argv: list[str] | None = None) -> int:
     if not _run("5. Track current-era races against the currently-served bundle", tracking_cmd):
         return 1
 
+    # Part 1 fix: refresh artifacts/features.parquet unconditionally, same
+    # as display data and tracking above — it answers "which races/drivers
+    # exist", orthogonal to which model version is served (see
+    # serving_bundle.py's own docstring). Previously this ONLY refreshed as
+    # a side effect of a successful registration/promotion, so a refused
+    # promotion (the normal weekly outcome) meant the API's own view of
+    # which races exist silently stayed stale too — not just the dashboard.
+    features_snapshot_cmd = [py, "scripts/refresh_features_snapshot.py"]
+    if args.artifacts_root:
+        features_snapshot_cmd += ["--artifacts-root", str(args.artifacts_root)]
+    if not _run("6. Refresh runtime features snapshot (always, unconditionally)",
+                features_snapshot_cmd):
+        return 1
+
     display_cmd = [py, "scripts/export_display_data.py"]
     if args.display_dest:
         display_cmd += ["--dest", str(args.display_dest)]
-    if not _run("6. Refresh display-data snapshot (always, unconditionally)", display_cmd):
+    if not _run("7. Refresh display-data snapshot (always, unconditionally)", display_cmd):
         return 1
 
     config = json.loads(args.params_file.read_text())
@@ -211,8 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         register_cmd += ["--artifacts-root", str(args.artifacts_root)]
     if args.automated:
         register_cmd.append("--no-export")
-    step_label = "7. Register candidate (export=False — gated by promote_model.py next)" \
-        if args.automated else "7. Register candidate (immediate export)"
+    step_label = "8. Register candidate (export=False — gated by promote_model.py next)" \
+        if args.automated else "8. Register candidate (immediate export)"
     if not _run(step_label, register_cmd):
         return 1
 
