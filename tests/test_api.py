@@ -18,7 +18,9 @@ from fastapi.testclient import TestClient
 
 from app.api import create_app
 from app.config import Settings
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
+from src.models.registry import training_schema
 from src.models.serving_bundle import DEFAULT_FEATURES_ARTIFACT, bundle_dir_for_alias
 from src.models.splits import temporal_split
 from src.models.train import register_model
@@ -204,12 +206,14 @@ def test_debug_features_hidden_by_default(client):
 
 
 def test_debug_features_when_enabled(debug_client):
+    # Decision 041: the serving_stack fixture registers via the default
+    # (exclusion-applied) feature set, not the raw full FEATURE_COLUMNS.
     body = debug_client.get(f"/debug/features/{IN_WINDOW_RACE}").json()
     assert body["race_id"] == IN_WINDOW_RACE
-    assert body["feature_names"] == list(FEATURE_COLUMNS)
+    assert body["feature_names"] == list(active_feature_columns())
     assert len(body["rows"]) == 5
     row = body["rows"][0]
-    assert set(row["features"]) == set(FEATURE_COLUMNS)
+    assert set(row["features"]) == set(active_feature_columns())
     assert all(v is None or isinstance(v, float) for v in row["features"].values())
 
 
@@ -263,10 +267,14 @@ def test_simulate_grid_locked_feature_lists(client):
         "reached_q2", "reached_q3", "qualifying_gap_to_pole_pct",
         "grid_penalty_applied",
     }
-    # All 30 historical/standings/teammate/weather/wet-form aggregates are locked.
-    assert len(body["locked_features"]) == 30
+    # 28 historical/standings/teammate/weather aggregates are locked — was 30
+    # before Decision 041: the served model no longer trains on wet_form
+    # (driver_wet_dry_delta/constructor_wet_dry_delta), so those 2 are
+    # simply absent from the schema entirely, not merely unlocked.
+    assert len(body["locked_features"]) == 28
     assert "driver_wins_last_5" in body["locked_features"]
     assert "constructor_standing_position_prev" in body["locked_features"]
+    assert "driver_wet_dry_delta" not in body["locked_features"]
 
 
 def test_simulate_grid_field_renormalizes_but_others_raw_unchanged(client):
@@ -410,6 +418,24 @@ def test_vs_baseline_unknown_race_404(client):
 def test_vs_baseline_forward_holdout_409(client):
     resp = client.get(f"/predictions/{HOLDOUT_RACE}/vs-baseline")
     assert resp.status_code == 409
+
+
+def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):
+    """Decision 041 explicitly flagged this call site: get_model()'s new
+    default (active_feature_columns(), wet_form excluded) would otherwise
+    silently mismatch the FULL features.parquet snapshot this route scores
+    against (app/api.py builds X via features.loc[:, list(FEATURE_COLUMNS)]
+    immediately after). Verify the fix directly — not just via the
+    vs-baseline route happening to still work — by checking the actual
+    fitted baseline model's own recorded schema."""
+    baseline_model = client.app.state.baseline_model
+    assert baseline_model is not None, (
+        f"pole_baseline failed to load at startup: "
+        f"{client.app.state.baseline_load_error}"
+    )
+    schema = training_schema(baseline_model)["feature_names"]
+    assert schema == list(FEATURE_COLUMNS)
+    assert "driver_wet_dry_delta" in schema
 
 
 # ---------------------------------------------------------------------------

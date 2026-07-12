@@ -73,10 +73,12 @@ MECHANICS
    row-level split can cut a race in half, corrupting per-race metrics, and
    rows within a race are not exchangeable.
 
-`to_xy(df)` extracts the design matrix from a split: exactly FEATURE_COLUMNS
-(imported from the feature pipeline — the single source of truth), the
-target, and raceId groups for per-race evaluation. Identifier columns are
-never features (design doc Section 11.1).
+`to_xy(df)` extracts the design matrix from a split: by default the
+training-exclusion-applied `active_feature_columns()` (Decision 041 —
+currently FEATURE_COLUMNS minus `wet_form`), never the raw FEATURE_COLUMNS
+unless explicitly requested via `feature_columns=`, the target, and raceId
+groups for per-race evaluation. Identifier columns are never features
+(design doc Section 11.1).
 """
 
 from __future__ import annotations
@@ -86,7 +88,8 @@ from enum import Enum
 
 import pandas as pd
 
-from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
+from src.features.metadata import active_feature_columns
+from src.features.pipeline import TARGET_COLUMN
 from src.models import eras
 
 # Decision 012 Section 13.1 — 2025+ is the forward holdout, reserved for the
@@ -519,16 +522,26 @@ def season_folds(
     return folds
 
 
-def to_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+def to_xy(
+    df: pd.DataFrame, feature_columns: tuple[str, ...] | None = None,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
     Extract (X, y, race_ids) from a split frame.
 
-    X contains exactly FEATURE_COLUMNS in canonical order — identifiers and
-    post-race columns are structurally excluded because FEATURE_COLUMNS is
-    the feature pipeline's guarded constant. race_ids carries the per-race
-    grouping every evaluation metric needs.
+    `feature_columns` (Decision 041) defaults — when NOT given — to
+    `active_feature_columns()` (the training-exclusion-applied set, e.g.
+    currently `FEATURE_COLUMNS` minus `wet_form`), never to the raw, full
+    `FEATURE_COLUMNS`. This is the same safe-by-default inversion
+    `registry.get_model()` applies, for the same reason: a silent repeat of
+    Decision 036 (an exclusion enforced only by manual discipline, which
+    automated retraining had no way to know about) must be structurally
+    impossible for any caller that doesn't explicitly ask for the full,
+    unexcluded set by passing `feature_columns=FEATURE_COLUMNS` (or another
+    explicit tuple) deliberately. race_ids carries the per-race grouping
+    every evaluation metric needs.
     """
-    missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
+    columns = feature_columns if feature_columns is not None else active_feature_columns()
+    missing = [c for c in columns if c not in df.columns]
     if missing:
         raise KeyError(f"Frame is missing feature column(s): {missing}")
-    return df[list(FEATURE_COLUMNS)], df[TARGET_COLUMN], df["raceId"]
+    return df[list(columns)], df[TARGET_COLUMN], df["raceId"]

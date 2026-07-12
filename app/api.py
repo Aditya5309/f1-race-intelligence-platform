@@ -261,7 +261,17 @@ async def _lifespan(app: FastAPI):
         # like the real model. Wrapped in its own try/except so a failure
         # here degrades only /vs-baseline, not the whole API.
         try:
-            baseline = get_model("pole_baseline", features[TARGET_COLUMN])
+            # Decision 041: get_model()'s feature_columns now defaults to
+            # the training-exclusion-applied set (currently FEATURE_COLUMNS
+            # minus wet_form), not the raw full set — but this route scores
+            # against the FULL frozen features.parquet snapshot below
+            # (features.loc[:, list(FEATURE_COLUMNS)]), so the guard must be
+            # explicitly told to expect the FULL set too, or the .fit() call
+            # immediately after would raise a column mismatch. Explicit
+            # override, not the new default, is deliberate here.
+            baseline = get_model(
+                "pole_baseline", features[TARGET_COLUMN], feature_columns=FEATURE_COLUMNS,
+            )
             baseline.fit(features.loc[:, list(FEATURE_COLUMNS)], features[TARGET_COLUMN])
             app.state.baseline_model = baseline
         except Exception as exc:                                # noqa: BLE001

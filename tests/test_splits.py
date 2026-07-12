@@ -29,6 +29,7 @@ Section 14.4 forward-holdout guard:
 import pandas as pd
 import pytest
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.integration.build_master_dataset import POST_RACE_OUTCOME_COLUMNS
 from src.models import eras
@@ -178,16 +179,32 @@ def test_folds_deterministic():
 # to_xy — design-matrix integrity (Section 11.1)
 # ---------------------------------------------------------------------------
 
-def test_to_xy_matrix_is_exactly_feature_columns():
+def test_to_xy_matrix_is_exactly_active_feature_columns_by_default():
+    # Decision 041: the DEFAULT contract is active_feature_columns() (the
+    # training-exclusion-applied set, currently FEATURE_COLUMNS minus
+    # wet_form) — never the raw FEATURE_COLUMNS unless explicitly
+    # requested (see test_to_xy_explicit_override_uses_full_feature_columns
+    # below).
     split = temporal_split(_full_range_frame())
     X, y, race_ids = to_xy(split.train)
-    assert list(X.columns) == list(FEATURE_COLUMNS)
+    assert list(X.columns) == list(active_feature_columns())
+    assert "driver_wet_dry_delta" not in X.columns
     # No identifiers, no post-race outcome columns in the design matrix.
     assert not {"raceId", "driverId", "constructorId", "circuitId", "year", "round"} & set(X.columns)
     assert not POST_RACE_OUTCOME_COLUMNS & set(X.columns)
     assert (y == split.train[TARGET_COLUMN]).all()
     assert (race_ids == split.train["raceId"]).all()
     assert len(X) == len(y) == len(race_ids) == len(split.train)
+
+
+def test_to_xy_explicit_override_uses_full_feature_columns():
+    """Decision 041: an explicit feature_columns= override is how research/
+    ablation work (e.g. Decision 040's investigation) deliberately opts
+    into the full, unexcluded set — never the silent default."""
+    split = temporal_split(_full_range_frame())
+    X, y, race_ids = to_xy(split.train, feature_columns=FEATURE_COLUMNS)
+    assert list(X.columns) == list(FEATURE_COLUMNS)
+    assert "driver_wet_dry_delta" in X.columns
 
 
 def test_to_xy_missing_feature_raises():

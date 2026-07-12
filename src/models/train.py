@@ -58,7 +58,11 @@ import pandas as pd
 from sklearn.model_selection import ParameterSampler
 from sklearn.pipeline import Pipeline
 
-from src.features.metadata import FEATURE_CLASSIFICATION
+from src.features.metadata import (
+    EXCLUDED_FROM_TRAINING,
+    FEATURE_CLASSIFICATION,
+    active_feature_columns,
+)
 from src.features.pipeline import FEATURES_PATH, MASTER_DATASET_PATH
 from src.models.evaluate import (
     calibration_table,
@@ -276,12 +280,22 @@ def _log_evaluation_artifacts(
 
 def _log_common(name: str, fingerprint: str, stage: str) -> None:
     spec = MODEL_ZOO[name]
+    active_cols = active_feature_columns()
     mlflow.set_tags({
         "model_family": spec.family,
         "stage": stage,
         "data_fingerprint": fingerprint,
         "feature_count": str(len(FEATURE_CLASSIFICATION)),
         "code_phase": "phase4",
+        # Decision 041: which FEATURE_GROUPS this run's design matrix
+        # actually excluded, and how many columns that left — the
+        # queryable, human-readable side of reproducibility. The
+        # ground-truth side is training_schema()'s own recorded column
+        # list (already logged as training_schema.json by every caller
+        # of this function), which is immune to a later edit of what
+        # EXCLUDED_FROM_TRAINING means.
+        "excluded_feature_groups": ",".join(EXCLUDED_FROM_TRAINING) or "none",
+        "active_feature_count": str(len(active_cols)),
         **{f"spec_{k}": str(v) for k, v in spec.to_metadata().items()
            if k not in ("description", "tuned_params")},
     })

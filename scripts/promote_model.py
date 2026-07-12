@@ -20,7 +20,7 @@ whether that version is allowed to become the live serving bundle.
     python scripts/promote_model.py --alias Staging
     python scripts/promote_model.py --alias Staging --version 3
     python scripts/promote_model.py --alias Production --top1-tolerance 0.02
-    python scripts/promote_model.py --alias Staging --force-baseline   # bootstrap only — see Check 4
+    python scripts/promote_model.py --alias Staging --force-baseline   # bootstrap only — see Check 5
 
 Checks, in order (all against the CANDIDATE, none of them retrain anything):
 
@@ -34,7 +34,16 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      of as an unpickle-time ImportError at the deployed Lambda's cold
      start. Project-native estimators (e.g. PoleSitterBaseline) are always
      allowed — no third-party dependency to check.
-  3. ColumnGuard self-consistency + non-degenerate predictions — scores a
+  3. Excluded-feature check (Decision 041) — refuses a candidate whose OWN
+     recorded training schema (never a repository constant) contains any
+     feature belonging to a group in src.features.metadata's
+     EXCLUDED_FROM_TRAINING (currently wet_form, per Decisions 036/040's
+     regression finding). to_xy()/get_model() already default to the
+     exclusion-applied set, so a normal training run can't trip this — it
+     exists as a last line of defense against the exact Decision-036
+     failure mode (a silently-bypassed exclusion), the same defense-in-
+     depth spirit as the model-class check above.
+  4. ColumnGuard self-consistency + non-degenerate predictions — scores a
      handful of real, in-window races (drawn from --features-source) via
      src.models.predict.predict_race(), which routes through the
      candidate's own recorded training schema. predict_race() already
@@ -42,7 +51,7 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      normalization; this step additionally rejects a race where every
      driver gets an identical probability (a constant-output model would
      pass both of predict_race's own checks while being useless).
-  4. Metric non-regression — the candidate is scored fresh on the
+  5. Metric non-regression — the candidate is scored fresh on the
      Decision-008 VALIDATION split (2022-2023, ~44 races) via evaluate_all
      (the same evaluation code every other module in this project uses)
      and compared against whatever's recorded in the CURRENTLY-SERVED
@@ -77,7 +86,7 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      uncompared is exactly the failure mode this gate exists to prevent.
 
      --force-baseline deliberately bootstraps this second case ONLY: it
-     skips the regression comparison (checks 1-3 above still run
+     skips the regression comparison (checks 1-4 above still run
      normally), prints a loud warning, and records
      baseline_bootstrapped=true permanently in the promoted manifest —
      never silent, never the default. It has NO effect if the served
@@ -128,9 +137,11 @@ import pandas as pd
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))          # runnable without pip install
 
+from src.features.metadata import EXCLUDED_FROM_TRAINING, FEATURE_GROUPS  # noqa: E402
 from src.features.pipeline import FEATURES_PATH, MASTER_DATASET_PATH  # noqa: E402
 from src.models.evaluate import evaluate_all  # noqa: E402
 from src.models.predict import predict_race  # noqa: E402
+from src.models.registry import training_schema  # noqa: E402
 from src.models.serving_bundle import (  # noqa: E402
     ModelInfo,
     bundle_dir_for_alias,
@@ -215,6 +226,37 @@ def check_model_class(model, allowed_modules: set[str]) -> None:
             f"'{module_root}') is not supported by this deployment target's "
             f"allowed model modules {sorted(allowed_modules)} — install "
             f"{module_root} there, or choose a different candidate."
+        )
+
+
+def check_excluded_features(
+    model, excluded_groups: tuple[str, ...] = EXCLUDED_FROM_TRAINING,
+) -> None:
+    """Decision 041: refuse a candidate whose OWN recorded training schema
+    (`training_schema()` reads the fitted ColumnGuard's actual recorded
+    columns, never a repository constant) contains any feature belonging
+    to a CURRENTLY-excluded `FEATURE_GROUPS` group.
+
+    This is the last line of defense against the Decision-036 class of
+    failure: `to_xy()`/`get_model()` default to the exclusion-applied
+    feature set (Decision 041), so a normal training run can't reintroduce
+    an excluded group by accident — but this check catches it anyway if a
+    candidate was registered some other way (e.g. an explicit
+    `feature_columns=FEATURE_COLUMNS` override used carelessly), the same
+    defense-in-depth spirit as `check_model_class`.
+    """
+    excluded_features = {f for g in excluded_groups for f in FEATURE_GROUPS[g]}
+    trained_features = set(training_schema(model)["feature_names"])
+    present = trained_features & excluded_features
+    if present:
+        raise PromotionRefused(
+            f"Candidate was trained on {len(present)} feature(s) belonging to "
+            f"a currently-excluded group: {sorted(present)} (excluded groups: "
+            f"{sorted(excluded_groups)}, see src/features/metadata.py's "
+            "EXCLUDED_FROM_TRAINING). Retrain via the default (no explicit "
+            "feature_columns override) unless the exclusion itself is being "
+            "deliberately changed — that requires its own context/decisions.md "
+            "entry (Decision 041)."
         )
 
 
@@ -332,12 +374,16 @@ def main(argv: list[str] | None = None) -> int:
               f"({type(model).__name__}, run {mv.run_id})")
 
         check_model_class(model, allowed_model_modules)
-        print(f"[1/3] Model-class check PASS "
+        print(f"[1/4] Model-class check PASS "
               f"(allowed: {sorted(allowed_model_modules)})")
+
+        check_excluded_features(model)
+        print(f"[2/4] Excluded-feature check PASS "
+              f"(excluded groups: {sorted(EXCLUDED_FROM_TRAINING) or 'none'})")
 
         features = pd.read_parquet(args.features_source)
         check_schema_and_predictions(model, features)
-        print(f"[2/3] Smoke checks (load, schema, non-degenerate on "
+        print(f"[3/4] Smoke checks (load, schema, non-degenerate on "
               f"{SMOKE_RACE_SAMPLE} real races) PASS")
 
         split = temporal_split(features)
@@ -382,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
                     "one now, re-run with --force-baseline."
                 )
             bootstrapped = True
-            print(f"[3/3] WARNING: --force-baseline used — bundle at "
+            print(f"[4/4] WARNING: --force-baseline used — bundle at "
                   f"{bundle_dir} had no recorded metrics, so the regression "
                   "check was SKIPPED, not passed. This candidate's own "
                   "metrics become the new baseline for future promotions. "
@@ -396,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             check_regression(candidate_metrics, served_metrics,
                              args.top1_tolerance, args.spearman_tolerance)
         if not bootstrapped:
-            print(f"[3/3] Metric non-regression PASS "
+            print(f"[4/4] Metric non-regression PASS "
                   f"(candidate top1_accuracy={candidate_metrics['top1_accuracy']:.4f}, "
                   f"spearman_corr={candidate_metrics.get('spearman_corr', float('nan')):.4f})")
 

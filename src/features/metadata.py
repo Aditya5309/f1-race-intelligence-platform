@@ -1,14 +1,16 @@
 """
 src/features/metadata.py
 
-Feature metadata — the single source of truth for feature grouping and the
-Decision-013 classification (Stable / Era-sensitive / Experimental).
+Feature metadata — the single source of truth for feature grouping, the
+Decision-013 classification (Stable / Era-sensitive / Experimental), AND
+(Decision 041) which feature groups are excluded from training by default.
 
-Consumers: model training (importance reporting grouped by class), evaluation,
-SHAP analysis, ETL/drift monitoring (Phase 8: Stable-feature drift suggests a
-data problem; Era-sensitive drift at regulation boundaries is expected domain
-behavior), and future dashboard components. Import from here — never re-type
-feature lists or classifications elsewhere.
+Consumers: model training (importance reporting grouped by class; `to_xy()`/
+`get_model()`'s default feature-column resolution), evaluation, SHAP analysis,
+ETL/drift monitoring (Phase 8: Stable-feature drift suggests a data problem;
+Era-sensitive drift at regulation boundaries is expected domain behavior),
+and future dashboard components. Import from here — never re-type feature
+lists, classifications, or exclusions elsewhere.
 
 Rationale for each class lives in Decision 013 and the feature-set review in
 reports/model_development_design.md §14:
@@ -23,6 +25,18 @@ reports/model_development_design.md §14:
 
 Reclassifying a feature requires a new decision entry (Decision 013
 consequence) — do not edit these tuples casually.
+
+TRAINING-TIME EXCLUSIONS (Decision 041, resolving Decisions 036/040): see
+`EXCLUDED_FROM_TRAINING`/`active_feature_columns()` below. A real automated
+retrain (Decision 036/PR #1) regressed because it trained on the full,
+current `FEATURE_COLUMNS` — including `wet_form`, which Decision 040's
+ablation study isolated as the actual cause (weather/qualifying_raw_times
+are inert; teammate_form/grid_penalty_applied are net-positive and must
+stay included — NOT a blanket "exclude all experimental features" rule).
+`to_xy()`/`get_model()` now default to `active_feature_columns()` (never
+the raw `FEATURE_COLUMNS`) precisely so that regression can't silently
+recur: getting the full, unexcluded set requires an explicit
+`feature_columns=FEATURE_COLUMNS` override, never the default.
 """
 
 from __future__ import annotations
@@ -128,6 +142,55 @@ def features_in_class(feature_class: str) -> tuple[str, ...]:
             f"Unknown feature class '{feature_class}' — expected one of {FEATURE_CLASSES}."
         )
     return tuple(f for f, c in FEATURE_CLASSIFICATION.items() if c == feature_class)
+
+
+# ---------------------------------------------------------------------------
+# Training-time exclusions (Decision 041 — the minimal path-(b) mechanism
+# resolving Decision 036/040's regression). NOT a Feature Profile System:
+# a single denylist of FEATURE_GROUPS names, applied as the training DEFAULT
+# everywhere (see active_feature_columns()) so an exclusion can never be
+# silently bypassed the way Decision 036's manual, uncommitted exclusion
+# was. Referenced by GROUP NAME, never by Decision-013 classification —
+# Decision 040's own ablation showed classification-level exclusion is too
+# coarse (it would incorrectly exclude teammate_form/grid_penalty_applied,
+# which are `stable`-classified and must stay included).
+#
+# Changing this list (excluding or re-including a group) requires a new
+# decision entry in context/decisions.md — same convention this file
+# already applies to the STABLE/ERA_SENSITIVE/EXPERIMENTAL tuples above.
+# Do not edit casually.
+EXCLUDED_FROM_TRAINING: tuple[str, ...] = ("wet_form",)
+
+
+def active_feature_columns(
+    excluded_groups: tuple[str, ...] = EXCLUDED_FROM_TRAINING,
+) -> tuple[str, ...]:
+    """FEATURE_COLUMNS minus every feature in `excluded_groups` (looked up
+    by FEATURE_GROUPS name), preserving FEATURE_COLUMNS' original order.
+
+    THIS is the training default (Decision 041): `to_xy()`/`get_model()`
+    resolve to this when no explicit `feature_columns` override is given,
+    so excluding a group cannot be silently bypassed the way Decision 036's
+    manual, uncommitted exclusion was. Pass the raw `FEATURE_COLUMNS`
+    explicitly (never this function) to deliberately opt into the full,
+    unexcluded set for research/ablation purposes — see Decision 040's own
+    investigation for the precedent this generalizes.
+    """
+    unknown = set(excluded_groups) - set(FEATURE_GROUPS)
+    if unknown:
+        raise ValueError(
+            f"Unknown feature group(s) in excluded_groups: {sorted(unknown)}. "
+            f"Known groups: {sorted(FEATURE_GROUPS)}."
+        )
+    excluded_features = {f for g in excluded_groups for f in FEATURE_GROUPS[g]}
+    return tuple(f for f in FEATURE_COLUMNS if f not in excluded_features)
+
+
+_unknown_excluded_default = set(EXCLUDED_FROM_TRAINING) - set(FEATURE_GROUPS)
+assert not _unknown_excluded_default, (
+    f"EXCLUDED_FROM_TRAINING references unknown feature group(s): "
+    f"{sorted(_unknown_excluded_default)}. Known groups: {sorted(FEATURE_GROUPS)}."
+)
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 from mlflow.exceptions import MlflowException
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.calibration import CalibratedModel
 from src.models.predict import (
@@ -262,7 +263,9 @@ def test_schema_comes_from_artifact_not_repository(staging, race_frame, monkeypa
     # Even if repository constants changed, predict_race reads the artifact.
     out = predict_race(model, race_frame)
     recorded = model.named_steps["guard"].feature_names_in_
-    assert recorded == list(FEATURE_COLUMNS)   # today they coincide
+    # Decision 041: the staging fixture is fit via the default
+    # (exclusion-applied) feature set, not the raw full FEATURE_COLUMNS.
+    assert recorded == list(active_feature_columns())   # today they coincide
     assert len(out) == len(race_frame)
 
 
@@ -305,7 +308,10 @@ def test_staging_predictions_are_calibrated_not_raw(staging, race_frame):
     model, info = staging
     assert info.calibration == "isotonic-oof"
     out = predict_race(model, race_frame)
-    X = race_frame.loc[:, list(FEATURE_COLUMNS)]
+    # Decision 041: the staging fixture's base_pipeline was fit via the
+    # default (exclusion-applied) feature set, not the raw full
+    # FEATURE_COLUMNS — its ColumnGuard expects exactly that.
+    X = race_frame.loc[:, list(active_feature_columns())]
     base_raw = model.base_pipeline.predict_proba(X)[:, 1]
     calibrated = model.predict_proba(X)[:, 1]
     # The serving path reports the calibrated number...

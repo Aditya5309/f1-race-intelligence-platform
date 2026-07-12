@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.calibration import (
     PROBABILITY_EPS,
@@ -156,9 +157,12 @@ def test_predict_thresholds_at_half(calibrated, val_df):
 
 
 def test_named_steps_delegation_keeps_training_schema_working(calibrated):
+    # Decision 041: fit_calibrated_model -> to_xy() defaults to the
+    # training-exclusion-applied set (currently FEATURE_COLUMNS minus
+    # wet_form), not the raw full set — the fixture was fit that way too.
     schema = training_schema(calibrated)
-    assert schema["feature_names"] == list(FEATURE_COLUMNS)
-    assert schema["n_features"] == len(FEATURE_COLUMNS)
+    assert schema["feature_names"] == list(active_feature_columns())
+    assert schema["n_features"] == len(active_feature_columns())
 
 
 def test_columnguard_still_enforced_through_wrapper(calibrated, val_df):

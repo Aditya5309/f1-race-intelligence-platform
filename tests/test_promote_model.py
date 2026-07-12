@@ -225,6 +225,44 @@ def test_check_schema_and_predictions_refuses_degenerate_output(env, monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# check_excluded_features (Decision 041 — the promotion-gate side of the
+# minimal path-(b) mechanism resolving Decision 036/040's regression)
+# ---------------------------------------------------------------------------
+
+def test_check_excluded_features_passes_for_a_default_trained_candidate(env):
+    """register_model() -> to_xy()/get_model() default to
+    active_feature_columns() (wet_form excluded) — a normal candidate must
+    clear this check."""
+    version = _register(env)
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    promote_model.check_excluded_features(model)  # no raise
+
+
+def test_check_excluded_features_refuses_a_candidate_trained_with_wet_form(env):
+    """The last line of defense against Decision 036's exact failure mode:
+    even if a candidate somehow got fit against the FULL, un-excluded
+    feature set (e.g. an explicit feature_columns=FEATURE_COLUMNS override
+    used carelessly), promotion must refuse it, loudly and specifically."""
+    X, y, _ = to_xy(env["split"].train, feature_columns=FEATURE_COLUMNS)
+    model = get_model("logreg", y, feature_columns=FEATURE_COLUMNS)
+    model.fit(X, y)
+    with pytest.raises(promote_model.PromotionRefused, match="wet_form|wet_dry_delta"):
+        promote_model.check_excluded_features(model)
+
+
+def test_check_excluded_features_respects_a_custom_excluded_groups_arg(env):
+    """The function itself is generic — not hardcoded to wet_form — so a
+    future exclusion-list change doesn't require touching this check."""
+    X, y, _ = to_xy(env["split"].train)  # default: wet_form already excluded
+    model = get_model("logreg", y)
+    model.fit(X, y)
+    # No teammate_form features were excluded from this candidate, so
+    # asking the check to enforce a teammate_form exclusion must refuse it.
+    with pytest.raises(promote_model.PromotionRefused, match="teammate"):
+        promote_model.check_excluded_features(model, excluded_groups=("teammate_form",))
+
+
+# ---------------------------------------------------------------------------
 # check_regression
 # ---------------------------------------------------------------------------
 

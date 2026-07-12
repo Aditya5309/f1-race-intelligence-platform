@@ -45,6 +45,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS
 
 RANDOM_STATE = 42
@@ -57,18 +58,32 @@ RANDOM_STATE = 42
 class ColumnGuard(BaseEstimator, TransformerMixin):
     """First step of every zoo pipeline: schema assertion + dtype normalization.
 
-    At FIT time the guard validates against the feature pipeline's
-    FEATURE_COLUMNS (the training-time contract) and RECORDS the schema it
-    saw (`feature_names_in_`, `feature_dtypes_in_`). At TRANSFORM time —
-    which includes every predict call on the serialized pipeline — it
-    validates against its own RECORDED schema, not the repository state.
-    A fitted model therefore carries its training schema with it: if
+    At FIT time the guard validates against `expected_columns` if given,
+    else the feature pipeline's full `FEATURE_COLUMNS` (the training-time
+    contract) — and RECORDS the schema it saw (`feature_names_in_`,
+    `feature_dtypes_in_`). At TRANSFORM time — which includes every
+    predict call on the serialized pipeline — it validates against its own
+    RECORDED schema, not the repository state or `expected_columns`. A
+    fitted model therefore carries its training schema with it: if
     FEATURE_COLUMNS later evolves (v2 features), old artifacts still
     validate serving input against what they were actually trained on.
     Names and order are enforced strictly; recorded dtypes are contract
     documentation (everything is cast to float64, so Float64-vs-float64
     differences are not errors).
+
+    `expected_columns` (Decision 041): callers normally never set this
+    directly — `get_model()` resolves and injects it via
+    `set_params(guard__expected_columns=...)`, defaulting to
+    `active_feature_columns()` (the training-exclusion-applied set) unless
+    an explicit override is given. Left as `None`, this guard falls back to
+    the full `FEATURE_COLUMNS`, unchanged from pre-Decision-041 behavior —
+    every direct `ColumnGuard()` construction outside `get_model()` (there
+    are none in this repository today, but the fallback exists for that
+    case and for old serialized artifacts) keeps working exactly as before.
     """
+
+    def __init__(self, expected_columns: tuple[str, ...] | None = None):
+        self.expected_columns = expected_columns
 
     def _check(self, X: pd.DataFrame, expected: list, contract: str) -> None:
         if not isinstance(X, pd.DataFrame):
@@ -85,7 +100,11 @@ class ColumnGuard(BaseEstimator, TransformerMixin):
             )
 
     def fit(self, X: pd.DataFrame, y=None) -> ColumnGuard:
-        self._check(X, list(FEATURE_COLUMNS), "FEATURE_COLUMNS")
+        if self.expected_columns is not None:
+            expected, contract = list(self.expected_columns), "the configured training feature set"
+        else:
+            expected, contract = list(FEATURE_COLUMNS), "FEATURE_COLUMNS"
+        self._check(X, expected, contract)
         self.feature_names_in_ = list(X.columns)
         self.feature_dtypes_in_ = {col: str(dtype) for col, dtype in X.dtypes.items()}
         return self
@@ -368,10 +387,27 @@ MODEL_ZOO: dict[str, ModelSpec] = {
 }
 
 
-def get_model(name: str, y_train: pd.Series) -> Pipeline:
-    """Build a ready-to-fit pipeline for one zoo candidate."""
+def get_model(
+    name: str, y_train: pd.Series, feature_columns: tuple[str, ...] | None = None,
+) -> Pipeline:
+    """Build a ready-to-fit pipeline for one zoo candidate.
+
+    `feature_columns` (Decision 041): the design matrix's expected column
+    set, injected into the pipeline's `ColumnGuard` step. Defaults —
+    when NOT given — to `active_feature_columns()` (the training-exclusion
+    -applied set, e.g. currently `FEATURE_COLUMNS` minus `wet_form`), never
+    to the raw, full `FEATURE_COLUMNS`. This default is deliberately the
+    SAFE one: getting the full, unexcluded set requires an explicit,
+    deliberate `feature_columns=FEATURE_COLUMNS` (or another explicit
+    tuple) — the inversion that makes a silent repeat of Decision 036
+    structurally impossible for any caller that doesn't ask for the raw
+    set by name.
+    """
     if name not in MODEL_ZOO:
         raise KeyError(
             f"Unknown model '{name}'. Available: {sorted(MODEL_ZOO)}."
         )
-    return MODEL_ZOO[name].build(y_train)
+    pipeline = MODEL_ZOO[name].build(y_train)
+    resolved = feature_columns if feature_columns is not None else active_feature_columns()
+    pipeline.set_params(guard__expected_columns=tuple(resolved))
+    return pipeline

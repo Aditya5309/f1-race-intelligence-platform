@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.registry import get_model
 from src.models.serving_bundle import (
@@ -91,7 +92,9 @@ def test_export_bundle_writes_model_manifest_and_schema(tmp_path, fitted_model, 
     assert manifest["exported_at"].startswith("20")
 
     schema = json.loads((bundle_dir / "feature_schema.json").read_text())
-    assert schema["feature_names"] == list(FEATURE_COLUMNS)
+    # Decision 041: fitted_model was fit via the default (exclusion-applied)
+    # feature set, not the raw full FEATURE_COLUMNS.
+    assert schema["feature_names"] == list(active_feature_columns())
 
 
 def test_export_bundle_overwrites_existing(tmp_path, fitted_model, sample_info):

@@ -315,7 +315,10 @@ def test_pole_baseline_through_evaluation():
     X = pd.DataFrame(rows)[list(FEATURE_COLUMNS)]
     y = pd.Series(y_true)
 
-    pipeline = get_model("pole_baseline", y).fit(X, y)
+    # feature_columns=FEATURE_COLUMNS: X above is built from the full
+    # declared feature set (Decision 041's training-exclusion default is a
+    # separate concern from this model-agnosticism test).
+    pipeline = get_model("pole_baseline", y, feature_columns=FEATURE_COLUMNS).fit(X, y)
     y_prob = pipeline.predict_proba(X)[:, 1]
 
     metrics = evaluate_all(y_true, y_prob, race_ids)

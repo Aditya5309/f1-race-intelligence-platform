@@ -25,9 +25,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.evaluate import top1_accuracy
-from src.models.registry import MODEL_ZOO, get_model
+from src.models.registry import MODEL_ZOO, get_model, training_schema
 from src.models.splits import temporal_split, to_xy
 from src.models.train import (
     check_tripwire,
@@ -234,7 +235,9 @@ def test_feature_importance_frame_boosted_trees():
     X, y, _ = to_xy(df)
     pipeline = get_model("lightgbm", y).fit(X, y)
     frame = feature_importance_frame(pipeline)
-    assert set(frame["feature"]) == set(FEATURE_COLUMNS)      # no imputer -> 1:1
+    # Decision 041: to_xy()/get_model() default to active_feature_columns()
+    # (the training-exclusion-applied set), not the raw full FEATURE_COLUMNS.
+    assert set(frame["feature"]) == set(active_feature_columns())      # no imputer -> 1:1
     assert set(frame["feature_class"]) <= {"stable", "era_sensitive", "experimental"}
     # The planted signal must dominate.
     assert frame.iloc[0]["feature"] in ("grid_adjusted", "grid_position_norm")
@@ -305,6 +308,56 @@ def test_register_rejects_unknown_alias(tmp_mlflow):
     split = temporal_split(_full_frame())
     with pytest.raises(ValueError, match="alias"):
         register_model("pole_baseline", split, alias="Canary")
+
+
+# ---------------------------------------------------------------------------
+# Decision 041 — automated retraining reads and honours the training
+# configuration (the exact path scripts/refresh_and_freeze.py's automated
+# mode and a manual `train.py --register` both go through: neither passes
+# any special feature_columns override, so both must get the safe default).
+# ---------------------------------------------------------------------------
+
+def test_register_model_honors_training_exclusion_by_default(tmp_mlflow, tmp_path):
+    """A real register_model() call — no feature_columns override, exactly
+    how the scheduled retrain workflow and a manual --register both invoke
+    it — must produce a candidate whose recorded schema excludes wet_form.
+    This is Decision 036's exact regression path, now structurally closed:
+    the automated pipeline can no longer silently retrain on wet_form."""
+    split = temporal_split(_full_frame())
+    version = register_model("logreg", split, alias="Staging",
+                             bundle_root=tmp_path / "bundle",
+                             features_source=_features_snapshot_source(tmp_path),
+                             artifacts_root=tmp_path / "artifacts")
+    model = mlflow.sklearn.load_model(f"models:/f1-winner/{version}")
+    schema = training_schema(model)
+    assert "driver_wet_dry_delta" not in schema["feature_names"]
+    assert "constructor_wet_dry_delta" not in schema["feature_names"]
+    assert schema["feature_names"] == list(active_feature_columns())
+    # teammate_form/grid_penalty_applied must stay included — Decision 040's
+    # own evidence, not just Decision 036's original regression.
+    assert "qualifying_gap_to_teammate" in schema["feature_names"]
+    assert "grid_penalty_applied" in schema["feature_names"]
+
+
+def test_register_model_logs_excluded_feature_groups_to_mlflow(tmp_mlflow, tmp_path):
+    """MLflow reproducibility (Decision 041): every training run is tagged
+    with which groups were excluded, queryable across experiments — the
+    ground-truth record is training_schema()'s own recorded column list
+    (already saved as feature_schema.json/training_schema.json), this tag
+    is the human-readable, filterable companion."""
+    split = temporal_split(_full_frame())
+    register_model("logreg", split, alias="Staging",
+                   bundle_root=tmp_path / "bundle",
+                   features_source=_features_snapshot_source(tmp_path),
+                   artifacts_root=tmp_path / "artifacts")
+    runs = mlflow.search_runs(
+        search_all_experiments=True, filter_string="tags.stage = 'register'",
+        output_format="list",
+    )
+    assert len(runs) >= 1
+    tags = runs[0].data.tags
+    assert tags["excluded_feature_groups"] == "wet_form"
+    assert tags["active_feature_count"] == str(len(active_feature_columns()))
 
 
 # ---------------------------------------------------------------------------

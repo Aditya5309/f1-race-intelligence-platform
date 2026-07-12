@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.features.metadata import FEATURE_CLASSIFICATION
+from src.features.metadata import FEATURE_CLASSIFICATION, active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.analysis import (
     _case_study_rows,
@@ -113,7 +113,9 @@ class TestPermutationImportance:
         return permutation_importance_top1(fitted_logreg, split.val, n_repeats=2)
 
     def test_one_row_per_feature(self, perm):
-        assert sorted(perm["feature"]) == sorted(FEATURE_COLUMNS)
+        # Decision 041: fitted_logreg was fit via the default (exclusion-
+        # applied) feature set, not the raw full FEATURE_COLUMNS.
+        assert sorted(perm["feature"]) == sorted(active_feature_columns())
 
     def test_baseline_attr_and_sorting(self, perm):
         assert 0.0 <= perm.attrs["baseline_top1"] <= 1.0
