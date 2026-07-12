@@ -43,7 +43,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))          # runnable without pip install
 
 from src.features.pipeline import FEATURES_PATH  # noqa: E402
-from src.models.serving_bundle import DEFAULT_ARTIFACTS_ROOT, export_features_snapshot  # noqa: E402
+from src.models.serving_bundle import (  # noqa: E402
+    DEFAULT_ARTIFACTS_ROOT,
+    export_features_snapshot,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

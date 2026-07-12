@@ -28,10 +28,10 @@ import pytest
 
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models import eras, season_tracking
-from src.models.registry import get_model
 from src.models.evaluate import evaluate_all
 from src.models.predict import load_model, predict_race
-from src.models.serving_bundle import ModelInfo, bundle_dir_for_alias, export_bundle
+from src.models.registry import get_model
+from src.models.serving_bundle import ModelInfo, export_bundle
 from src.models.splits import to_xy
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
