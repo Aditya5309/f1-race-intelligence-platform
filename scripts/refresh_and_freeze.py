@@ -17,34 +17,54 @@ anyway" runner; everything after a failed step is left untouched):
   2. src.data.build_interim --target all
   3. src.pipelines.build_dataset
   4. src.features.pipeline
-  5. scripts/export_display_data.py     ALWAYS runs — display data has no
+  5. src.models.season_tracking         ALWAYS runs, right here — scores any
+                                        newly completed race in the current,
+                                        ONGOING regulation era (2026's
+                                        `future_engine` today; see
+                                        src/models/eras.py) against
+                                        whichever bundle was ALREADY served
+                                        before this run (never the not-yet-
+                                        registered candidate from step 7
+                                        below). Read-only: never a training
+                                        input, never touches split.test or
+                                        temporal_split (src/models/
+                                        season_tracking.py's own module
+                                        docstring is the structural
+                                        guarantee, not just this comment).
+  6. scripts/export_display_data.py     ALWAYS runs — display data has no
                                         "good vs bad" concept to gate on,
                                         only "current vs stale" (Decision
                                         030); it must not be tied to
                                         whether the model registration
                                         below succeeds or is later promoted
-  6. src.models.train --model <from config> --register [--calibrate]
+  7. src.models.train --model <from config> --register [--calibrate]
      --params-file config/registered_model_params.json — model family,
      calibrate flag, and hyperparameters ALL read from the shared config
      file (Phase 4 Tranche D's source of truth), not hardcoded here
 
-    python scripts/refresh_and_freeze.py                  # manual mode (default): step 6 exports immediately
-    python scripts/refresh_and_freeze.py --automated       # step 6 registers only (export=False); a separate
+    python scripts/refresh_and_freeze.py                  # manual mode (default): step 7 exports immediately
+    python scripts/refresh_and_freeze.py --automated       # step 7 registers only (export=False); a separate
                                                             # `python scripts/promote_model.py` call is the gate
                                                             # that actually swaps the served bundle (Tranche C/D)
     python scripts/refresh_and_freeze.py --skip-ingest      # rebuild/freeze only, using data/ as-is
     python scripts/refresh_and_freeze.py --dry-run          # runs ingest_jolpica.py --dry-run, stops there
 
 --tracking-uri/--bundle-root/--artifacts-root pass straight through to step
-6's `train.py --register` call (same flags, same meaning); --display-dest
-passes through to step 5's `export_display_data.py --dest`. Point ALL FOUR
-at tmp locations for a hermetic dry run of the whole sequence against real
-data — the default (manual mode, no override) WILL overwrite the real
-committed mlflow.db/artifacts/serving/artifacts/display, same as
-`train.py --register`/`export_display_data.py` always have. Step 5 is
-NEVER gated (see above), so --display-dest matters even in --automated
-mode, unlike --bundle-root/--artifacts-root which --automated already
-protects via --no-export.
+7's `train.py --register` call (same flags, same meaning); --display-dest
+passes through to step 6's `export_display_data.py --dest`; --tracking-dir
+passes through to step 5's `season_tracking --tracking-dir` (default:
+artifacts/tracking/). Point ALL FIVE at tmp locations for a hermetic dry
+run of the whole sequence against real data — the default (manual mode, no
+override) WILL overwrite the real committed
+mlflow.db/artifacts/serving/artifacts/display/artifacts/tracking, same as
+`train.py --register`/`export_display_data.py` always have. Steps 5 and 6
+are NEVER gated (see above), so --tracking-dir/--display-dest matter even
+in --automated mode, unlike --bundle-root/--artifacts-root which
+--automated already protects via --no-export. Step 5 also reads
+--bundle-root (NOT --bundle-root's step-7 write target — the SAME flag,
+since tracking must score whatever bundle is currently sitting at that
+root, i.e. last week's served candidate, before step 7 potentially
+overwrites it).
 
 --automated is what the scheduled retrain workflow (Phase 4 Tranche D Part
 3) uses: it never touches artifacts/serving/ itself, then calls
@@ -113,14 +133,22 @@ def main(argv: list[str] | None = None) -> int:
                         help="Passed through to `scripts/export_display_data.py "
                              "--dest` (default: artifacts/display/). Point at "
                              "a tmp dir for hermetic testing — otherwise step "
-                             "5 WILL overwrite the real committed display "
+                             "6 WILL overwrite the real committed display "
                              "data, even in --automated mode (display refresh "
                              "is never gated, see the module docstring).")
+    parser.add_argument("--tracking-dir", type=Path, default=None,
+                        help="Passed through to `src.models.season_tracking "
+                             "--tracking-dir` (default: artifacts/tracking/). "
+                             "Point at a tmp dir for hermetic testing — "
+                             "otherwise step 5 WILL append to the real "
+                             "committed running-eval CSV, even in "
+                             "--automated mode (tracking is never gated, "
+                             "same reasoning as display refresh).")
     args = parser.parse_args(argv)
 
     if not args.dry_run and not args.params_file.exists():
         print(f"ERROR: --params-file {args.params_file} not found — checked "
-              "up front so a config typo doesn't waste time on steps 1-5 "
+              "up front so a config typo doesn't waste time on steps 1-6 "
               "before failing at registration.", file=sys.stderr)
         return 1
 
@@ -144,10 +172,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not _run("4. Build feature store", [py, "-m", "src.features.pipeline"]):
         return 1
+
+    # Score newly completed races with whatever bundle is CURRENTLY served
+    # at --bundle-root, BEFORE step 7 potentially overwrites it — tracks the
+    # model that was actually in production, not this run's not-yet-vetted
+    # candidate. Always runs, regardless of --automated / whether step 7's
+    # candidate ends up promoted (src/models/season_tracking.py: read-only,
+    # never a training input).
+    tracking_cmd = [py, "-m", "src.models.season_tracking", "--alias", args.alias]
+    if args.bundle_root:
+        tracking_cmd += ["--bundle-root", str(args.bundle_root)]
+    if args.tracking_dir:
+        tracking_cmd += ["--tracking-dir", str(args.tracking_dir)]
+    if not _run("5. Track current-era races against the currently-served bundle", tracking_cmd):
+        return 1
+
     display_cmd = [py, "scripts/export_display_data.py"]
     if args.display_dest:
         display_cmd += ["--dest", str(args.display_dest)]
-    if not _run("5. Refresh display-data snapshot (always, unconditionally)", display_cmd):
+    if not _run("6. Refresh display-data snapshot (always, unconditionally)", display_cmd):
         return 1
 
     config = json.loads(args.params_file.read_text())
@@ -168,8 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         register_cmd += ["--artifacts-root", str(args.artifacts_root)]
     if args.automated:
         register_cmd.append("--no-export")
-    step_label = "6. Register candidate (export=False — gated by promote_model.py next)" \
-        if args.automated else "6. Register candidate (immediate export)"
+    step_label = "7. Register candidate (export=False — gated by promote_model.py next)" \
+        if args.automated else "7. Register candidate (immediate export)"
     if not _run(step_label, register_cmd):
         return 1
 

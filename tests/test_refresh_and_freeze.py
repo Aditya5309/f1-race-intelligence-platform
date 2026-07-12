@@ -43,21 +43,22 @@ def _params_file(tmp_path, model="logreg", calibrate=True) -> Path:
     return path
 
 
-def test_runs_all_six_steps_in_order_manual_mode(tmp_path):
+def test_runs_all_seven_steps_in_order_manual_mode(tmp_path):
     params_file = _params_file(tmp_path)
     with patch.object(refresh_and_freeze.subprocess, "run", return_value=_FakeResult(0)) as mock_run:
         rc = refresh_and_freeze.main(["--params-file", str(params_file)])
 
     assert rc == 0
     commands = [call.args[0] for call in mock_run.call_args_list]
-    assert len(commands) == 6
+    assert len(commands) == 7
     assert "ingest_jolpica.py" in commands[0][1]
     assert commands[1][2:4] == ["src.data.build_interim", "--target"]
     assert commands[2][2] == "src.pipelines.build_dataset"
     assert commands[3][2] == "src.features.pipeline"
-    assert "export_display_data.py" in commands[4][1]
-    assert commands[5][2] == "src.models.train"
-    assert "--no-export" not in commands[5]   # manual mode: immediate export
+    assert commands[4][2] == "src.models.season_tracking"
+    assert "export_display_data.py" in commands[5][1]
+    assert commands[6][2] == "src.models.train"
+    assert "--no-export" not in commands[6]   # manual mode: immediate export
 
 
 def test_display_dest_passed_through_to_export_display_data_step(tmp_path):
@@ -75,10 +76,33 @@ def test_display_dest_passed_through_to_export_display_data_step(tmp_path):
         ])
 
     assert rc == 0
-    display_cmd = mock_run.call_args_list[4].args[0]
+    display_cmd = mock_run.call_args_list[5].args[0]
     assert "export_display_data.py" in display_cmd[1]
     assert "--dest" in display_cmd
     assert str(display_dest) in display_cmd
+
+
+def test_tracking_step_always_runs_and_forwards_bundle_root_and_tracking_dir(tmp_path):
+    """Tracking must run even in --automated mode (never gated, same as
+    display refresh) and must read --bundle-root (the CURRENTLY served
+    bundle) rather than only the register step's write target."""
+    params_file = _params_file(tmp_path)
+    bundle_root = tmp_path / "serving"
+    tracking_dir = tmp_path / "tracking"
+    with patch.object(refresh_and_freeze.subprocess, "run", return_value=_FakeResult(0)) as mock_run:
+        rc = refresh_and_freeze.main([
+            "--automated", "--params-file", str(params_file),
+            "--bundle-root", str(bundle_root),
+            "--tracking-dir", str(tracking_dir),
+        ])
+
+    assert rc == 0
+    tracking_cmd = mock_run.call_args_list[4].args[0]
+    assert tracking_cmd[2] == "src.models.season_tracking"
+    assert "--bundle-root" in tracking_cmd
+    assert str(bundle_root) in tracking_cmd
+    assert "--tracking-dir" in tracking_cmd
+    assert str(tracking_dir) in tracking_cmd
 
 
 def test_automated_mode_registers_with_no_export(tmp_path):
@@ -111,16 +135,16 @@ def test_stops_at_first_failing_step_and_runs_nothing_after(tmp_path):
         rc = refresh_and_freeze.main(["--params-file", str(params_file)])
 
     assert rc == 1
-    assert mock_run.call_count == 3   # steps 4/5/6 never ran
+    assert mock_run.call_count == 3   # steps 4/5/6/7 never ran
 
 
-def test_skip_ingest_runs_five_steps_not_six(tmp_path):
+def test_skip_ingest_runs_six_steps_not_seven(tmp_path):
     params_file = _params_file(tmp_path)
     with patch.object(refresh_and_freeze.subprocess, "run", return_value=_FakeResult(0)) as mock_run:
         rc = refresh_and_freeze.main(["--skip-ingest", "--params-file", str(params_file)])
 
     assert rc == 0
-    assert mock_run.call_count == 5
+    assert mock_run.call_count == 6
 
 
 def test_dry_run_stops_after_ingest_step(tmp_path):
@@ -134,7 +158,7 @@ def test_dry_run_stops_after_ingest_step(tmp_path):
 
 
 def test_missing_params_file_returns_1_before_running_any_step(tmp_path):
-    """Checked up front — a config typo must not waste time on steps 1-5
+    """Checked up front — a config typo must not waste time on steps 1-6
     before failing at registration."""
     with patch.object(refresh_and_freeze.subprocess, "run", return_value=_FakeResult(0)) as mock_run:
         rc = refresh_and_freeze.main(["--params-file", str(tmp_path / "missing.json")])
