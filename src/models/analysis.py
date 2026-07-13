@@ -1,8 +1,7 @@
 """
 src/models/analysis.py
 
-Post-training explainability and cost analysis for Phase 4 (Decision 012;
-reports/model_development_design.md Section 10).
+Post-training explainability and cost analysis.
 
     python -m src.models.analysis --model random_forest                # finalist analysis
     python -m src.models.analysis --model random_forest --params '{...}'
@@ -10,9 +9,9 @@ reports/model_development_design.md Section 10).
 
 Produces, for one candidate (fit on train, analyzed on validation — never
 test):
-- native feature-importance CSV + bar plot, grouped by Decision-013 class
-- permutation importance scored by PER-RACE TOP-1 (design Section 10 — what
-  actually moves the metric we care about, not row AUC)
+- native feature-importance CSV + bar plot, grouped by era-robustness class
+- permutation importance scored by PER-RACE TOP-1 — what
+  actually moves the metric we care about, not row AUC
 - SHAP global summary (beeswarm + bar), dependence plots for the top
   features, and per-race waterfall plots for 2022-2023 case-study races
   (TreeExplainer for tree families, LinearExplainer for logreg)
@@ -24,7 +23,7 @@ run tagged stage=analysis, so the artifacts are attributable to the same
 data fingerprint as the training runs.
 
 Leakage note: analysis uses train (fit) and validation (explain) only. The
-test split is not an input to anything here (design Section 11.3).
+test split is not an input to anything here.
 """
 
 from __future__ import annotations
@@ -57,13 +56,13 @@ from src.models.train import (
 )
 
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "reports" / "phase4_analysis"
-N_DEPENDENCE_PLOTS = 6          # design Section 10: top ~6 features
+N_DEPENDENCE_PLOTS = 6          # top ~6 features
 N_PERMUTATION_REPEATS = 5
 N_CASE_STUDY_RACES = 3
 
 
 # ---------------------------------------------------------------------------
-# Timing (training cost / inference latency, design-Section-9 tiebreak input)
+# Timing (training cost / inference latency — a tiebreak input for model selection)
 # ---------------------------------------------------------------------------
 
 def measure_timing(
@@ -108,7 +107,7 @@ def measure_timing(
 
 
 # ---------------------------------------------------------------------------
-# Permutation importance scored by per-race top-1 (design Section 10)
+# Permutation importance scored by per-race top-1
 # ---------------------------------------------------------------------------
 
 def permutation_importance_top1(
@@ -150,7 +149,7 @@ def permutation_importance_top1(
 
 
 # ---------------------------------------------------------------------------
-# SHAP (design Section 10)
+# SHAP
 # ---------------------------------------------------------------------------
 
 def _transformed_matrices(pipeline, X_tr: pd.DataFrame, X_val: pd.DataFrame):
@@ -220,7 +219,7 @@ def shap_analysis(
     summary["feature_class"] = base.map(FEATURE_CLASSIFICATION).fillna("derived")
     summary = summary.sort_values("mean_abs_shap", ascending=False).reset_index(drop=True)
 
-    # Dependence plots for the top features (design Section 10).
+    # Dependence plots for the top features.
     for feat in summary["feature"].head(N_DEPENDENCE_PLOTS):
         shap.dependence_plot(
             feat, shap_values, Xt_val, feature_names=names,
@@ -296,7 +295,7 @@ def _importance_plots(importances: pd.DataFrame, name: str, out_dir: Path) -> No
     by_class = importances.groupby("feature_class")["importance"].sum().sort_values()
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.barh(by_class.index, by_class.values)
-    ax.set_title(f"Importance by Decision-013 class — {name}")
+    ax.set_title(f"Importance by feature class — {name}")
     ax.set_xlabel("summed importance")
     fig.tight_layout()
     fig.savefig(out_dir / f"importance_by_class_{name}.png", dpi=150,
@@ -309,7 +308,7 @@ def _importance_plots(importances: pd.DataFrame, name: str, out_dir: Path) -> No
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Phase 4 post-training analysis.")
+    parser = argparse.ArgumentParser(description="Post-training analysis.")
     parser.add_argument("--model", default=None,
                         help="Zoo candidate to analyze (SHAP + importances).")
     parser.add_argument("--params", default=None,

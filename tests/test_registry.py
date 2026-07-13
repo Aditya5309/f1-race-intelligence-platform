@@ -1,14 +1,13 @@
 """
-Tests for src/models/registry.py and src/features/metadata.py
-(Phase 4 module 2 — Decision 012/013).
+Tests for src/models/registry.py and src/features/metadata.py.
 
-Design-doc Section 12 requirements for test_registry:
+Coverage:
   - every zoo entry builds a fit-able sklearn pipeline on synthetic data
-  - design-matrix columns == FEATURE_COLUMNS (Section 11.1 ColumnGuard)
+  - design-matrix columns == FEATURE_COLUMNS (via ColumnGuard)
   - pole-baseline heuristic produces valid probabilities
   - class weights computed from data, not hardcoded
 
-Plus Decision-013 metadata integrity (single source of truth in
+Plus feature-metadata integrity (single source of truth in
 src/features/metadata.py).
 """
 
@@ -70,10 +69,9 @@ def _training_data(n_rows: int = 200, seed: int = 0) -> tuple[pd.DataFrame, pd.S
 @pytest.mark.parametrize("name", sorted(MODEL_ZOO))
 def test_zoo_entry_fits_and_predicts(name):
     # feature_columns=FEATURE_COLUMNS: this file tests the raw zoo/
-    # ColumnGuard mechanics against the full declared feature contract
-    # (its own stated purpose, Decision 012) — a separate concern from
-    # Decision 041's training-exclusion DEFAULT, which has its own
-    # dedicated tests (test_metadata.py / test_train.py).
+    # ColumnGuard mechanics against the full declared feature contract —
+    # a separate concern from the training-exclusion DEFAULT, which has its
+    # own dedicated tests (test_metadata.py / test_train.py).
     X, y = _training_data()
     pipeline = get_model(name, y, feature_columns=FEATURE_COLUMNS)
     pipeline.fit(X, y)
@@ -92,7 +90,7 @@ def test_zoo_has_exactly_the_designed_candidates():
 def test_unknown_model_raises():
     _, y = _training_data()
     with pytest.raises(KeyError, match="Unknown model"):
-        get_model("catboost", y)   # not in the approved design (Decision 012)
+        get_model("catboost", y)   # not in the approved model zoo
 
 
 def test_tuned_candidates_declare_distributions():
@@ -102,7 +100,7 @@ def test_tuned_candidates_declare_distributions():
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 Tranche D Item 1a — xgboost/lightgbm are imported lazily, only by
+# xgboost/lightgbm are imported lazily, only by
 # the specific candidate that needs them. Serving a non-boosted-trees model
 # (the currently-registered logreg) must not require either installed.
 # ---------------------------------------------------------------------------
@@ -330,7 +328,7 @@ def test_model_spec_to_metadata_is_json_ready():
 
 
 # ---------------------------------------------------------------------------
-# Decision 013 — feature metadata single source of truth
+# Feature metadata single source of truth
 # ---------------------------------------------------------------------------
 
 def test_classification_partitions_feature_columns():
@@ -338,11 +336,11 @@ def test_classification_partitions_feature_columns():
     assert all_classified == set(FEATURE_COLUMNS)
     assert len(STABLE_FEATURES) + len(ERA_SENSITIVE_FEATURES) + len(EXPERIMENTAL_FEATURES) \
         == len(FEATURE_COLUMNS)
-    # Decision 013 counts (12, 12, 7) + Phase 4 Tranche A: grid_penalty_applied
-    # (item 2) and qualifying_gap_to_teammate_current, qualifying_gap_to_teammate,
-    # race_pace_delta_to_teammate (item 1) — all classified stable — + Tranche B
-    # item 1: race_precip_mm, race_temp_c, quali_precip_mm, conditions_changed,
-    # and item 2: driver_wet_dry_delta, constructor_wet_dry_delta — all
+    # Original counts (12, 12, 7) plus later additions: grid_penalty_applied,
+    # qualifying_gap_to_teammate_current, qualifying_gap_to_teammate, and
+    # race_pace_delta_to_teammate — all classified stable — plus
+    # race_precip_mm, race_temp_c, quali_precip_mm, conditions_changed,
+    # driver_wet_dry_delta, and constructor_wet_dry_delta — all
     # classified experimental (new, unvalidated signal).
     assert (len(STABLE_FEATURES), len(ERA_SENSITIVE_FEATURES), len(EXPERIMENTAL_FEATURES)) \
         == (16, 12, 13)
@@ -367,14 +365,13 @@ def test_groups_cover_feature_columns():
 
 
 # ---------------------------------------------------------------------------
-# Decision 041 — training-time exclusions (the minimal path-(b) mechanism
-# resolving Decision 036/040's regression)
+# Training-time exclusions (the safe-by-default mechanism that keeps
+# experimental, not-yet-validated feature groups out of automated retraining)
 # ---------------------------------------------------------------------------
 
 def test_excluded_from_training_is_currently_just_wet_form():
     """Pins the CURRENT exclusion list so a change to it is a deliberate,
-    reviewed diff to this assertion, not a silent surprise (metadata.py's
-    own docstring requires a decisions.md entry for any change here)."""
+    reviewed diff to this assertion, not a silent surprise."""
     assert EXCLUDED_FROM_TRAINING == ("wet_form",)
 
 
@@ -386,9 +383,10 @@ def test_active_feature_columns_excludes_wet_form_by_default():
 
 
 def test_active_feature_columns_keeps_teammate_form_and_grid_penalty():
-    """Decision 040's own evidence: these must stay included — they are
-    `stable`-classified, not `experimental`, and were shown to be
-    net-positive, not part of the regression."""
+    """These must stay included — they are
+    `stable`-classified, not `experimental`, and were shown by the
+    per-group ablation study to be net-positive, not part of the
+    wet_form regression."""
     active = active_feature_columns()
     for feature in (
         "qualifying_gap_to_teammate_current", "qualifying_gap_to_teammate",
@@ -420,18 +418,18 @@ def test_get_model_defaults_to_active_feature_columns():
 
 
 def test_get_model_explicit_override_uses_full_feature_columns():
-    """The deliberate opt-in path for research/ablation (Decision 040's own
-    precedent) — never the silent default."""
+    """The deliberate opt-in path for research/ablation — never the
+    silent default."""
     _, y = _training_data()
     pipeline = get_model("logreg", y, feature_columns=FEATURE_COLUMNS)
     assert pipeline.named_steps["guard"].expected_columns == FEATURE_COLUMNS
 
 
 def test_get_model_default_refuses_the_full_unexcluded_design_matrix():
-    """THE critical inversion (Decision 041's primary requirement): fitting
-    the DEFAULT pipeline against the full, un-excluded 41-column design
-    matrix must fail LOUDLY, not silently reintroduce wet_form — this is
-    Decision 036's exact failure mode, now made structurally impossible."""
+    """THE critical inversion: fitting the DEFAULT pipeline against the
+    full, un-excluded 41-column design matrix must fail LOUDLY, not
+    silently reintroduce wet_form — this is the real regression's exact
+    failure mode, now made structurally impossible."""
     X, y = _training_data()
     pipeline = get_model("logreg", y)   # default: active (39 cols)
     with pytest.raises(ValueError, match="configured training feature set"):
@@ -453,9 +451,10 @@ def test_reintroducing_wet_form_requires_an_explicit_override():
 
 def test_column_guard_default_construction_unaffected():
     """Backward compatibility: a bare ColumnGuard() (no expected_columns),
-    exactly how every pre-Decision-041 call site constructed it, still
-    falls back to the full, raw FEATURE_COLUMNS — unchanged behavior for
-    any caller that doesn't go through get_model()."""
+    exactly how every call site constructed it before the training-exclusion
+    default was introduced, still falls back to the full, raw
+    FEATURE_COLUMNS — unchanged behavior for any caller that doesn't go
+    through get_model()."""
     X, y = _training_data()
     guard = ColumnGuard().fit(X, y)
     assert guard.feature_names_in_ == list(FEATURE_COLUMNS)

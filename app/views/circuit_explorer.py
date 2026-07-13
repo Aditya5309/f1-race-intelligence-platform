@@ -1,4 +1,4 @@
-"""Circuit Explorer — one circuit's history (Phase 2).
+"""Circuit Explorer — one circuit's history.
 
 Picker by circuit name; every stat here is derived from results.csv /
 qualifying.csv / circuits.csv — no lap-by-lap telemetry exists anywhere in
@@ -7,7 +7,7 @@ difficulty rating, only the proxies computed in
 app/views/metadata.py::circuit_stats(), each captioned with what it
 actually measures and doesn't.
 
-Track-outline geometry (Phase 4 Tranche A, scripts/backfill_circuit_layouts.py)
+Track-outline geometry (scripts/backfill_circuit_layouts.py)
 is a separate, best-effort OpenStreetMap enrichment — not every circuit has
 one (see metadata.circuit_layout()'s docstring), so the outline section
 renders only when available and stays silent otherwise.

@@ -5,12 +5,13 @@ Freezes a small, committed subset of the Ergast display-metadata CSVs from
 the gitignored training-side data/ tree into artifacts/display/ — the
 directory app/config.py's Settings.data_dir now defaults to.
 
-Why this exists: data/ is entirely gitignored (Phase 5 / Decision 016). A
+Why this exists: data/ is entirely gitignored. A
 fresh clone (Streamlit Cloud, Render, CI) has no data/ at all, so every
 display-name lookup (app/api.py::_load_name_lookups, app/views/metadata.py)
 silently degrades to null/fallback text — the "race/driver name missing in
-prod" bug. Decision 029 already solved this exact shape of problem for the
-model itself (frozen artifacts/features.parquet + artifacts/serving/); this
+prod" bug. The frozen artifacts/features.parquet + artifacts/serving/
+tree already solves this exact shape of problem for the
+model itself; this
 script does the same for display data.
 
 The exported set is deliberately the FULL set of files any app/-side reader

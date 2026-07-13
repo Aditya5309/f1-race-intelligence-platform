@@ -1,7 +1,7 @@
 """
 src/features/teammate_form.py
 
-Teammate-relative features (Phase 4, Tranche A) — how a driver compares to
+Teammate-relative features — how a driver compares to
 their own teammate, both this weekend and over recent form.
 
 Same fan-out hazard as constructor_form.py: a constructor fields (usually)

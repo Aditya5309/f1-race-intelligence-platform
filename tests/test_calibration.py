@@ -1,5 +1,5 @@
 """
-Tests for src/models/calibration.py (Decision 015; design Sections 5, 9.5).
+Tests for src/models/calibration.py (out-of-fold isotonic calibration).
 
 Coverage:
   - OOF protocol: pairs come from held-out fold seasons only; season_folds'
@@ -157,7 +157,7 @@ def test_predict_thresholds_at_half(calibrated, val_df):
 
 
 def test_named_steps_delegation_keeps_training_schema_working(calibrated):
-    # Decision 041: fit_calibrated_model -> to_xy() defaults to the
+    # fit_calibrated_model -> to_xy() defaults to the
     # training-exclusion-applied set (currently FEATURE_COLUMNS minus
     # wet_form), not the raw full set — the fixture was fit that way too.
     schema = training_schema(calibrated)

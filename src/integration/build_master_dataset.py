@@ -3,11 +3,11 @@ src/integration/build_master_dataset.py
 
 Reusable integration logic for joining cleaned interim/raw F1 datasets into a
 single master modeling dataset: one row per (raceId, driverId), covering the
-full available race history (no year filtering — the Decision-008 train/val/
+full available race history (no year filtering — the train/val/
 test split is applied later, at training time, not here).
 
-Scope (Decision 009 / reports/master_dataset_design.md)
---------------------------------------------------------
+Scope
+-----
 This module performs INTEGRATION ONLY:
   - straight joins on stable keys (raceId, driverId, constructorId, circuitId)
   - column renaming to avoid collisions across source tables
@@ -26,8 +26,7 @@ Post-race outcome columns (position, points, laps, statusId, etc.) ARE included
 in the output — they're needed to derive the `winner` target and will be needed
 by future feature engineering to compute prior-race rolling history. They are
 NOT pre-race-safe and must never be selected as a model feature for a row's own
-race. See POST_RACE_OUTCOME_COLUMNS below and
-reports/master_dataset_design.md Section 6.1.
+race. See POST_RACE_OUTCOME_COLUMNS below.
 
 Entry points
 ------------
@@ -138,8 +137,8 @@ def load_inputs(interim_dir: Path = _INTERIM_DIR) -> dict[str, pd.DataFrame]:
 
     `results` and `qualifying` come from data/interim/ (already cleaned by
     src/data/cleaner.py + src/data/build_interim.py). `races`, `drivers`,
-    `constructors`, and `circuits` are loaded directly from data/*.csv — per
-    Decision 005, these dimension tables join cleanly as-is and have no
+    `constructors`, and `circuits` are loaded directly from data/*.csv — these
+    dimension tables join cleanly as-is and have no
     dedicated clean_* step.
 
     Raises
@@ -279,7 +278,7 @@ def build_master_dataset(inputs: dict[str, pd.DataFrame]) -> pd.DataFrame:
     Does not filter by year — the full race history is retained so that a
     future feature-engineering step can compute rolling/circuit-history
     features using pre-2010 races as context, even though only 2010+ rows are
-    used for training (Decision 008).
+    used for training.
     """
     results = inputs["results"]
     base_row_count = len(results)
@@ -307,9 +306,8 @@ def build_master_dataset(inputs: dict[str, pd.DataFrame]) -> pd.DataFrame:
                          step_name="qualifying", expected_row_count=base_row_count)
 
     # Target: winner. Uses positionOrder (Ergast's canonical finishing-order
-    # column), not position/positionText, per reports/master_dataset_design.md
-    # Section 5.2 — avoids the string/nullable-int ambiguity clean_results()
-    # already resolved once.
+    # column), not position/positionText — avoids the string/nullable-int
+    # ambiguity clean_results() already resolved once.
     df["winner"] = (df["positionOrder"] == 1).astype(int)
 
     return df[list(MASTER_DATASET_COLUMNS)]

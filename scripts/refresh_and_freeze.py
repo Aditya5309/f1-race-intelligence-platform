@@ -3,7 +3,7 @@ scripts/refresh_and_freeze.py
 
 Orchestrates the full data-refresh-to-registration sequence as ONE atomic
 run, so its steps can't drift out of sync the way they already did once
-before (Decision 030): the model bundle and the display-data snapshot used
+before: the model bundle and the display-data snapshot used
 to be two independent manual commands, and a real production bug shipped
 because someone ran one without the other. Fixing that structurally, not
 just documenting "remember to run both", is the point of this script.
@@ -35,8 +35,7 @@ anyway" runner; everything after a failed step is left untouched):
                                         just-rebuilt data/processed/
                                         features.parquet as artifacts/
                                         features.parquet independent of
-                                        registration (Part 1 fix, post-
-                                        Tranche-D): this snapshot answers
+                                        registration: this snapshot answers
                                         "which races/drivers exist", which
                                         src/models/serving_bundle.py's own
                                         docstring already says is orthogonal
@@ -48,19 +47,19 @@ anyway" runner; everything after a failed step is left untouched):
                                         a successful promotion.
   7. scripts/export_display_data.py     ALWAYS runs — display data has no
                                         "good vs bad" concept to gate on,
-                                        only "current vs stale" (Decision
-                                        030); it must not be tied to
+                                        only "current vs stale"; it must not
+                                        be tied to
                                         whether the model registration
                                         below succeeds or is later promoted
   8. src.models.train --model <from config> --register [--calibrate]
      --params-file config/registered_model_params.json — model family,
      calibrate flag, and hyperparameters ALL read from the shared config
-     file (Phase 4 Tranche D's source of truth), not hardcoded here
+     file (the single source of truth), not hardcoded here
 
     python scripts/refresh_and_freeze.py                  # manual mode (default): step 8 exports immediately
     python scripts/refresh_and_freeze.py --automated       # step 8 registers only (export=False); a separate
                                                             # `python scripts/promote_model.py` call is the gate
-                                                            # that actually swaps the served bundle (Tranche C/D)
+                                                            # that actually swaps the served bundle
     python scripts/refresh_and_freeze.py --skip-ingest      # rebuild/freeze only, using data/ as-is
     python scripts/refresh_and_freeze.py --dry-run          # runs ingest_jolpica.py --dry-run, stops there
 
@@ -86,12 +85,12 @@ export TO if not automated — see step 8 below). Step 5 also reads
 must score whatever bundle is currently sitting at that root, i.e. last
 week's served candidate, before step 8 potentially overwrites it).
 
---automated is what the scheduled retrain workflow (Phase 4 Tranche D Part
-3) uses: it never touches artifacts/serving/ itself, then calls
+--automated is what the scheduled retrain workflow
+uses: it never touches artifacts/serving/ itself, then calls
 promote_model.py separately, so promote_model.py's gate is the ONLY thing
 that can change what's served — not a no-op behind an already-completed
 unchecked export. Manual/interactive use keeps the default (immediate
-export) unchanged from how this was documented before Tranche D existed.
+export) unchanged.
 """
 
 from __future__ import annotations
@@ -122,11 +121,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--alias", default="Staging", choices=["Staging", "Production"],
                         help="Alias to register the retrained candidate under.")
     parser.add_argument("--automated", action="store_true",
-                        help="Register with --no-export (Phase 4 Tranche D) "
+                        help="Register with --no-export "
                              "so promote_model.py remains the only path "
                              "that changes what's served. Default (manual "
                              "mode): register with an immediate, unchecked "
-                             "export, matching this project's pre-Tranche-D "
+                             "export, matching this project's originally "
                              "documented manual command.")
     parser.add_argument("--skip-ingest", action="store_true",
                         help="Skip scripts/ingest_jolpica.py — rebuild/"
@@ -135,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Run scripts/ingest_jolpica.py --dry-run and stop.")
     parser.add_argument("--params-file", type=Path, default=DEFAULT_PARAMS_FILE,
                         help="Shared retrain-hyperparameter config passed "
-                             "to `train.py --register` (Phase 4 Tranche D).")
+                             "to `train.py --register`.")
     parser.add_argument("--tracking-uri", default=None,
                         help="Passed through to `train.py --register` "
                              "(default: train.py's own DEFAULT_TRACKING_URI). "

@@ -4,7 +4,7 @@ Season-scoped by default (fast: one season's worth of /predictions calls);
 an optional full-career toggle aggregates every served season, reusing the
 same per-season cache Season Analytics uses. Predictions come only from the
 HTTP API; championship standings, career stats, and qualifying/finishing
-trends are display metadata (app/views/metadata.py, Decision 024) and every
+trends are display metadata (app/views/metadata.py) and every
 metadata block degrades gracefully when data/ is absent.
 """
 

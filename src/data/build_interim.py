@@ -1,7 +1,7 @@
 """
 src/data/build_interim.py
 
-Runs the full Phase 1 data pipeline for race results:
+Runs the data-cleaning pipeline for race results:
 
     results.csv
       → clean_results()      dtype enforcement, result_status, finished
@@ -15,8 +15,8 @@ Usage
     python src/data/build_interim.py             # full pipeline
     python src/data/build_interim.py --dry-run   # validate only, do not write
 
-The output parquet is the canonical input for Phase 2 (EDA) and
-Phase 3 (feature engineering). Nothing downstream should read results.csv directly.
+The output parquet is the canonical input for downstream EDA and
+feature engineering. Nothing downstream should read results.csv directly.
 
 Known data quality issues repaired here
 ----------------------------------------
@@ -35,8 +35,6 @@ never decides between competing rows):
    The raw CSV has a null `position` value but a valid numeric `positionText`.
    Resolution: fill position from positionText when finished=True and
    position is null.
-
-See Decision 007 for the rationale behind these choices.
 """
 
 from __future__ import annotations
@@ -142,7 +140,7 @@ def build_interim(
     FileNotFoundError
         If results.csv is not found in data/.
     """
-    print("=== Phase 1 — Build Interim Dataset ===\n")
+    print("=== Build Interim Dataset ===\n")
 
     # Step 1: Load
     print("1/4  Loading results.csv ...")
@@ -194,8 +192,8 @@ def build_qualifying_interim(
 
     No repair step is needed: qualifying.csv has no duplicate (raceId,
     driverId) pairs and no null keys as-is (verified against the current
-    data snapshot) — unlike results.csv, which required the repairs in
-    Decision 007.
+    data snapshot) — unlike results.csv, which required the duplicate/
+    null-position repairs documented above.
 
     Parameters
     ----------

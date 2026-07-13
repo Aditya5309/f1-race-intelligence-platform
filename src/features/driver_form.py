@@ -2,9 +2,9 @@
 src/features/driver_form.py
 
 Rolling driver form — trailing-window statistics over each driver's PRIOR
-races only (reports/master_dataset_design.md Section 5.4).
+races only.
 
-Leakage rule (design doc Section 6.2, failure mode 1): every rolling window is
+Leakage rule: every rolling window is
 computed on `shift(1)` within the driver's chronologically ordered race
 history, so the current race's own result is never inside its own window.
 Ordering is by (year, round) — never raceId, which is not guaranteed to sort
@@ -15,8 +15,8 @@ A driver's first-ever race has no prior history: its rolling features are NaN
 (not 0 — "no information" and "0 wins in the last 5" are different signals).
 
 Mid-season constructor changes are intentionally ignored here: these are
-DRIVER features and correctly span a mid-season team switch (design doc
-Section 6.6) — do not "fix" this by grouping on constructorId.
+DRIVER features and correctly span a mid-season team switch — do not "fix"
+this by grouping on constructorId.
 """
 
 from __future__ import annotations
@@ -58,12 +58,12 @@ def add_driver_form_features(
     Requires columns: raceId, driverId, year, round, winner, positionOrder,
     points, finished. Returns a copy sorted chronologically by (year, round);
     row count unchanged. `windows` applies to the win counts; the remaining
-    features use a fixed 5-race window per the design doc.
+    features use a fixed 5-race window.
 
     `driver_avg_finish_last_5` uses positionOrder for ALL prior entries,
     including DNFs — Ergast's positionOrder ranks non-finishers at the back of
-    the field, which acts as a built-in DNF penalty (the documented choice
-    required by design doc Section 5.4).
+    the field, which acts as a built-in DNF penalty and is the deliberate
+    choice here, not an oversight.
     """
     out = df.sort_values(["year", "round", "raceId"], kind="mergesort").copy()
     driver = out["driverId"]

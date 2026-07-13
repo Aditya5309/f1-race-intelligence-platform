@@ -1,5 +1,5 @@
 """
-Tests for scripts/promote_model.py (Phase 4 Tranche C, Item 2).
+Tests for scripts/promote_model.py.
 
 scripts/ is not a package (no __init__.py, mirrors backfill_weather.py/
 smoke.py/dev.py — none of which have tests either), so the module is loaded
@@ -154,7 +154,7 @@ def test_resolve_version_empty_registry_refuses(env):
 
 
 # ---------------------------------------------------------------------------
-# check_model_class (Phase 4 Tranche D Item 1c)
+# check_model_class
 # ---------------------------------------------------------------------------
 
 def test_check_model_class_allows_permitted_module(env):
@@ -225,8 +225,9 @@ def test_check_schema_and_predictions_refuses_degenerate_output(env, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# check_excluded_features (Decision 041 — the promotion-gate side of the
-# minimal path-(b) mechanism resolving Decision 036/040's regression)
+# check_excluded_features (the promotion-gate side of the training-exclusion
+# default: automated retraining has no way to know a feature group was
+# manually excluded unless the safe default itself enforces it)
 # ---------------------------------------------------------------------------
 
 def test_check_excluded_features_passes_for_a_default_trained_candidate(env):
@@ -239,8 +240,8 @@ def test_check_excluded_features_passes_for_a_default_trained_candidate(env):
 
 
 def test_check_excluded_features_refuses_a_candidate_trained_with_wet_form(env):
-    """The last line of defense against Decision 036's exact failure mode:
-    even if a candidate somehow got fit against the FULL, un-excluded
+    """The last line of defense against a candidate silently trained on the
+    excluded feature group: even if it somehow got fit against the FULL, un-excluded
     feature set (e.g. an explicit feature_columns=FEATURE_COLUMNS override
     used carelessly), promotion must refuse it, loudly and specifically."""
     X, y, _ = to_xy(env["split"].train, feature_columns=FEATURE_COLUMNS)
@@ -396,7 +397,7 @@ def test_promote_first_ever_promotion_has_no_baseline_to_compare(env):
 
 def test_promote_refuses_when_served_bundle_has_no_metrics(env):
     """The bug found after the first real automated run: a served bundle
-    that EXISTS but has no metrics recorded (e.g. a legacy pre-Tranche-C
+    that EXISTS but has no metrics recorded (e.g. a legacy pre-metrics
     export — exactly the real committed artifacts/serving/staging/
     manifest.json's actual shape, no "metrics" key at all) is NOT the same
     as no baseline at all — it must refuse, not silently skip the

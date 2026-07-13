@@ -1,4 +1,4 @@
-# Continuous Integration (Phase C2 — Decision-free tooling).
+# Continuous Integration.
 #
 # Runs the exact local quality workflow (`make quality && make smoke`) on every
 # push and pull request, so a broken commit is caught on GitHub before it is
@@ -24,6 +24,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks needs full history, not a shallow clone
+
+      # Secret scanning. Needs no Python/deps, so
+      # it runs first — fail fast before spending time on the rest of the
+      # pipeline. BLOCKING (no continue-on-error): verified locally against
+      # this repo's full history with zero findings before
+      # this was added, so there is nothing pre-existing for a hard gate to
+      # trip over. Free for public repos (this one is) — no
+      # GITLEAKS_LICENSE needed.
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -31,18 +45,38 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # Editable install with the [dev] extra: pytest, pytest-cov, ruff
-      # (pyproject.toml is the single source of truth for pins — Decision 020).
+      # Editable install with the [dev] extra: pytest, pytest-cov, ruff,
+      # pip-audit
+      # (pyproject.toml is the single source of truth for pins).
       - name: Install dependencies
         run: pip install -e .[dev]
 
       # [tool.ruff] in pyproject.toml owns the rule set and exemptions;
-      # this step just runs it. Zero findings expected (Decision-free
-      # Phase C1 baseline).
+      # this step just runs it. Zero findings expected.
       - name: Lint (ruff)
         run: python -m ruff check .
 
-      # Full suite. data/ and mlflow.db are gitignored (Decision 002) and do
+      # Dependency vulnerability scan. REPORT-ONLY
+      # for now (continue-on-error, not a hard gate): a real run against
+      # this exact dependency set found known vulnerabilities across several
+      # TRANSITIVE packages, none of them this project's own direct pins —
+      # traced (not assumed) to their actual source: bleach/mistune/
+      # tornado/jupyter-server/jupyterlab come from the dev-only `notebook`
+      # extra (never shipped/served); aiohttp/cryptography come from mlflow
+      # (training-side only — never on the deployed
+      # serving path); pillow/python-multipart/starlette are the ones
+      # genuinely on the served API/dashboard path and the real follow-up
+      # target (see SECURITY.md). Hard-gating today would break
+      # every CI run on vulnerabilities this project cannot responsibly fix as
+      # a side effect (bumping fastapi/streamlit/mlflow needs its own
+      # verification pass, not bundled into "add scanning").
+      # continue-on-error keeps this VISIBLE (a failed, non-blocking step
+      # in the UI) rather than silently swallowed.
+      - name: Dependency vulnerability scan (pip-audit)
+        continue-on-error: true
+        run: python -m pip_audit
+
+      # Full suite. data/ and mlflow.db are gitignored and do
       # not exist on this runner, so the handful of real-data smoke tests
       # (tests/test_features.py, tests/test_splits.py) skip themselves via
       # their own skipif guards rather than failing — expected, not a bug.
@@ -53,6 +87,25 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
 
+      # Coverage threshold enforcement — scoped to
+      # src/ ONLY, not the combined src/+app number the step above reports.
+      # Re-analyzes the SAME .coverage data file the step above already
+      # wrote (via `coverage report`, not a second pytest run — zero
+      # additional test time) so this doesn't touch that step's command at
+      # all. Deliberately NOT gating on the combined src/+app total: app/
+      # views/*.py is 0% covered BY DESIGN (a real, measured fact — Streamlit
+      # presentation code, exercised by scripts/smoke.py's headless AppTest
+      # and manual QA, never by pytest), so the combined
+      # number is a moving target that dilutes as pages are added and would
+      # need constant, meaningless recalibration — measuring the wrong
+      # thing. src/ is the disciplined, unit-tested ML core this project
+      # has always stated an explicit target for: ≥80% src/ coverage.
+      # 80 is that same
+      # already-agreed number, not a new one invented for this gate — real
+      # measured src/ coverage at the time this was added: 95.19%.
+      - name: Coverage threshold (src/, --fail-under=80)
+        run: python -m coverage report --include="src/*" --fail-under=80
+
       # Synthetic, service-free end-to-end check (config -> MLflow
       # train/register -> load_model -> predict_race -> FastAPI TestClient
       # /health + one prediction -> Streamlit import/compile checks).
@@ -62,9 +115,9 @@ jobs:
       - name: Smoke test
         run: python scripts/smoke.py
 
-      # Coverage numbers as a downloadable CI artifact (not a hard gate yet —
-      # a --cov-fail-under threshold is a tracked follow-up once a stable
-      # target is agreed).
+      # Coverage numbers as a downloadable CI artifact. The combined
+      # src/+app/ total in this XML is NOT gated (see the src/-only step
+      # above for why) — this upload is for visibility/trend-watching only.
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

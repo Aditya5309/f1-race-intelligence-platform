@@ -1,19 +1,19 @@
 """
-scripts/smoke.py — end-to-end platform smoke test (Phase B quality baseline).
+scripts/smoke.py — end-to-end platform smoke test.
 
     python scripts/smoke.py
 
 Verifies the core serving workflow on a fully SYNTHETIC stack — no gitignored
 data/, no project mlflow.db, no network, no ports, no external services — so
-the same command runs identically on a dev machine and in a future GitHub
-Actions job:
+the same command runs identically on a dev machine and in the GitHub
+Actions CI job:
 
   1. project configuration     app.config.Settings constructs and exposes the
                                documented knobs
   2. MLflow train + registry   register a calibrated logreg into a THROWAWAY
                                sqlite registry built in a temp dir, which
                                ALSO exports a frozen serving bundle to a
-                               temp dir (Decision 026/027)
+                               temp dir
   3. model loading             load the frozen serving bundle exported in
                                step 2 via src.models.predict.load_model — no
                                MLflow tracking URI or registry call
@@ -103,7 +103,7 @@ def step_configuration(ctx: dict) -> None:
 
 def step_mlflow_train_and_register(ctx: dict) -> None:
     """Train + calibrate + register into the throwaway registry (MLflow up),
-    which ALSO exports a frozen serving bundle (Decision 026/027) — the
+    which ALSO exports a frozen serving bundle — the
     thing step 3 actually loads, with no MLflow call at all."""
     import mlflow
 
@@ -135,7 +135,7 @@ def step_mlflow_train_and_register(ctx: dict) -> None:
 
 def step_model_loading(ctx: dict) -> None:
     """Loads the frozen bundle exported in step 2 — no MLflow tracking URI,
-    no registry call (Decision 026/027)."""
+    no registry call."""
     from src.models.predict import load_model
 
     model, info = load_model(ctx["bundle_dir"])
@@ -159,19 +159,27 @@ def step_prediction_pipeline(ctx: dict) -> None:
 
 
 def step_api_health_and_prediction(ctx: dict) -> None:
-    """create_app lifespan + /health + one full prediction, all in-process."""
+    """create_app lifespan + /api/v1/health + one full prediction, all
+    in-process. Also checks the unversioned legacy alias
+    still resolves — a cheap, real regression check on the dual-mount."""
     from fastapi.testclient import TestClient
 
     from app.api import create_app
+    from app.config import API_V1_PREFIX
 
     with TestClient(create_app(ctx["settings"])) as client:
-        health = client.get("/health")
+        health = client.get(f"{API_V1_PREFIX}/health")
         assert health.status_code == 200, health.text
         body = health.json()
         assert body["status"] == "ok", f"API degraded: {body.get('detail')}"
         assert body["model"]["name"] == "f1-winner"
 
-        response = client.get(f"/predictions/{SMOKE_RACE_ID}")
+        # Legacy unversioned alias — same handler, same state.
+        legacy_health = client.get("/health")
+        assert legacy_health.status_code == 200, legacy_health.text
+        assert legacy_health.json()["model"] == body["model"]
+
+        response = client.get(f"{API_V1_PREFIX}/predictions/{SMOKE_RACE_ID}")
         assert response.status_code == 200, response.text
         predictions = response.json()["predictions"]
         assert len(predictions) == 5
@@ -247,7 +255,7 @@ def main() -> int:
             "tmp_dir": tmp_dir,
             "tracking_uri": f"sqlite:///{tmp_dir / 'mlflow.db'}",
             "features_path": tmp_dir / "features.parquet",
-            # register_model (Decision 026/027/029) exports a bundle + a
+            # register_model exports a bundle + a
             # features snapshot here; these paths are explicit so nothing
             # ever touches the real project's artifacts/ during a smoke run.
             "bundle_root": bundle_root,

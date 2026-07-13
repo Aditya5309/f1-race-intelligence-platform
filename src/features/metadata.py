@@ -1,38 +1,39 @@
 """
 src/features/metadata.py
 
-Feature metadata — the single source of truth for feature grouping, the
-Decision-013 classification (Stable / Era-sensitive / Experimental), AND
-(Decision 041) which feature groups are excluded from training by default.
+Feature metadata — the single source of truth for feature grouping, an
+era-robustness classification (Stable / Era-sensitive / Experimental), AND
+which feature groups are excluded from training by default.
 
 Consumers: model training (importance reporting grouped by class; `to_xy()`/
 `get_model()`'s default feature-column resolution), evaluation, SHAP analysis,
-ETL/drift monitoring (Phase 8: Stable-feature drift suggests a data problem;
+drift monitoring (Stable-feature drift suggests a data problem;
 Era-sensitive drift at regulation boundaries is expected domain behavior),
-and future dashboard components. Import from here — never re-type feature
+and dashboard components. Import from here — never re-type feature
 lists, classifications, or exclusions elsewhere.
 
-Rationale for each class lives in Decision 013 and the feature-set review in
-reports/model_development_design.md §14:
+Classification criteria:
 - Stable: era-robust relative/normalized measures, rank-based values, or
   structural facts. Expected to survive regulation resets.
 - Era-sensitive: predictive power depends on dominance concentration,
   regulation continuity, or points-system stability. Expected to weaken at
-  era boundaries (2026) and under cost-cap convergence.
-- Experimental: weak, noisy, or proxy signal; explicit keep-or-drop decision
-  after v1 SHAP/error analysis (e.g., raw q times are ~99% circuit-identity
-  variance).
+  era boundaries and under cost-cap convergence.
+- Experimental: weak, noisy, or proxy signal; kept pending a deliberate
+  keep-or-drop call after SHAP/error analysis (e.g., raw qualifying times
+  are ~99% circuit-identity variance, not real signal).
 
-Reclassifying a feature requires a new decision entry (Decision 013
-consequence) — do not edit these tuples casually.
+Reclassifying a feature is a deliberate, reviewed change — do not edit
+these tuples casually; record the reasoning wherever this project tracks
+engineering decisions.
 
-TRAINING-TIME EXCLUSIONS (Decision 041, resolving Decisions 036/040): see
-`EXCLUDED_FROM_TRAINING`/`active_feature_columns()` below. A real automated
-retrain (Decision 036/PR #1) regressed because it trained on the full,
-current `FEATURE_COLUMNS` — including `wet_form`, which Decision 040's
-ablation study isolated as the actual cause (weather/qualifying_raw_times
-are inert; teammate_form/grid_penalty_applied are net-positive and must
-stay included — NOT a blanket "exclude all experimental features" rule).
+TRAINING-TIME EXCLUSIONS: see `EXCLUDED_FROM_TRAINING`/
+`active_feature_columns()` below. A real automated retrain once regressed
+because it trained on the full, current `FEATURE_COLUMNS` — including the
+`wet_form` group, which a per-group ablation study isolated as the actual
+cause (the `weather`/`qualifying_raw_times` groups are inert;
+`teammate_form`/`grid_penalty_applied` are net-positive and must stay
+included — this is NOT a blanket "exclude all experimental features"
+rule, it targets one specific group that was shown not to generalize).
 `to_xy()`/`get_model()` now default to `active_feature_columns()` (never
 the raw `FEATURE_COLUMNS`) precisely so that regression can't silently
 recur: getting the full, unexcluded set requires an explicit
@@ -67,7 +68,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Decision-013 classification.
+# Era-robustness classification.
 # ---------------------------------------------------------------------------
 
 STABLE_FEATURES: tuple[str, ...] = (
@@ -112,16 +113,16 @@ EXPERIMENTAL_FEATURES: tuple[str, ...] = (
     "driver_circuit_wins",
     "driver_circuit_avg_finish",
     "constructor_circuit_wins",
-    # Phase 4 Tranche B: brand-new, never-before-assessed weather signal —
-    # explicit keep-or-drop decision pending, per this class's own criteria,
-    # after the Tranche B retrain's feature-importance/ablation check.
+    # Weather signal — recently added, not yet extensively assessed;
+    # explicit keep-or-drop call pending, per this class's own criteria,
+    # after a feature-importance/ablation check.
     "race_precip_mm",
     "race_temp_c",
     "quali_precip_mm",
     "conditions_changed",
     # Same rationale — driver_wet_dry_delta/constructor_wet_dry_delta are
-    # brand-new, never-before-assessed signals derived from the weather
-    # features above; explicit keep-or-drop decision pending too.
+    # newly added signals derived from the weather features above;
+    # explicit keep-or-drop call pending too.
     "driver_wet_dry_delta",
     "constructor_wet_dry_delta",
 )
@@ -136,7 +137,7 @@ FEATURE_CLASSIFICATION: dict[str, str] = {
 
 
 def features_in_class(feature_class: str) -> tuple[str, ...]:
-    """Return the features of one Decision-013 class ('stable', 'era_sensitive', 'experimental')."""
+    """Return the features of one class ('stable', 'era_sensitive', 'experimental')."""
     if feature_class not in FEATURE_CLASSES:
         raise ValueError(
             f"Unknown feature class '{feature_class}' — expected one of {FEATURE_CLASSES}."
@@ -145,20 +146,19 @@ def features_in_class(feature_class: str) -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
-# Training-time exclusions (Decision 041 — the minimal path-(b) mechanism
-# resolving Decision 036/040's regression). NOT a Feature Profile System:
-# a single denylist of FEATURE_GROUPS names, applied as the training DEFAULT
-# everywhere (see active_feature_columns()) so an exclusion can never be
-# silently bypassed the way Decision 036's manual, uncommitted exclusion
-# was. Referenced by GROUP NAME, never by Decision-013 classification —
-# Decision 040's own ablation showed classification-level exclusion is too
-# coarse (it would incorrectly exclude teammate_form/grid_penalty_applied,
-# which are `stable`-classified and must stay included).
+# Training-time exclusions — a minimal, structural mechanism, not a full
+# feature-profile system: a single denylist of FEATURE_GROUPS names,
+# applied as the training DEFAULT everywhere (see active_feature_columns())
+# so an exclusion can never be silently bypassed by manual discipline that
+# automated retraining has no way to know about. Referenced by GROUP NAME,
+# never by the Stable/Era-sensitive/Experimental classification above — a
+# per-group ablation showed classification-level exclusion is too coarse
+# (it would incorrectly exclude teammate_form/grid_penalty_applied, which
+# are `stable`-classified and must stay included).
 #
-# Changing this list (excluding or re-including a group) requires a new
-# decision entry in context/decisions.md — same convention this file
-# already applies to the STABLE/ERA_SENSITIVE/EXPERIMENTAL tuples above.
-# Do not edit casually.
+# Changing this list (excluding or re-including a group) requires the same
+# careful, recorded review this file already applies to the
+# STABLE/ERA_SENSITIVE/EXPERIMENTAL tuples above. Do not edit casually.
 EXCLUDED_FROM_TRAINING: tuple[str, ...] = ("wet_form",)
 
 
@@ -168,13 +168,12 @@ def active_feature_columns(
     """FEATURE_COLUMNS minus every feature in `excluded_groups` (looked up
     by FEATURE_GROUPS name), preserving FEATURE_COLUMNS' original order.
 
-    THIS is the training default (Decision 041): `to_xy()`/`get_model()`
+    THIS is the training default: `to_xy()`/`get_model()`
     resolve to this when no explicit `feature_columns` override is given,
-    so excluding a group cannot be silently bypassed the way Decision 036's
-    manual, uncommitted exclusion was. Pass the raw `FEATURE_COLUMNS`
+    so excluding a group cannot be silently bypassed by discipline that
+    only lives in someone's head. Pass the raw `FEATURE_COLUMNS`
     explicitly (never this function) to deliberately opt into the full,
-    unexcluded set for research/ablation purposes — see Decision 040's own
-    investigation for the precedent this generalizes.
+    unexcluded set for research/ablation purposes.
     """
     unknown = set(excluded_groups) - set(FEATURE_GROUPS)
     if unknown:

@@ -1,21 +1,21 @@
 """
 src/models/calibration.py
 
-Out-of-fold isotonic probability calibration for Phase 4 finalists
-(Decision 015; design Sections 5 and 9.5).
+Out-of-fold isotonic probability calibration for the trained model
+candidates.
 
 Why: class-weighted training (class_weight='balanced', scale_pos_weight)
 deliberately distorts probability SCALE while preserving probability ORDER.
-The Phase 4 finalist (tuned logreg) showed the expected inflation on
+The finalist (tuned logreg) showed the expected inflation on
 validation (ECE 0.153 — e.g. its "55% win chance" bin realizes ~3% winners).
-Design Section 5's approved remedy: an isotonic calibrator fit on
+The approved remedy: an isotonic calibrator fit on
 CROSS-VALIDATION FOLD PREDICTIONS ONLY — never on validation or test — so
 calibration adds no new data exposure beyond the training split.
 
 How it composes (leakage discipline unchanged):
 - `oof_predictions()` replays the exact season-fold protocol of
   train.run_cv: a FRESH pipeline is built and fit inside every fold
-  (Section 11.4 containment), and each fold's held-out season supplies
+  (a fresh-pipeline-per-fold containment rule), and each fold's held-out season supplies
   out-of-fold (probability, outcome) pairs.
 - `fit_calibrated_model()` fits IsotonicRegression on those OOF pairs, refits
   the base pipeline on the full fit frame, and wraps both in a
@@ -104,7 +104,7 @@ def oof_predictions(
     """Out-of-fold (probability, outcome) pairs over the season folds.
 
     Identical fold protocol to train.run_cv: fresh pipeline per fold, fit on
-    the fold's train seasons only (Section 11.4), scored on the fold's
+    the fold's train seasons only, scored on the fold's
     held-out season. season_folds() itself rejects any input containing
     val/test/forward-holdout years, so the calibrator can only ever see
     training-window data.
@@ -139,10 +139,10 @@ def fit_calibrated_model(
 ) -> CalibratedModel:
     """Build the production-ready calibrated artifact for one candidate.
 
-    train_df — the Decision-008 training split; sole source of the
+    train_df — the training split; sole source of the
     calibrator's OOF pairs regardless of what the base model is fit on.
     fit_df — what the base pipeline is refit on (defaults to train_df;
-    a future Production refit passes train+val here, per design Section 4,
+    a Production refit passes train+val here,
     while the calibrator stays train-OOF).
     """
     oof_prob, oof_y = oof_predictions(name, train_df, params=params, n_folds=n_folds)

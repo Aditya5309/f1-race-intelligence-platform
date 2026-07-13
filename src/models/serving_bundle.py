@@ -1,16 +1,16 @@
 """
 src/models/serving_bundle.py
 
-Frozen serving artifacts (Decision 026/027/029): everything FastAPI actually
+Frozen serving artifacts: everything FastAPI actually
 reads at request time — a frozen model bundle plus a frozen features
 snapshot — produced as a byproduct of registration
 (src/models/train.py::register_model). Serving never talks to a live MLflow
 tracking server or registry, and never reads from the gitignored `data/`
 training tree; it reads a plain local directory that is committed to git.
 
-Runtime artifact layout, rooted at artifacts/ (Decision 029 — separates
-committed runtime artifacts from gitignored training artifacts in data/,
-mlruns/, mlflow.db, reports/):
+Runtime artifact layout, rooted at artifacts/ — this tree is deliberately
+separate from the gitignored training artifacts in data/,
+mlruns/, mlflow.db, reports/:
 
     artifacts/
         features.parquet      A frozen snapshot of the serving feature
@@ -33,19 +33,16 @@ mlruns/, mlflow.db, reports/):
                                format (cloudpickle). Written via
                                mlflow.sklearn.save_model() but loaded via a
                                plain stdlib pickle.load() on
-                               model/model.pkl (Phase 4 Tranche D Item 1b)
-                               — no MLflow import, tracking URI, registry
+                               model/model.pkl — no MLflow import, tracking URI, registry
                                client, or network needed to serve.
                 manifest.json  ModelInfo fields, frozen at export time
                                (name, version, alias, run_id, trained_at,
                                calibration, model_class, metrics — the
                                evaluate_all() dict this bundle's model
-                               scored on the validation split, Phase 4
-                               Tranche C Item 1 — and baseline_bootstrapped,
+                               scored on the validation split — and baseline_bootstrapped,
                                True only if this bundle was promoted via
                                `promote_model.py --force-baseline` with no
-                               prior baseline to compare against, Phase 4
-                               Tranche D post-mortem) plus a bundle format
+                               prior baseline to compare against) plus a bundle format
                                version and the export timestamp.
                 feature_schema.json
                                A human-readable mirror of the ColumnGuard
@@ -59,7 +56,7 @@ mlruns/, mlflow.db, reports/):
 This module has no opinion about experiments, aliases, or how the model was
 produced — export_bundle() takes an already-fitted model + ModelInfo built
 by the caller (train.py). Loading (used by predict.py) needs no MLflow
-import at all (Item 1b) — plain stdlib json + pickle over a filesystem read.
+import at all — plain stdlib json + pickle over a filesystem read.
 Only export_bundle() still imports mlflow, since writing still goes through
 mlflow.sklearn.save_model() (unchanged — this is a training/registration-side
 concern, not a serving one).
@@ -79,7 +76,7 @@ from src.models.registry import training_schema
 BUNDLE_FORMAT_VERSION = 1
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-#: Runtime artifact root (Decision 029) — committed to git; contrast with
+#: Runtime artifact root — committed to git; contrast with
 #: the gitignored data/, mlruns/, mlflow.db, models/ training-side trees.
 DEFAULT_ARTIFACTS_ROOT = _PROJECT_ROOT / "artifacts"
 DEFAULT_BUNDLE_ROOT = DEFAULT_ARTIFACTS_ROOT / "serving"
@@ -91,8 +88,8 @@ _MODEL_SUBDIR = "model"
 #: unchanged across pickle vs cloudpickle serialization; verified directly
 #: against the real committed bundle). export_bundle() below is the only
 #: writer, via mlflow.sklearn.save_model(); load_bundle() reads this same
-#: fixed path with plain stdlib pickle — no mlflow import needed to load
-#: (Phase 4 Tranche D Item 1b). A cloudpickle-written stream is a valid
+#: fixed path with plain stdlib pickle — no mlflow import needed to load.
+#: A cloudpickle-written stream is a valid
 #: standard pickle stream for objects with no closures/dynamic classes —
 #: true of every zoo pipeline/CalibratedModel here — confirmed byte-identical
 #: predict_proba() output against mlflow.sklearn.load_model() before this
@@ -117,14 +114,14 @@ class ModelInfo:
     calibration: str         # "isotonic-oof" | "none"
     model_class: str         # e.g. "CalibratedModel", "Pipeline"
     #: evaluate_all() metrics for this bundle's own fitted model, scored on
-    #: the Decision-008 validation split (Phase 4 Tranche C, Item 1) — what
+    #: the validation split — what
     #: this bundle actually scored, not just what it is. {} for bundles
     #: exported before this field existed (load_bundle degrades gracefully;
     #: see its manifest.get("metrics", {})) or when a caller has no honest
     #: held-out metrics to report.
     metrics: dict = field(default_factory=dict)
     #: True only for a bundle promoted via `promote_model.py --force-baseline`
-    #: (Phase 4 Tranche D post-mortem) — i.e. this bundle's metrics were
+    #: — i.e. this bundle's metrics were
     #: recorded WITHOUT a regression check against a prior baseline, because
     #: none existed yet. Distinguishes "passed a real comparison" from
     #: "bootstrapped the first one" for anyone reading this manifest later.
@@ -149,8 +146,7 @@ def export_bundle(model, info: ModelInfo, bundle_root: Path | None = None) -> Pa
     object directly (no MLflow reload): the caller (register_model) already
     has it fitted in memory.
 
-    mlflow is imported here, not at module level (Phase 4 Tranche D Item
-    1b): this is the ONLY function in this module that still needs it (to
+    mlflow is imported here, not at module level: this is the ONLY function in this module that still needs it (to
     write via mlflow.sklearn.save_model()) — a training/registration-side
     concern. Serving (load_bundle, and everything predict.py/app/api.py
     call) must be able to import this whole module without mlflow installed
@@ -180,7 +176,7 @@ def export_bundle(model, info: ModelInfo, bundle_root: Path | None = None) -> Pa
 
 def export_features_snapshot(source: Path | str, artifacts_root: Path | None = None) -> Path:
     """Freeze the current training-side features.parquet as the runtime
-    serving snapshot (Decision 029): artifacts_root/features.parquet.
+    serving snapshot: artifacts_root/features.parquet.
 
     Copies `source` (normally the training pipeline's
     data/processed/features.parquet, produced by src.features.pipeline)
@@ -201,8 +197,8 @@ def export_features_snapshot(source: Path | str, artifacts_root: Path | None = N
 def load_bundle(bundle_dir: Path | str):
     """Load a frozen bundle. Returns (model, ModelInfo).
 
-    No MLflow tracking URI, no registry client, no network, and (Phase 4
-    Tranche D Item 1b) no MLflow import at all — a plain local filesystem
+    No MLflow tracking URI, no registry client, no network, and
+    no MLflow import at all — a plain local filesystem
     read plus stdlib pickle. Raises FileNotFoundError with a clear,
     actionable message if the bundle is missing; app/api.py's degraded-start
     lifespan catches this exactly like it caught a missing registry before.

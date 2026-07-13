@@ -1,9 +1,9 @@
-"""Model Insights page — importance/SHAP/calibration artifacts (design §3/§14).
+"""Model Insights page — importance/SHAP/calibration artifacts.
 
-Renders the static Phase-4 analysis figures from reports/phase4_analysis/;
-no model computation happens here. This is the ADVANCED page (UI/UX
-redesign): the technical detail intentionally kept off the other four
-user-facing pages — calibration method, run id, algorithm choice — lives
+Renders the static analysis figures from reports/phase4_analysis/;
+no model computation happens here. This is the ADVANCED page: the technical
+detail intentionally kept off the other pages
+— calibration method, run id, algorithm choice — lives
 here, for recruiters/engineers who want to see how the model actually works.
 """
 
@@ -23,9 +23,9 @@ _ANALYSIS_DIR = Path(__file__).resolve().parents[2] / "reports" / "phase4_analys
 _COMPARISON_CSV = _ANALYSIS_DIR.parent / "model_comparison.csv"
 _REPORT = "reports/model_selection_report.md"
 
-# Decision-013 feature classification (display copy — the dashboard cannot
-# import src/, so the code-level source of truth stays
-# src/features/metadata.py; keep the two in sync on reclassification).
+# Feature classification, mirrored here as display copy since the
+# dashboard cannot import src/ — the code-level source of truth is
+# src/features/metadata.py; keep the two in sync on reclassification.
 _STABLE_FEATURES = [
     "qualifying_position", "qualifying_gap_to_pole_pct", "reached_q2",
     "reached_q3", "pit_lane_start", "grid_adjusted", "grid_position_norm",
@@ -135,7 +135,7 @@ simplicity. Full evidence: `{_REPORT}`.
                    "lives in reports/ (local-only) and in MLflow "
                    "(`mlflow ui`)._")
 
-    st.subheader("🏷 Feature classes (Decision 013)")
+    st.subheader("🏷 Feature classes")
     st.caption("All 31 model features, classified by era-robustness. A "
                "healthy model concentrates its signal in Stable features — "
                "this one draws ~59% of its importance from them, led by grid "
@@ -161,7 +161,7 @@ simplicity. Full evidence: `{_REPORT}`.
         _figure("feature_importance_logreg.png",
                 "Native importance (|coefficient|), top 20 — grid/qualifying dominate")
         _figure("importance_by_class_logreg.png",
-                "Summed importance by Decision-013 feature class")
+                "Summed importance by feature class")
     with tab_shap:
         _figure("shap_summary_logreg.png",
                 "SHAP beeswarm on validation races — direction and spread per feature")

@@ -1,4 +1,4 @@
-"""Compare Drivers — two-driver side-by-side, season-scoped (Phase 2).
+"""Compare Drivers — two-driver side-by-side, season-scoped.
 
 Season-scoped only, deliberately: comparing across regulation eras (or a
 driver's own career-spanning seasons) would mix car-performance changes

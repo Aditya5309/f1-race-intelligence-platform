@@ -1,11 +1,10 @@
 """
 src/models/eras.py
 
-Formula 1 regulation-era definitions (Decision 019) — the code-level single
-source of truth for era boundaries, mirroring this project's internal F1
-domain-knowledge reference (local engineering notes, not part of this
-repository) and following the Decision-013 precedent of
-src/features/metadata.py.
+Formula 1 regulation-era definitions — the code-level single
+source of truth for era boundaries, following the same pattern
+src/features/metadata.py uses for feature classification: one canonical,
+importable definition instead of scattered literal years.
 
 WHY ERAS MATTER (concept drift in F1)
 -------------------------------------
@@ -18,10 +17,10 @@ a model learns from one era — constructor form persistence, dominance
 concentration, even the qualifying-to-race conversion rate — therefore drift
 or break at era boundaries. This is CONCEPT DRIFT with known, pre-announced
 breakpoints, which is why this project's split strategies are era-aware
-(src/models/splits.py, Decisions 008/018/019) and why Decision 013 classifies
-features as era-sensitive or stable.
+(src/models/splits.py) and why features are classified as era-sensitive or
+stable (src/features/metadata.py).
 
-Eras are defined only from 2010 (MODELING_WINDOW_START, Decision 008):
+Eras are defined only from 2010 (MODELING_WINDOW_START):
 earlier seasons are structurally different (field size, ~50% finish rates,
 points systems) and are outside every split strategy. `era_of()` returns
 None for pre-2010 years by design.
@@ -34,8 +33,6 @@ MAINTENANCE
 When the FIA announces or starts a new regulation cycle:
 1. Close the current final era (set its `end_year`).
 2. Append the new era (usually with `end_year=None` while ongoing).
-3. If you maintain an internal domain-knowledge reference alongside this
-   repo, update it in the same change.
 Nothing in the splitting logic needs to change; within-era presets for the
 new era become available automatically once the era is closed (or has enough
 seasons) — see `within_era_strategy` in src/models/splits.py.
@@ -45,7 +42,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Decision 008 — the modeling window starts here; no era is defined earlier.
+# The modeling window starts here; no era is defined earlier.
 MODELING_WINDOW_START: int = 2010
 
 
@@ -87,8 +84,8 @@ class RegulationEra:
 
 
 # ---------------------------------------------------------------------------
-# The era table (segmentation verified in the Decision-012 Section 14
-# era-nonstationarity analysis and Decision 013).
+# The era table (boundaries verified against a era-nonstationarity analysis
+# of the historical results).
 # ---------------------------------------------------------------------------
 
 V8 = RegulationEra(
@@ -123,7 +120,8 @@ GROUND_EFFECT = RegulationEra(
     description=(
         "Venturi-floor aerodynamics, 18-inch wheels; order reset (Red Bull "
         "dominance 2022-2023, convergence from 2024 under the cost cap). "
-        "2025 rows are the project's forward holdout (Decision 012 S13.1)."
+        "2025 rows are the project's forward holdout, reserved for future "
+        "evaluation."
     ),
 )
 
@@ -175,7 +173,7 @@ def era_of(year: int) -> RegulationEra | None:
 # ---------------------------------------------------------------------------
 
 assert REGULATION_ERAS[0].start_year == MODELING_WINDOW_START, (
-    "First regulation era must start at the Decision-008 modeling window."
+    "First regulation era must start at the modeling window."
 )
 for _prev, _next in zip(REGULATION_ERAS, REGULATION_ERAS[1:]):
     assert _prev.end_year is not None, (

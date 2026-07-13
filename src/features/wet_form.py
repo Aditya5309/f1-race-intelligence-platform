@@ -1,7 +1,7 @@
 """
 src/features/wet_form.py
 
-Driver/constructor wet-weather form (Phase 4 Tranche B item 2): does a
+Driver/constructor wet-weather form: does a
 driver/constructor perform differently in wet races vs. dry races, and by
 how much?
 

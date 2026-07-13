@@ -1,4 +1,4 @@
-"""Team (Constructor) page — one constructor's season or career (Phase 2).
+"""Team (Constructor) page — one constructor's season or career.
 
 Mirrors Driver Explorer's season/full-career toggle pattern at constructor
 grain. Predictions come only from the HTTP API; roster, standings, and

@@ -1,5 +1,5 @@
 """
-Tests for src/models/serving_bundle.py (Decision 026/027/029).
+Tests for src/models/serving_bundle.py.
 
 Coverage:
   - export_bundle writes model/ + manifest.json + feature_schema.json
@@ -11,7 +11,7 @@ Coverage:
   - export_features_snapshot copies the source parquet to
     artifacts_root/features.parquet, creating directories as needed
   - default runtime artifact paths are all rooted under artifacts/
-    (Decision 029 — the committed runtime tree, contrast with the
+    (the committed runtime tree, contrast with the
     gitignored data/ and models/ training-side trees)
 """
 
@@ -92,7 +92,7 @@ def test_export_bundle_writes_model_manifest_and_schema(tmp_path, fitted_model, 
     assert manifest["exported_at"].startswith("20")
 
     schema = json.loads((bundle_dir / "feature_schema.json").read_text())
-    # Decision 041: fitted_model was fit via the default (exclusion-applied)
+    # fitted_model was fit via the default (exclusion-applied)
     # feature set, not the raw full FEATURE_COLUMNS.
     assert schema["feature_names"] == list(active_feature_columns())
 
@@ -122,7 +122,7 @@ def test_load_bundle_roundtrip(tmp_path, fitted_model, sample_info):
 
 
 def test_load_bundle_does_not_need_mlflow_importable(tmp_path, fitted_model, sample_info, monkeypatch):
-    """Phase 4 Tranche D Item 1b: load_bundle() (predict.py/app/api.py's
+    """load_bundle() (predict.py/app/api.py's
     entire serving path) must not need mlflow installed at all — only
     export_bundle() (training/registration-side) still does."""
     bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
@@ -147,7 +147,7 @@ def test_load_bundle_roundtrips_metrics(tmp_path, fitted_model, sample_info):
 
 
 def test_load_bundle_defaults_metrics_for_legacy_manifest(tmp_path, fitted_model, sample_info):
-    """A manifest.json written before Tranche C has no "metrics" key at all
+    """A legacy manifest.json has no "metrics" key at all
     — load_bundle must degrade to {} rather than KeyError, so bundles
     already committed to the repo keep loading unchanged."""
     bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
@@ -162,7 +162,7 @@ def test_load_bundle_defaults_metrics_for_legacy_manifest(tmp_path, fitted_model
 
 def test_load_bundle_defaults_baseline_bootstrapped_for_legacy_manifest(tmp_path, fitted_model, sample_info):
     """Same degrade-gracefully discipline as metrics above, for the field
-    added alongside --force-baseline (Phase 4 Tranche D post-mortem)."""
+    added alongside --force-baseline."""
     bundle_dir = export_bundle(fitted_model, sample_info, bundle_root=tmp_path)
     manifest_path = bundle_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -187,7 +187,7 @@ def test_load_bundle_missing_manifest_raises(tmp_path, fitted_model, sample_info
 
 
 # ---------------------------------------------------------------------------
-# Runtime artifact layout (Decision 029)
+# Runtime artifact layout
 # ---------------------------------------------------------------------------
 
 def test_default_paths_are_rooted_under_artifacts():

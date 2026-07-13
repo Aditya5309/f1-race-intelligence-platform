@@ -3,7 +3,7 @@ scripts/ingest_jolpica.py
 
 Backfills recently-completed race weekends from jolpica-f1
 (api.jolpi.ca/ergast/f1/) — the actively-maintained, Ergast-schema-compatible
-successor to the deprecated Ergast API (Decision 035) — into this project's
+successor to the deprecated Ergast API — into this project's
 existing training-side data/ tree: results.csv, qualifying.csv,
 driver_standings.csv, constructor_standings.csv, plus drivers.csv/
 constructors.csv for any genuinely new entities (rookies, new teams).
@@ -19,7 +19,7 @@ built here; use --dry-run to see what a run would touch first).
     python scripts/ingest_jolpica.py --dry-run              # fetch + report, no write
     python scripts/ingest_jolpica.py --year 2026 --round 7  # one race only
 
-ID reconciliation (Decision 035): this project's raceId/driverId/
+ID reconciliation: this project's raceId/driverId/
 constructorId/circuitId are CSV-dump surrogate keys, NOT what jolpica's
 live API returns (it uses string refs like "max_verstappen", matching
 Ergast's own driverRef/constructorRef/circuitRef convention). Existing
@@ -31,7 +31,7 @@ ever writes results/qualifying/standings for a raceId races.csv already
 has (see Scope above).
 
 KNOWN, PERMANENT LIMITATION — read before treating 2025+ ingested rows as
-equivalent in detail to older rows (Decision 035): jolpica consolidates
+equivalent in detail to older rows: jolpica consolidates
 granular DNF reasons ("Engine", "Collision", "Gearbox", etc. — 141 distinct
 values in this project's historical status.csv) into a generic "Retired"
 bucket from 2025 onward, and it also does not preserve Ergast's historical
@@ -67,7 +67,7 @@ DEFAULT_DATA_DIR = _PROJECT_ROOT / "data"
 #: regardless of --dry-run and regardless of whether the calling workflow
 #: goes on to promote anything — this is "what did ingestion actually do",
 #: entirely separate from any later step's outcome. NOT under artifacts/
-#: (that tree is the committed-runtime-artifact convention, Decision 029) —
+#: (that tree is the committed-runtime-artifact convention) —
 #: this is an ephemeral, gitignored, per-run diagnostic meant to be
 #: `actions/upload-artifact`-ed from CI, not committed.
 DEFAULT_REPORT_DIRNAME = "ingest_report"
@@ -191,7 +191,7 @@ def _constructor_new_row(c: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# positionText/status normalization (Decision 035 — see module docstring)
+# positionText/status normalization (see the module docstring's KNOWN LIMITATION note)
 # ---------------------------------------------------------------------------
 
 def normalize_finish(position_text: str) -> tuple[str | float, str, int]:

@@ -2,8 +2,7 @@
 src/features/standings.py
 
 Lagged championship standings — the highest-severity leakage risk in the
-whole design (reports/master_dataset_design.md Section 5.7 / 6.2 failure
-mode 2).
+whole design.
 
 Why the lag is mandatory: a row in driver_standings.csv / constructor_
 standings.csv keyed by raceId X reflects the standing AFTER race X was run.
@@ -16,19 +15,17 @@ modeling frame, sorted by (year, round), and take `prev_raceId = shift(1)`.
 This single shift implements BOTH required rules at once:
   - mid-season: race at round N joins standings as of round N-1;
   - round 1 of a season: the previous calendar row is the FINAL race of the
-    prior season, i.e. the prior season's final standings — the explicit
-    round-1 rule the design doc demands;
+    prior season, i.e. the prior season's final standings;
   - the first-ever race (or a driver's/constructor's first appearance) has no
     prior standings row and correctly gets nulls, not zeros.
 
-Per Decision 010, standings are read directly from the raw CSVs
+Standings are read directly from the raw CSVs
 (driver_standings.csv / constructor_standings.csv) — they are deliberately
 NOT in master_dataset.parquet, and this module must never expect them there.
 
 Standing POSITION (rank) is the primary feature, not raw points — the 2010
-points-system change breaks raw-point comparability across seasons
-(Decision 008 rationale, design doc Section 5.7); points are kept as a
-secondary, same-lag value.
+points-system change breaks raw-point comparability across seasons; points
+are kept as a secondary, same-lag value.
 """
 
 from __future__ import annotations

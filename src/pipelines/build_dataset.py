@@ -1,7 +1,7 @@
 """
 src/pipelines/build_dataset.py
 
-Orchestration entry point for the Master Dataset Integration layer (Decision 009).
+Orchestration entry point for the Master Dataset Integration layer.
 
     data/interim/results.parquet   ─┐
     data/interim/qualifying.parquet ─┤
@@ -23,8 +23,7 @@ Usage
 Scope
 -----
 Integration only — no feature engineering, no rolling statistics, no lagged
-standings, no training data, no model training, no inference. See
-reports/master_dataset_design.md and Decision 009.
+standings, no training data, no model training, no inference.
 """
 
 from __future__ import annotations
@@ -64,7 +63,7 @@ def build_dataset(dry_run: bool = False, output_path: Path = _OUTPUT_PATH):
     FileNotFoundError
         If a required interim dataset is missing.
     """
-    print("=== Master Dataset Integration Pipeline (Decision 009) ===\n")
+    print("=== Master Dataset Integration Pipeline ===\n")
 
     print("1/5  Loading interim datasets ...")
     inputs = load_inputs()

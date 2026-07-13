@@ -1,15 +1,14 @@
 """
 src/models/evaluate.py
 
-Model-agnostic evaluation for Phase 4 (Decision 012;
-reports/model_development_design.md Section 6).
+Model-agnostic evaluation.
 
 Everything here is a pure function of `(y_true, y_prob, race_ids[, years])` —
 no model objects, no MLflow, no I/O — so any classifier in MODEL_ZOO (or a
 future one) evaluates through identical code, and tests can hand-compute
 every number.
 
-Why per-race metrics are the only honest ones (design Section 6): at a 4.7%
+Why per-race metrics are the only honest ones: at a 4.7%
 positive rate, row-level accuracy is meaningless (predicting "nobody wins" is
 95% accurate). The prediction task is "pick the winner within each race", so
 the headline metrics group by raceId.
@@ -130,7 +129,7 @@ def per_race_table(y_true, y_prob, race_ids, position_order=None) -> pd.DataFram
 
 
 # ---------------------------------------------------------------------------
-# Headline ranking metrics (design Section 6)
+# Headline ranking metrics
 # ---------------------------------------------------------------------------
 
 def top1_accuracy(y_true, y_prob, race_ids) -> float:
@@ -265,8 +264,8 @@ def evaluate_all(y_true, y_prob, race_ids, position_order=None) -> dict[str, flo
 
 def evaluate_by_season(y_true, y_prob, race_ids, years, position_order=None) -> pd.DataFrame:
     """
-    evaluate_all() per season — the regulation-era monitoring view mandated
-    by design Section 9 ("report metrics per season, not only pooled"): era
+    evaluate_all() per season — a regulation-era monitoring view: report
+    metrics per season, not only pooled, since era
     effects and form-feature nonstationarity are invisible in pooled numbers.
 
     Returns a DataFrame indexed by year, one column per evaluate_all metric.

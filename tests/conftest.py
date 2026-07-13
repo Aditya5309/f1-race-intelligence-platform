@@ -1,5 +1,5 @@
 """
-Shared pytest helpers (Phase C1 — CI readiness).
+Shared pytest helpers.
 
 Also importable directly: `from tests.conftest import set_tmp_experiment`
 (the tests package has an __init__.py, so this is a normal module import;

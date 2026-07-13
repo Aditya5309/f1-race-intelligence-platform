@@ -1,14 +1,14 @@
 """
 scripts/promote_model.py
 
-The sanctioned promotion gate (Phase 4 Tranche C) between "a candidate is
+The sanctioned promotion gate between "a candidate is
 registered in MLflow" and "the candidate is what the deployed API serves".
 
 Problem this closes: src.models.train.register_model() ALWAYS calls
 serving_bundle.export_bundle(), which `shutil.rmtree`s whatever is at
 artifacts/serving/<alias>/model/ and writes the new candidate over it — with
-zero validation in between. Every "don't promote" decision made so far
-(e.g. Tranche B, Decision 034) was pure human discipline: the operator
+zero validation in between. Historically, every "don't promote this
+candidate" call was pure human discipline: the operator
 looked at metrics and chose not to run `--register`. Nothing in the tooling
 stopped a bad promotion from overwriting a good one.
 
@@ -25,7 +25,7 @@ whether that version is allowed to become the live serving bundle.
 Checks, in order (all against the CANDIDATE, none of them retrain anything):
 
   1. Loads without error — mlflow.sklearn.load_model("models:/f1-winner/N").
-  2. Model-class check (Phase 4 Tranche D Item 1c) — the candidate's actual
+  2. Model-class check — the candidate's actual
      fitted estimator's module (e.g. 'sklearn', 'xgboost', 'lightgbm') must
      be in --allowed-model-modules (default: permissive, all three — no
      live deployment is constrained yet). Catches "an XGBoost/LightGBM
@@ -34,14 +34,16 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      of as an unpickle-time ImportError at the deployed Lambda's cold
      start. Project-native estimators (e.g. PoleSitterBaseline) are always
      allowed — no third-party dependency to check.
-  3. Excluded-feature check (Decision 041) — refuses a candidate whose OWN
+  3. Excluded-feature check — refuses a candidate whose OWN
      recorded training schema (never a repository constant) contains any
      feature belonging to a group in src.features.metadata's
-     EXCLUDED_FROM_TRAINING (currently wet_form, per Decisions 036/040's
-     regression finding). to_xy()/get_model() already default to the
+     EXCLUDED_FROM_TRAINING (currently wet_form, an experimental feature
+     group a per-group ablation isolated as a real accuracy regression that
+     doesn't generalize past the training window). to_xy()/get_model()
+     already default to the
      exclusion-applied set, so a normal training run can't trip this — it
-     exists as a last line of defense against the exact Decision-036
-     failure mode (a silently-bypassed exclusion), the same defense-in-
+     exists as a last line of defense against a silently-bypassed
+     exclusion, the same defense-in-
      depth spirit as the model-class check above.
   4. ColumnGuard self-consistency + non-degenerate predictions — scores a
      handful of real, in-window races (drawn from --features-source) via
@@ -52,20 +54,20 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      driver gets an identical probability (a constant-output model would
      pass both of predict_race's own checks while being useless).
   5. Metric non-regression — the candidate is scored fresh on the
-     Decision-008 VALIDATION split (2022-2023, ~44 races) via evaluate_all
+     VALIDATION split (2022-2023, ~44 races) via evaluate_all
      (the same evaluation code every other module in this project uses)
      and compared against whatever's recorded in the CURRENTLY-SERVED
-     bundle's manifest.json (populated by register_model() since Tranche C
-     Item 1) — ALSO a val-split number, never test. Refuses to promote if
+     bundle's manifest.json (populated by register_model()) — ALSO a
+     val-split number, never test. Refuses to promote if
      top1_accuracy or spearman_corr regress by more than the configured
      tolerance.
 
-     DO NOT compare either side of this check against "the 0.749 Spearman
-     baseline" quoted elsewhere in this project's docs/decision log — that
-     figure is explicitly, consistently the 2024 TEST split's score
-     (Section 11.3 test-set discipline: nothing outside `train.py
-     --final-test` may ever touch split.test, so this gate structurally
-     cannot use it). The currently-served v2 model's OWN val-split
+     DO NOT compare either side of this check against the frequently-quoted
+     "0.749 Spearman" figure found elsewhere in this project's
+     documentation — that figure is explicitly, consistently the 2024 TEST
+     split's score (nothing outside `train.py --final-test` may ever touch
+     split.test, so this gate structurally cannot use it). The currently-
+     served model's OWN val-split
      spearman_corr, measured directly, is ~0.60 — a real, large, permanent
      gap from the oft-quoted 0.749 that has nothing to do with any
      regression; it is simply a different evaluation surface. A candidate
@@ -75,12 +77,12 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      gate itself prints, never against a remembered test-split figure.
 
      No baseline to compare against is handled as TWO DIFFERENT cases, not
-     one (a bug found and fixed after the first real automated run let a
-     candidate promote with zero comparison, because both cases were
-     originally treated as "skip the check" — see PR #1's post-mortem):
+     one (a real bug found and fixed after the first real automated run let
+     a candidate promote with zero comparison, because both cases were
+     originally treated as "skip the check"):
      no bundle exists at all -> genuinely nothing to compare, skip is safe
      (first-ever promotion for an alias). A bundle EXISTS but its manifest
-     has no metrics recorded (e.g. a legacy bundle predating Tranche C)
+     has no metrics recorded (e.g. a legacy bundle predating this field)
      -> REFUSE by default — a real served model is out there, we just
      don't know its numbers, and silently letting anything through
      uncompared is exactly the failure mode this gate exists to prevent.
@@ -99,11 +101,11 @@ Checks, in order (all against the CANDIDATE, none of them retrain anything):
      Default tolerances: 0.03 (top1_accuracy) / 0.015 (spearman_corr),
      both measured on THIS gate's own val-split comparison (see above —
      not calibrated against the test-split 0.749 figure at all). The
-     2022-2023 validation split is ~44 races (README §10), so one race
+     2022-2023 validation split is ~44 races, so one race
      flipping from a correct to incorrect top-1 pick moves top1_accuracy by
      ~1/44 ≈ 0.023 — the default tolerance covers a little more than one
-     race of sampling noise without masking a real regression. Tranche B's
-     genuine regressions (reports/phase4_tranche_b_retrain_findings.md)
+     race of sampling noise without masking a real regression. A genuine
+     regression investigated during this gate's development
      moved spearman_corr by 0.017-0.021 on the 2024 test split; 0.015 is
      carried over from that as a same-order-of-magnitude heuristic for the
      val-split comparison actually performed here — it has not been
@@ -161,7 +163,7 @@ DEFAULT_SPEARMAN_TOLERANCE = 0.015
 #: How many of the most recent real races to smoke-test predict_race() on.
 SMOKE_RACE_SAMPLE = 5
 #: Third-party ML library modules a deployment target may support serving.
-#: Permissive by default (Phase 4 Tranche D Item 1c) — no specific
+#: Permissive by default — no specific
 #: deployment is constrained to a subset yet; this exists so ONE becomes
 #: constrainable later (e.g. a minimal sklearn-only Lambda) without any
 #: candidate silently promoting into an environment that can't unpickle it.
@@ -232,14 +234,14 @@ def check_model_class(model, allowed_modules: set[str]) -> None:
 def check_excluded_features(
     model, excluded_groups: tuple[str, ...] = EXCLUDED_FROM_TRAINING,
 ) -> None:
-    """Decision 041: refuse a candidate whose OWN recorded training schema
+    """Refuse a candidate whose OWN recorded training schema
     (`training_schema()` reads the fitted ColumnGuard's actual recorded
     columns, never a repository constant) contains any feature belonging
     to a CURRENTLY-excluded `FEATURE_GROUPS` group.
 
-    This is the last line of defense against the Decision-036 class of
-    failure: `to_xy()`/`get_model()` default to the exclusion-applied
-    feature set (Decision 041), so a normal training run can't reintroduce
+    This is the last line of defense: `to_xy()`/`get_model()` default to
+    the exclusion-applied
+    feature set, so a normal training run can't reintroduce
     an excluded group by accident — but this check catches it anyway if a
     candidate was registered some other way (e.g. an explicit
     `feature_columns=FEATURE_COLUMNS` override used carelessly), the same
@@ -255,8 +257,7 @@ def check_excluded_features(
             f"{sorted(excluded_groups)}, see src/features/metadata.py's "
             "EXCLUDED_FROM_TRAINING). Retrain via the default (no explicit "
             "feature_columns override) unless the exclusion itself is being "
-            "deliberately changed — that requires its own context/decisions.md "
-            "entry (Decision 041)."
+            "deliberately, carefully changed."
         )
 
 
@@ -284,8 +285,8 @@ def check_schema_and_predictions(model, features: pd.DataFrame) -> None:
 
 
 def compute_candidate_metrics(model, split, position_order) -> dict[str, float]:
-    """Check 3 (part 1): fresh evaluate_all() on split.val — never split.test
-    (Section 11.3). Mirrors register_model()'s own manifest-metrics logic."""
+    """Check 3 (part 1): fresh evaluate_all() on split.val — never split.test.
+    Mirrors register_model()'s own manifest-metrics logic."""
     X_val, y_val, races_val = to_xy(split.val)
     y_prob = model.predict_proba(X_val)[:, 1]
     po_val = None
@@ -316,7 +317,7 @@ def check_regression(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Gate + promote an already-registered MLflow model "
-                     "version to the live serving bundle (Phase 4 Tranche C).")
+                     "version to the live serving bundle.")
     parser.add_argument("--alias", default="Staging", choices=["Staging", "Production"],
                         help="Which serving bundle directory to promote into.")
     parser.add_argument("--version", default=None,
@@ -410,11 +411,11 @@ def main(argv: list[str] | None = None) -> int:
         elif not served_metrics:
             # A real, currently-served model IS out there — we just don't
             # have its metrics on record (e.g. a legacy bundle exported
-            # before Tranche C added metrics to the manifest). Silently
+            # before this manifest field existed). Silently
             # skipping here would mean literally any candidate, however
             # bad, sails through uncompared — exactly what let a candidate
-            # promote uncompared in the first real automated run of this
-            # gate (see PR #1's post-mortem). Refuse UNLESS the operator
+            # promote uncompared the first time this gate ran for
+            # real. Refuse UNLESS the operator
             # explicitly opts into bootstrapping via --force-baseline — no
             # metrics baseline means no comparison is possible, and that
             # must be a deliberate, loud, recorded choice, never a default.

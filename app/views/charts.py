@@ -108,8 +108,8 @@ def standings_bar(frame: pd.DataFrame, name_col: str, value_col: str,
 
 def circuit_layout_map(layout: dict, height: int = 320) -> None:
     """
-    Track outline from OpenStreetMap (scripts/backfill_circuit_layouts.py,
-    Phase 4 Tranche A). `layout` is the GeoJSON Feature dict returned by
+    Track outline from OpenStreetMap (scripts/backfill_circuit_layouts.py).
+    `layout` is the GeoJSON Feature dict returned by
     app.views.metadata.circuit_layout() — a LineString of [lon, lat] pairs.
 
     Coordinates are projected to a local equirectangular meter grid (lon

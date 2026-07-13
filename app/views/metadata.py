@@ -1,14 +1,15 @@
 """
 app/views/metadata.py
 
-Display-metadata loaders for the dashboard (UI/UX redesign v2, Decision 024).
+Display-metadata loaders for the dashboard.
 
 Reads Ergast-format CSVs from Settings().data_dir — the same knob the API's
-display-name lookups already use (app/api.py::_load_name_lookups, the
-Decision 016 precedent) — to enrich pages with Grand Prix names, circuits,
-grids, championship standings, and historical outcome stats.
+display-name lookups already use (app/api.py::_load_name_lookups) — to
+enrich pages with Grand Prix names, circuits, grids, championship
+standings, and historical outcome stats.
 
-Scope note (amends Decision 016's HTTP-only rule for DISPLAY data only):
+Scope note — this is a deliberate, narrow exception to the "predictions
+come from the HTTP API only" rule, for DISPLAY data only:
 predictions still come exclusively from the HTTP API and nothing here
 imports src/ or feeds the model. Post-race columns (wins, podiums, fastest
 laps, standings) are read solely to DISPLAY historical outcomes of races
@@ -209,7 +210,7 @@ def _parse_laptime(value: str) -> float | None:
 def circuit_layout(circuit_id: int) -> dict | None:
     """
     Track-outline geometry for one circuit, from the OpenStreetMap backfill
-    (scripts/backfill_circuit_layouts.py, Phase 4 Tranche A) — a GeoJSON
+    (scripts/backfill_circuit_layouts.py) — a GeoJSON
     Feature with a LineString geometry (`coordinates`: [[lon, lat], ...])
     and an `attribution` property. None when the file is absent (most
     circuits: OSM data didn't cleanly assemble, or this circuit isn't one

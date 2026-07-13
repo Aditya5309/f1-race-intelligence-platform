@@ -2,17 +2,17 @@
 src/features/qualifying.py
 
 Grid and qualifying feature group — pre-race information from the race weekend
-itself (reports/master_dataset_design.md Section 5.3).
+itself.
 
 Everything here is known once the grid is set (post-qualifying, pre-race), so
 none of it is temporal leakage. The two hazards handled explicitly:
 
-- `grid == 0` is Ergast's pit-lane-start sentinel, NOT a real grid slot
-  (design doc Section 6.5). It is exposed as a boolean `pit_lane_start` and
+- `grid == 0` is Ergast's pit-lane-start sentinel, NOT a real grid slot.
+  It is exposed as a boolean `pit_lane_start` and
   remapped to worst-case `field_size + 1` in `grid_adjusted` /
   `grid_position_norm`; the raw `grid` column is never a model feature.
 - `q2`/`q3` nulls are informative (driver eliminated earlier), not
-  missing-at-random (design doc Section 5.3). They are NOT imputed; instead
+  missing-at-random. They are NOT imputed; instead
   `reached_q2`/`reached_q3` booleans make the knockout stage explicit and the
   `*_sec` columns keep their nulls for tree models' native NaN handling.
   Note: `reached_*` is also False for rows with no qualifying data at all
@@ -78,17 +78,17 @@ def add_qualifying_features(df: pd.DataFrame) -> pd.DataFrame:
     out["reached_q2"] = out["q2"].notna()
     out["reached_q3"] = out["q3"].notna()
 
-    # Best available time per driver: Q3 if present, else Q2, else Q1
-    # (design doc Section 5.3). Gap to the session's best such time, as a
+    # Best available time per driver: Q3 if present, else Q2, else Q1.
+    # Gap to the session's best such time, as a
     # percentage — absolute lap times are not comparable across circuits,
     # the relative gap is.
     best_time = out["q3_sec"].fillna(out["q2_sec"]).fillna(out["q1_sec"])
     pole_time = best_time.groupby(out["raceId"]).transform("min")
     out["qualifying_gap_to_pole_pct"] = (best_time - pole_time) / pole_time * 100.0
 
-    # Grid: remap the pit-lane sentinel before any numeric use (Section 6.5).
+    # Grid: remap the pit-lane sentinel before any numeric use.
     # field_size = entries in this race, so normalization is per-race and
-    # era-safe within the modeling window (Section 6.7).
+    # era-safe within the modeling window.
     field_size = out.groupby("raceId")["driverId"].transform("count")
     grid = out["grid"].astype("Float64")
     pit_lane = grid.eq(0).fillna(False)

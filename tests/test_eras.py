@@ -1,11 +1,11 @@
 """
-Tests for src/models/eras.py (Decision 019 — regulation-era domain model).
+Tests for src/models/eras.py (regulation-era domain model).
 
 The era table is the code-level single source of truth for F1 regulation
 boundaries. These tests pin the structural invariants future edits must
 preserve:
 
-  - table starts at the Decision-008 modeling window (2010)
+  - table starts at the modeling window (2010)
   - eras are contiguous and non-overlapping; only the final era is ongoing
   - year lookup (era_of) and name resolution (get_era) behave at boundaries
   - closed-range access is loud for ongoing eras
@@ -38,7 +38,7 @@ def test_eras_contiguous_and_only_last_ongoing():
 
 
 def test_expected_era_boundaries():
-    # Pin the domain facts (Decision 013's era segmentation): editing these
+    # Pin the domain facts (the regulation-era segmentation): editing these
     # is a domain decision, not a refactor.
     assert (V8.start_year, V8.end_year) == (2010, 2013)
     assert (HYBRID.start_year, HYBRID.end_year) == (2014, 2021)

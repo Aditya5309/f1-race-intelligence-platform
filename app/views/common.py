@@ -1,8 +1,8 @@
 """
 app/views/common.py
 
-Shared dashboard plumbing (Decision 016; application_design.md §3).
-All project logic goes through the API — the dashboard never imports src/.
+Shared dashboard plumbing. All project logic goes through the API — the
+dashboard never imports src/.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import httpx
 import pandas as pd
 import streamlit as st
 
-from app.config import Settings
+from app.config import API_V1_PREFIX, Settings
 
 ERA_CAVEAT = (
     "**Reading the numbers:** the model's advantage over simply picking the "
@@ -46,8 +46,20 @@ def _http_client() -> httpx.Client:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def api_get(path: str, params: dict | None = None) -> dict:
-    """GET {api_url}{path} -> parsed JSON. Raises httpx.HTTPError on failure."""
-    response = _http_client().get(path, params=params)
+    """GET {api_url}{API_V1_PREFIX}{path} -> parsed JSON. Raises
+    httpx.HTTPError on failure.
+
+    Every route this dashboard calls lives under API_V1_PREFIX
+    ("/api/v1") — prepended here, the ONE chokepoint every call site in
+    this file and every app/views/*.py direct api_get_or_stop() call
+    already goes through, so no other call site needs to change if the
+    prefix ever moves. Deliberately plain string concatenation, not
+    httpx's base_url-relative-URL joining: a leading "/" in `path` would
+    otherwise be treated as host-root-relative and silently discard any
+    path prefix baked into base_url — a well-known httpx/requests footgun,
+    avoided by not relying on URL-join semantics here at all.
+    """
+    response = _http_client().get(f"{API_V1_PREFIX}{path}", params=params)
     response.raise_for_status()
     return response.json()
 

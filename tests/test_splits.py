@@ -1,10 +1,9 @@
 """
-Tests for src/models/splits.py (Phase 4 module 1 — Decisions 012 and 018).
+Tests for src/models/splits.py.
 
-Covers the design-doc Section 11.2 split-integrity leakage checks plus the
-Section 14.4 forward-holdout guard:
+Covers the split-integrity leakage checks plus the forward-holdout guard:
 
-  - Decision-008 year boundaries exact per split (historical default)
+  - Year boundaries exact per split (historical default)
   - Disjoint raceIds across train/val/test
   - Forward holdout (2025+) rows never appear in ANY split by default
   - Empty-window and missing-column failures are loud
@@ -13,13 +12,13 @@ Section 14.4 forward-holdout guard:
     integrity, rejection of non-training-split input, determinism
   - to_xy: design matrix is exactly FEATURE_COLUMNS (no identifiers, no
     post-race columns), y is the target, groups are raceIds
-  - Real-data smoke test: measured Decision-008 split sizes
-  - Decision 018 strategies: preset window boundaries, construction-time
+  - Real-data smoke test: measured split sizes
+  - SplitStrategy presets: preset window boundaries, construction-time
     validation (inverted/overlapping windows, holdout opt-in), unknown-name
     resolution, rolling-window factory arithmetic, ground_effect's clear
     error when 2025 data is absent, season_folds strategy awareness, and
     exact backward compatibility of the historical default
-  - Decision 019 regulation-era domain model: every preset carries the
+  - Regulation-era domain model: every preset carries the
     correct EvaluationObjective; within-era presets stay entirely inside
     one regulation era; within_era_strategy arithmetic, ongoing-era and
     too-short-era rejection; historical preset provably crosses the 2022
@@ -79,7 +78,7 @@ def _full_range_frame() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# temporal_split — Decision-008 boundaries and integrity
+# temporal_split — boundaries and integrity
 # ---------------------------------------------------------------------------
 
 def test_split_year_boundaries_exact():
@@ -176,11 +175,11 @@ def test_folds_deterministic():
 
 
 # ---------------------------------------------------------------------------
-# to_xy — design-matrix integrity (Section 11.1)
+# to_xy — design-matrix integrity
 # ---------------------------------------------------------------------------
 
 def test_to_xy_matrix_is_exactly_active_feature_columns_by_default():
-    # Decision 041: the DEFAULT contract is active_feature_columns() (the
+    # The DEFAULT contract is active_feature_columns() (the
     # training-exclusion-applied set, currently FEATURE_COLUMNS minus
     # wet_form) — never the raw FEATURE_COLUMNS unless explicitly
     # requested (see test_to_xy_explicit_override_uses_full_feature_columns
@@ -198,9 +197,9 @@ def test_to_xy_matrix_is_exactly_active_feature_columns_by_default():
 
 
 def test_to_xy_explicit_override_uses_full_feature_columns():
-    """Decision 041: an explicit feature_columns= override is how research/
-    ablation work (e.g. Decision 040's investigation) deliberately opts
-    into the full, unexcluded set — never the silent default."""
+    """An explicit feature_columns= override is how research/
+    ablation work deliberately opts into the full, unexcluded set —
+    never the silent default."""
     split = temporal_split(_full_range_frame())
     X, y, race_ids = to_xy(split.train, feature_columns=FEATURE_COLUMNS)
     assert list(X.columns) == list(FEATURE_COLUMNS)
@@ -214,12 +213,12 @@ def test_to_xy_missing_feature_raises():
 
 
 # ---------------------------------------------------------------------------
-# SplitStrategy presets and validation (Decision 018)
+# SplitStrategy presets and validation
 # ---------------------------------------------------------------------------
 
 def test_historical_default_is_backward_compatible():
     # No-argument call must be byte-identical to the explicit historical
-    # preset — every pre-Decision-018 caller depends on this.
+    # preset — every existing caller depends on this.
     df = _full_range_frame()
     default_split = temporal_split(df)
     explicit_split = temporal_split(df, strategy="historical")
@@ -234,8 +233,8 @@ def test_historical_default_is_backward_compatible():
 
 
 def test_hybrid_era_boundaries_exact():
-    # Decision 019: entirely within the hybrid regulations (2014-2021) —
-    # the pre-019 definition tested on 2022, which was cross-era.
+    # Entirely within the hybrid regulations (2014-2021) — an earlier
+    # definition tested on 2022, which was cross-era.
     split = temporal_split(_full_range_frame(), strategy="hybrid_era")
     assert sorted(split.train["year"].unique()) == list(range(2014, 2020))
     assert sorted(split.val["year"].unique()) == [2020]
@@ -245,7 +244,7 @@ def test_hybrid_era_boundaries_exact():
 
 def test_ground_effect_boundaries_and_holdout_opt_in():
     # ground_effect legitimately tests on 2025 — but only because the
-    # preset declares allow_forward_holdout=True (Decision 018).
+    # preset declares allow_forward_holdout=True.
     split = temporal_split(_full_range_frame(), strategy="ground_effect")
     assert sorted(split.train["year"].unique()) == [2022, 2023]
     assert sorted(split.val["year"].unique()) == [2024]
@@ -349,7 +348,7 @@ def test_season_folds_default_n_folds_unchanged_for_historical():
 
 
 # ---------------------------------------------------------------------------
-# Regulation-era domain model (Decision 019)
+# Regulation-era domain model
 # ---------------------------------------------------------------------------
 
 def test_preset_objectives_are_explicit():
@@ -366,7 +365,7 @@ def test_preset_objectives_are_explicit():
 
 
 def test_within_era_presets_stay_inside_one_era():
-    # The Decision-019 core property: every window of a within-era preset
+    # The core property: every window of a within-era preset
     # sits under the same technical regulations.
     for preset, era in ((HYBRID_ERA, eras.HYBRID), (GROUND_EFFECT, eras.GROUND_EFFECT)):
         for lo, hi in (preset.train_years, preset.val_years, preset.test_years):
@@ -383,7 +382,7 @@ def test_historical_preset_crosses_the_2022_era_boundary():
     assert eras.era_of(HISTORICAL.train_years[1]) is eras.HYBRID
     assert eras.era_of(HISTORICAL.val_years[0]) is eras.GROUND_EFFECT
     assert eras.era_of(HISTORICAL.test_years[0]) is eras.GROUND_EFFECT
-    # And it is a frozen literal contract (Decision 008), era-table-independent.
+    # And it is a frozen literal contract, era-table-independent.
     assert (HISTORICAL.train_years, HISTORICAL.val_years, HISTORICAL.test_years) \
         == ((2010, 2021), (2022, 2023), (2024, 2024))
 
@@ -423,14 +422,14 @@ def test_ground_effect_preset_is_era_derived_with_holdout_opt_in():
         eras.GROUND_EFFECT, allow_forward_holdout=True, name="ground_effect")
     assert (derived.train_years, derived.val_years, derived.test_years) == (
         GROUND_EFFECT.train_years, GROUND_EFFECT.val_years, GROUND_EFFECT.test_years)
-    # Without the opt-in the same era is rejected — the Decision-018 guard
-    # composes with the Decision-019 factory.
+    # Without the opt-in the same era is rejected — the SplitStrategy guard
+    # composes with the within_era_strategy factory.
     with pytest.raises(ValueError, match="allow_forward_holdout"):
         within_era_strategy(eras.GROUND_EFFECT)
 
 
 # ---------------------------------------------------------------------------
-# Real-data smoke test — measured Decision-008 sizes
+# Real-data smoke test — measured split sizes
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(

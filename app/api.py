@@ -1,8 +1,7 @@
 """
 app/api.py
 
-FastAPI serving layer (Decision 016; reports/application_design.md;
-Decision 026/027/029).
+FastAPI serving layer.
 
     uvicorn app.api:app --reload
 
@@ -10,45 +9,84 @@ The app is deliberately logic-free: HTTP concerns in, exactly two calls to
 the tested prediction layer out — `predict.load_model()` once at startup,
 `predict.predict_race()` per request. Feature rows are looked up SERVER-SIDE
 from the frozen runtime features snapshot (settings.features_path, default
-artifacts/features.parquet) by raceId (clients never send feature payloads —
-features are derived artifacts of the leakage-audited pipeline; design §1).
+artifacts/features.parquet) by raceId — clients never send feature payloads,
+since features are derived artifacts of the leakage-audited pipeline, not
+something a caller should be able to inject.
 
 `predict.load_model()` reads a frozen serving bundle (settings.
 serving_bundle_path, default artifacts/serving/staging) — no live MLflow
 tracking server, SQLite registry, or mlruns/ directory is required at
-runtime (Decision 026/027). Both runtime artifacts live under the committed
-artifacts/ tree (Decision 029) — the deployed API needs nothing from the
-gitignored data/ training tree to serve predictions. This module has no
-concept of experiments or registry aliases; that machinery lives entirely
-on the training side (src/models/train.py).
+runtime. Both runtime artifacts live under the committed artifacts/ tree,
+so the deployed API needs nothing from the gitignored data/ training tree
+to serve predictions. This module has no concept of experiments or
+registry aliases; that machinery lives entirely on the training side
+(src/models/train.py).
 
-Endpoints (design §5):
-    GET  /health                              liveness + serving model metadata
-    GET  /model                               full ModelInfo
-    GET  /races?year=                         races available to score (<= serve_max_year)
-    GET  /predictions/{race_id}               per-race-normalized field predictions
-    GET  /predictions/{race_id}/simulate/{driver_id}
-                                              Phase 3 Item 1 (Prediction Simulator):
-                                              re-score one driver with an overridden
+Endpoints, all under /api/v1:
+    GET  /api/v1/health                              liveness + serving model metadata
+    GET  /api/v1/model                               full ModelInfo
+    GET  /api/v1/races?year=                         races available to score (<= serve_max_year)
+    GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
+    GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
+                                              Prediction Simulator: re-score
+                                              one driver with an overridden
                                               grid/qualifying position, everything
                                               else held at real values — see
                                               ADJUSTABLE_GRID_FEATURES below for why
                                               only 3 of the 10 qualifying-group
                                               features actually move.
-    GET  /predictions/{race_id}/vs-baseline   Phase 3 Item 2 (Qualifying Impact):
-                                              the calibrated model's predictions next
+    GET  /api/v1/predictions/{race_id}/vs-baseline   Qualifying Impact: the
+                                              calibrated model's predictions next
                                               to MODEL_ZOO["pole_baseline"]'s (grid-
                                               only heuristic) for the same race.
-    GET  /debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
+    GET  /api/v1/debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
                                     the exact feature vectors fed to the model
-    POST /predict                   RESERVED for Phase 8 upcoming-race scoring;
-                                    returns 501 (design §5 amendment)
+    POST /api/v1/predict            RESERVED for a future upcoming-race
+                                    scoring contract; always returns 501
 
-Degraded-start policy (§7): if the model or features cannot be loaded, the
-app still starts and reports the failure via 503s — starting-and-reporting
-beats crash-looping under a scheduler. The pole-baseline model (used only by
-/predictions/{race_id}/vs-baseline) degrades independently of the main
+API versioning: every route above is defined ONCE on a plain `APIRouter`
+(no route logic duplicated) and mounted TWICE — once under
+`app.config.API_V1_PREFIX` ("/api/v1", the canonical, documented location,
+listed in /docs) and once with no prefix at all (`include_in_schema=False`
+— every pre-versioning URL, e.g. plain `/health`, keeps working
+identically, for anything still hardcoded to it, but doesn't clutter the
+public OpenAPI schema with duplicate entries). Both mounts call the exact
+same handler closures and share the exact same `app.state` — there is no
+behavioral difference between hitting a route at its versioned or legacy
+path, only the URL differs. `docker/Dockerfile.api`'s HEALTHCHECK and this
+project's own dashboard both keep working through this — the Dockerfile's
+healthcheck deliberately still targets the unversioned `/health` (simpler,
+and health checks are conventionally unversioned anyway), while
+`app/views/common.py` calls the versioned paths (a first-party client
+should use the current version, not lean on the back-compat shim).
+
+Degraded-start policy: if the model or features cannot be loaded, the app
+still starts and reports the failure via 503s — starting-and-reporting
+beats crash-looping under a scheduler. The pole-baseline model (used only
+by /predictions/{race_id}/vs-baseline) degrades independently of the main
 model — a failure there doesn't take down the rest of the API.
+
+API hardening: CORSMiddleware with configurable origins
+(settings.cors_allow_origins, default empty — deny all cross-origin
+browser access) and three exception handlers that add structured logging
+to every error path while preserving the exact existing response for
+anything that was already a deliberate HTTPException/RequestValidationError;
+a bare, unhandled exception (a bug) is the only thing whose response
+actually changes — from a generic plaintext 500 to a generic JSON one,
+`{"detail": "Internal server error."}`, with nothing internal (message,
+type, traceback) ever reaching the client. Full detail always goes to the
+server log via `logger.exception(...)`.
+
+**Authentication is deliberately NOT implemented.** This is a public
+demonstration deployment of a read-only, historical-data prediction
+service — not a multi-user production system: every route is GET (bar the
+reserved, always-501 POST /predict), there is no concept of a user account,
+no write operation exists anywhere in this API, and nothing served is
+private (F1 results are public record). Adding auth here would protect
+nothing real while adding a credential-management surface this project has
+no actual use for. Revisit only if this API ever gains a genuine
+per-user/write capability — an upcoming-race POST /predict is the most
+likely future trigger.
 """
 
 from __future__ import annotations
@@ -63,10 +101,18 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.config import Settings
+from app.config import API_V1_PREFIX, Settings
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.features.qualifying import QUALIFYING_FEATURES
 from src.models.predict import load_model, predict_race
@@ -74,7 +120,7 @@ from src.models.registry import MODEL_ZOO, get_model, training_schema
 
 logger = logging.getLogger("f1.api")
 
-# Phase 3 Item 1 (Prediction Simulator) — of the 10 QUALIFYING_FEATURES, only
+# Prediction Simulator — of the 10 QUALIFYING_FEATURES, only
 # these 3 are literally overridden by a grid-position "what if". The other 7
 # (qualifying_position, q1/q2/q3_sec, reached_q2/q3, qualifying_gap_to_pole_pct)
 # stay FROZEN at the driver's real values for the race, rather than being
@@ -89,9 +135,9 @@ ADJUSTABLE_GRID_FEATURES: tuple[str, ...] = (
     "grid_adjusted", "grid_position_norm", "pit_lane_start",
 )
 
-# Single-source version (Decision 020): pyproject.toml is the only place the
-# version is defined; the fallback covers running from a checkout that was
-# never `pip install -e .`-ed (unsupported, but should not crash /health).
+# pyproject.toml is the single source of truth for the version; the
+# fallback covers running from a checkout that was never `pip install -e .`
+# -ed (unsupported, but should not crash /health).
 try:
     API_VERSION = _package_version("f1-race-winner-prediction")
 except PackageNotFoundError:                                    # pragma: no cover
@@ -99,7 +145,7 @@ except PackageNotFoundError:                                    # pragma: no cov
 
 
 # ---------------------------------------------------------------------------
-# Response schemas (design §6)
+# Response schemas
 # ---------------------------------------------------------------------------
 
 class ModelInfoSchema(BaseModel):
@@ -165,7 +211,7 @@ class FeatureDebugResponse(BaseModel):
 
 
 class BaselineComparisonResponse(BaseModel):
-    """Phase 3 Item 2 — the calibrated model vs. the grid-only heuristic
+    """The calibrated model vs. the grid-only heuristic
     baseline (MODEL_ZOO["pole_baseline"]) for the same race and driver set."""
     race_id: int
     year: int
@@ -181,7 +227,7 @@ class BaselineComparisonResponse(BaseModel):
 
 
 class SimulateGridResponse(BaseModel):
-    """Phase 3 Item 1 — one driver's win share re-scored under an overridden
+    """One driver's win share re-scored under an overridden
     grid/qualifying position, everything else held at real values."""
     race_id: int
     driver_id: int
@@ -206,7 +252,7 @@ def _load_name_lookups(settings: Settings) -> tuple[dict, dict]:
     """id -> display-name maps from drivers.csv / constructors.csv.
 
     Display names are a serving concern only — absence of the CSVs degrades
-    names to null, never fails the app (design §6)."""
+    names to null, never fails the app."""
     drivers: dict[int, str] = {}
     constructors: dict[int, str] = {}
     try:
@@ -252,7 +298,7 @@ async def _lifespan(app: FastAPI):
             info.name, info.version, info.alias, info.calibration, len(features),
         )
 
-        # Phase 3 Item 2 (vs-baseline): MODEL_ZOO["pole_baseline"] fit once at
+        # vs-baseline route: MODEL_ZOO["pole_baseline"] fit once at
         # startup against the full frozen feature snapshot. "Fit" is a no-op
         # here — PoleSitterBaseline.fit() only records classes_=[0,1] and
         # never looks at X or y (the rule is the fixed "grid_adjusted==1"
@@ -261,9 +307,9 @@ async def _lifespan(app: FastAPI):
         # like the real model. Wrapped in its own try/except so a failure
         # here degrades only /vs-baseline, not the whole API.
         try:
-            # Decision 041: get_model()'s feature_columns now defaults to
-            # the training-exclusion-applied set (currently FEATURE_COLUMNS
-            # minus wet_form), not the raw full set — but this route scores
+            # get_model()'s feature_columns defaults to a curated subset of
+            # FEATURE_COLUMNS (an experimental group is excluded from
+            # training by default), not the raw full set — but this route scores
             # against the FULL frozen features.parquet snapshot below
             # (features.loc[:, list(FEATURE_COLUMNS)]), so the guard must be
             # explicitly told to expect the FULL set too, or the .fit() call
@@ -279,7 +325,7 @@ async def _lifespan(app: FastAPI):
             logger.warning("pole-baseline model unavailable — /vs-baseline "
                            "will 503: %s", app.state.baseline_load_error)
     except Exception as exc:                                    # noqa: BLE001
-        # Degraded start (design §7): report via /health + 503s.
+        # Degraded start: report via /health + 503s.
         app.state.load_error = f"{type(exc).__name__}: {exc}"
         logger.error("startup failed — serving degraded: %s", app.state.load_error)
     yield
@@ -297,6 +343,66 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=_lifespan,
     )
     app.state.settings = settings
+
+    # --- CORS --------------------------------------------------------------
+    # Always registered; settings.cors_allow_origins (default "") controls
+    # the actual allow-list. Deliberately fixed (not configurable) beyond
+    # origins: GET/POST cover every route this API actually exposes, this
+    # API never uses cookies/auth headers so allow_credentials=False is
+    # correct regardless of origin config, and allow_headers=["*"] is safe
+    # for a public read-only API with no auth scheme to leak.
+    cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+    # --- global exception handling ------------------------------------------
+    # All three handlers log first, then either delegate to FastAPI's own
+    # default handler (StarletteHTTPException, RequestValidationError —
+    # response is BYTE-IDENTICAL to before these handlers existed) or, for
+    # a bare unhandled Exception only, return a new generic-but-safe JSON
+    # 500 instead of Starlette's default plaintext one. No response body
+    # ever includes exception internals; full detail goes to the server
+    # log only (logger.exception below captures the traceback).
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _log_http_exception(request: Request, exc: StarletteHTTPException):
+        logger.log(
+            logging.WARNING if exc.status_code < 500 else logging.ERROR,
+            "http_exception method=%s path=%s status_code=%d detail=%s",
+            request.method, request.url.path, exc.status_code, exc.detail,
+        )
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def _log_validation_exception(request: Request, exc: RequestValidationError):
+        logger.warning(
+            "validation_error method=%s path=%s errors=%s",
+            request.method, request.url.path, exc.errors(),
+        )
+        return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(Exception)
+    async def _handle_unexpected_exception(request: Request, exc: Exception):
+        logger.exception(
+            "unhandled_exception method=%s path=%s exception_type=%s",
+            request.method, request.url.path, type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error."},
+        )
+
+    # --- versioned router ----------------------------------------------------
+    # Every route below is defined once on this router and mounted twice —
+    # see the module docstring's "API versioning" paragraph for the full
+    # rationale. `router` carries no prefix of its own; both prefixes are
+    # applied at include_router() time, at the bottom of this function.
+    router = APIRouter()
 
     # --- helpers -----------------------------------------------------------
 
@@ -320,8 +426,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 409,
                 detail=f"raceId {race_id} ({year}) is in the forward holdout "
-                       f"(> {settings.serve_max_year}) — reserved for Phase 8 "
-                       "evaluation.",
+                       f"(> {settings.serve_max_year}) — reserved as a "
+                       "genuinely unseen evaluation window.",
             )
         return rows
 
@@ -352,7 +458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- routes ------------------------------------------------------------
 
-    @app.get("/health", response_model=HealthResponse)
+    @router.get("/health", response_model=HealthResponse)
     def health():
         if app.state.model is None:
             return HealthResponse(
@@ -363,12 +469,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status="ok", api_version=API_VERSION, model=_model_schema(),
         )
 
-    @app.get("/model", response_model=ModelInfoSchema)
+    @router.get("/model", response_model=ModelInfoSchema)
     def model_info():
         _require_ready()
         return _model_schema()
 
-    @app.get("/races", response_model=RaceListResponse)
+    @router.get("/races", response_model=RaceListResponse)
     def races(year: int | None = None):
         _require_ready()
         features: pd.DataFrame = app.state.features
@@ -386,7 +492,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for r in summary.itertuples()
         ])
 
-    @app.get("/predictions/{race_id}", response_model=PredictionResponse)
+    @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):
         _require_ready()
         started = time.perf_counter()
@@ -421,7 +527,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             while len(cache) > settings.prediction_cache_size:
                 cache.popitem(last=False)                       # FIFO eviction
 
-        # Structured prediction log (design §10 amendment). A cache hit
+        # Structured prediction log. A cache hit
         # reuses the cached body but gets its own prediction_id in the log.
         latency_ms = (time.perf_counter() - started) * 1e3
         logger.info(
@@ -432,11 +538,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return response
 
-    @app.get("/predictions/{race_id}/simulate/{driver_id}",
+    @router.get("/predictions/{race_id}/simulate/{driver_id}",
              response_model=SimulateGridResponse)
     def simulate_grid(race_id: int, driver_id: int,
                       grid_position: int | None = None, pit_lane: bool = False):
-        """Phase 3 Item 1 — Prediction Simulator (grid/qualifying group only).
+        """Prediction Simulator (grid/qualifying group only).
 
         Re-scores ONE driver's row with `grid_adjusted`/`grid_position_norm`/
         `pit_lane_start` overridden (see ADJUSTABLE_GRID_FEATURES); every
@@ -518,10 +624,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model=_model_schema(),
         )
 
-    @app.get("/predictions/{race_id}/vs-baseline",
+    @router.get("/predictions/{race_id}/vs-baseline",
              response_model=BaselineComparisonResponse)
     def predictions_vs_baseline(race_id: int):
-        """Phase 3 Item 2 — Qualifying Impact: the calibrated model next to
+        """Qualifying Impact: the calibrated model next to
         MODEL_ZOO["pole_baseline"] (P(win)=1 iff grid_adjusted==1) for the
         same race and driver set — "here's what qualifying position alone
         predicts vs. what the full model predicts," grounded entirely in
@@ -556,7 +662,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             baseline_top1_hit=(winner_id == baseline_top1) if winner_id is not None else None,
         )
 
-    @app.get("/debug/features/{race_id}", response_model=FeatureDebugResponse)
+    @router.get("/debug/features/{race_id}", response_model=FeatureDebugResponse)
     def debug_features(race_id: int):
         if not settings.debug_endpoints:
             # Indistinguishable from an unknown route in production.
@@ -581,17 +687,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         )
 
-    @app.post("/predict", status_code=501)
+    @router.post("/predict", status_code=501)
     def predict_reserved():
-        """RESERVED (design §5 amendment): Phase 8 upcoming-race predictions
+        """RESERVED: a future upcoming-race prediction contract
         will accept a future race_id or explicit feature rows here. Routing
-        it now means Phase 8 lands without an API redesign."""
+        it now means that feature can land without an API redesign."""
         raise HTTPException(
             501,
-            detail="Reserved for Phase 8 upcoming-race predictions — see "
-                   "reports/application_design.md §5/§12. Use "
-                   "GET /predictions/{race_id} for historical races.",
+            detail="Reserved for a future upcoming-race prediction contract "
+                   "(pre-race feature materialization for races that have not run yet). "
+                   "Use GET /predictions/{race_id} for historical races.",
         )
+
+    # --- mount the router twice ----------------------------------------------
+    # Canonical, documented: /api/v1/... . Legacy back-compat: every
+    # pre-versioning path (e.g. bare /health) keeps working identically —
+    # hidden from /docs/OpenAPI so the schema only ever shows one contract
+    # per route, not two. Both mounts share the same handler closures and
+    # app.state; there is no behavioral difference, only the URL.
+    app.include_router(router, prefix=API_V1_PREFIX)
+    app.include_router(router, include_in_schema=False)
 
     return app
 

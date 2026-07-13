@@ -1,5 +1,5 @@
 """
-Tests for app/api.py (Decision 016; reports/application_design.md §15).
+Tests for app/api.py.
 
 TestClient against create_app() with an isolated stack: tmp sqlite registry
 holding a calibrated model + a tiny synthetic features parquet, wired in via
@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import create_app
-from app.config import Settings
+from app.config import API_V1_PREFIX, Settings
 from src.features.metadata import active_feature_columns
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.models.registry import training_schema
@@ -198,7 +198,7 @@ def test_prediction_cache_returns_identical_body(client):
 
 
 # ---------------------------------------------------------------------------
-# Debug endpoint gating (design §5 amendment)
+# Debug endpoint gating
 # ---------------------------------------------------------------------------
 
 def test_debug_features_hidden_by_default(client):
@@ -206,7 +206,7 @@ def test_debug_features_hidden_by_default(client):
 
 
 def test_debug_features_when_enabled(debug_client):
-    # Decision 041: the serving_stack fixture registers via the default
+    # The serving_stack fixture registers via the default
     # (exclusion-applied) feature set, not the raw full FEATURE_COLUMNS.
     body = debug_client.get(f"/debug/features/{IN_WINDOW_RACE}").json()
     assert body["race_id"] == IN_WINDOW_RACE
@@ -222,7 +222,7 @@ def test_debug_features_respects_holdout(debug_client):
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 Item 1 — Prediction Simulator (/predictions/{race_id}/simulate/{driver_id})
+# Prediction Simulator (/predictions/{race_id}/simulate/{driver_id})
 #
 # _synthetic_features bakes a deterministic relationship into the fixture:
 # winner == 1 iff grid_adjusted == 1 (see the module docstring above), with
@@ -267,8 +267,8 @@ def test_simulate_grid_locked_feature_lists(client):
         "reached_q2", "reached_q3", "qualifying_gap_to_pole_pct",
         "grid_penalty_applied",
     }
-    # 28 historical/standings/teammate/weather aggregates are locked — was 30
-    # before Decision 041: the served model no longer trains on wet_form
+    # 28 historical/standings/teammate/weather aggregates are locked — the
+    # served model no longer trains on the wet_form group
     # (driver_wet_dry_delta/constructor_wet_dry_delta), so those 2 are
     # simply absent from the schema entirely, not merely unlocked.
     assert len(body["locked_features"]) == 28
@@ -320,7 +320,7 @@ def test_simulate_grid_forward_holdout_409(client):
 # qualifying group" design (app/api.py's ADJUSTABLE_GRID_FEATURES) depends
 # on the override being a true no-op when it matches what actually happened.
 # Runs against the ACTUAL committed serving bundle + features snapshot
-# (artifacts/serving/staging, artifacts/features.parquet — Decision 029:
+# (artifacts/serving/staging, artifacts/features.parquet —
 # committed to git, unlike the gitignored data/ tree), not the synthetic
 # fixture used by every other test in this file, so this is a genuine
 # regression check against real 2024 races. Two races are covered: one
@@ -386,7 +386,7 @@ def test_simulate_at_real_grid_exactly_reproduces_real_prediction(
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 Item 2 — Qualifying Impact (/predictions/{race_id}/vs-baseline)
+# Qualifying Impact (/predictions/{race_id}/vs-baseline)
 # ---------------------------------------------------------------------------
 
 def test_vs_baseline_picks_the_pole_sitter(client, serving_stack):
@@ -421,7 +421,7 @@ def test_vs_baseline_forward_holdout_409(client):
 
 
 def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):
-    """Decision 041 explicitly flagged this call site: get_model()'s new
+    """This call site is worth its own explicit test: get_model()'s
     default (active_feature_columns(), wet_form excluded) would otherwise
     silently mismatch the FULL features.parquet snapshot this route scores
     against (app/api.py builds X via features.loc[:, list(FEATURE_COLUMNS)]
@@ -439,10 +439,52 @@ def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):
 
 
 # ---------------------------------------------------------------------------
-# Reserved POST /predict (design §5 amendment)
+# Reserved POST /predict
 # ---------------------------------------------------------------------------
 
 def test_post_predict_reserved_501(client):
     resp = client.post("/predict")
     assert resp.status_code == 501
-    assert "Phase 8" in resp.json()["detail"]
+    assert "upcoming-race" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# API versioning — the versioned mount is the
+# canonical, documented one; every test above already exercises the legacy
+# unversioned alias, so its continued passing IS the back-compat regression
+# check. These tests cover what's genuinely new: the versioned mount itself.
+# ---------------------------------------------------------------------------
+
+def test_versioned_health_matches_legacy(client):
+    versioned = client.get(f"{API_V1_PREFIX}/health")
+    legacy = client.get("/health")
+    assert versioned.status_code == legacy.status_code == 200
+    assert versioned.json() == legacy.json()
+
+
+def test_versioned_prediction_matches_legacy_same_cache_entry(client):
+    """Both mounts call the same closures over the same app.state — a cache
+    hit on one path returns the SAME cached object (including prediction_id)
+    as a hit via the other path, proving there's no second, drifted copy of
+    server state per mount."""
+    versioned = client.get(f"{API_V1_PREFIX}/predictions/{IN_WINDOW_RACE}")
+    legacy = client.get(f"/predictions/{IN_WINDOW_RACE}")
+    assert versioned.status_code == legacy.status_code == 200
+    assert versioned.json() == legacy.json()
+
+
+def test_versioned_error_paths_match_legacy(client):
+    assert (client.get(f"{API_V1_PREFIX}/predictions/999999999").status_code
+            == client.get("/predictions/999999999").status_code == 404)
+    assert (client.post(f"{API_V1_PREFIX}/predict").status_code
+            == client.post("/predict").status_code == 501)
+
+
+def test_openapi_schema_lists_only_versioned_paths(client):
+    """The legacy back-compat mount is deliberately include_in_schema=False
+    — /docs/OpenAPI should show exactly one contract per route, not two."""
+    schema_paths = client.get("/openapi.json").json()["paths"]
+    assert schema_paths, "expected at least one documented route"
+    assert all(p.startswith(API_V1_PREFIX) for p in schema_paths), schema_paths
+    assert "/health" not in schema_paths
+    assert f"{API_V1_PREFIX}/health" in schema_paths

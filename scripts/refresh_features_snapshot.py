@@ -2,11 +2,10 @@
 scripts/refresh_features_snapshot.py
 
 Freezes the training-side data/processed/features.parquet as the runtime
-serving snapshot artifacts/features.parquet (Decision 029) — independent of
+serving snapshot artifacts/features.parquet — independent of
 model registration or promotion.
 
-Why this exists as its OWN script (Part 1 fix, post-Tranche-D display-data
-post-mortem): this snapshot answers "which races/drivers exist" — by
+Why this exists as its OWN script: this snapshot answers "which races/drivers exist" — by
 src/models/serving_bundle.py's own docstring, orthogonal to which model
 version serves them (it is NOT alias-scoped). Despite that, it previously
 only ever refreshed as a side effect of `train.py --register`/
@@ -19,8 +18,8 @@ could complete and never become predictable via the deployed API, with no
 indication anything was stale.
 
 This script lets scripts/refresh_and_freeze.py refresh the snapshot
-unconditionally, every run — alongside display data (Decision 030) and the
-2026 tracking set (src/models/season_tracking.py) — as "current vs. stale"
+unconditionally, every run — alongside display data and the
+current-season tracking set (src/models/season_tracking.py) — as "current vs. stale"
 ground-truth data, never a model-quality judgment, so it belongs in the
 SAME always-open PR as those two, not the gated model-promotion PR.
 train.py::register_model()'s and promote_model.py's own calls to

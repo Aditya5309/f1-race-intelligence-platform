@@ -4,7 +4,7 @@ Leads with the Grand Prix identity, the model's favorite and how confident
 it is, the top contenders as cards, and a plain-language "why" — the full
 field chart and tables follow as supporting detail. Predictions come only
 from GET /races + GET /predictions/{race_id}; Grand Prix names, grids, and
-race facts are display metadata (app/views/metadata.py, Decision 024) and
+race facts are display metadata (app/views/metadata.py) and
 every one of them degrades gracefully when data/ is absent.
 """
 
@@ -357,11 +357,11 @@ def render() -> None:
 
 
 def _qualifying_impact_section(race_id: int, winner_id: int | None) -> None:
-    """Phase 3 Item 2 — how much of the model's pick is 'just pole position'
+    """How much of the model's pick is 'just pole position'
     vs. the rest of the model (form/circuit history/standings). Grounded
     entirely in real, already-registered artifacts: the calibrated model and
-    MODEL_ZOO['pole_baseline'] (design Section 9.1's grid-only heuristic) —
-    no fabricated FP1-FP3 progression, per the Phase 3 investigation."""
+    MODEL_ZOO['pole_baseline'] (a grid-only heuristic) —
+    no fabricated FP1-FP3 progression."""
     st.divider()
     st.subheader("🧮 Qualifying Impact: model vs. pole-only baseline")
     st.caption(
@@ -410,7 +410,7 @@ def _qualifying_impact_section(race_id: int, winner_id: int | None) -> None:
 
 def _grid_simulator_section(race_id: int, preds: list[dict],
                             grid_by: dict[int, int]) -> None:
-    """Phase 3 Item 1 — Prediction Simulator, grid/qualifying group only.
+    """Prediction Simulator, grid/qualifying group only.
 
     Only the starting grid slot is adjustable; the driver's real qualifying
     times/gap-to-pole and all 21 historical form/circuit/standings features

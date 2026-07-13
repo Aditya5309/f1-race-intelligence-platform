@@ -1,11 +1,11 @@
-# Scheduled retrain (Phase 4 Tranche D, Part 3) — Decision-free automation
-# layered on top of the promotion gate (Tranche C) and the model-class gate
-# (Tranche D Item 1c). Separate from ci.yml on purpose: this workflow never
+# Scheduled retrain — automation
+# layered on top of the promotion gate and the model-class gate.
+# Separate from ci.yml on purpose: this workflow never
 # runs on push/PR, only on a schedule or manual dispatch, and it is the
 # only workflow in this repo allowed to open a PR against main.
 #
-# KNOWN GAP — read before relying on this in production (see also the final
-# Tranche D report): `data/` is entirely gitignored (Decision 002) and does
+# KNOWN GAP — read before relying on this in production:
+# `data/` is entirely gitignored and does
 # not exist on a fresh GitHub-hosted runner checkout, but
 # scripts/ingest_jolpica.py requires the existing data/*.csv files to
 # already be present (it only backfills races MISSING from them — it is
@@ -132,19 +132,18 @@ jobs:
           path: data/
           key: f1-data-${{ github.run_id }}
 
-      # Part 1 fix (display-data push gap post-mortem): this PR is
+      # This PR is
       # DELIBERATELY separate from the model-promotion PR below and has NO
       # `if:` condition tying it to promotion — display data, the runtime
-      # features snapshot, and the 2026 tracking set are all "current vs.
-      # stale" ground-truth data with no quality judgment involved (Decision
-      # 030 / Tranche D), refreshed unconditionally by refresh_and_freeze.py
-      # regardless of whether a candidate is promoted. Before this fix, the
-      # ONLY push mechanism in this workflow was the promotion-gated PR
-      # below, so on every refused promotion (the normal case) this
-      # refreshed data was silently discarded when the runner was torn
-      # down — confirmed against real run history (PR #1 was closed
-      # unmerged; the committed artifacts/display/ was 3 races stale,
-      # last touched by a manual, non-workflow commit).
+      # features snapshot, and the current-season tracking set are all "current vs.
+      # stale" ground-truth data with no quality judgment involved,
+      # refreshed unconditionally by refresh_and_freeze.py
+      # regardless of whether a candidate is promoted. A single-PR design
+      # (gated on promotion) was tried first and found to silently discard
+      # this refreshed data on every refused promotion (the normal case)
+      # when the runner was torn
+      # down — confirmed against real run history — hence the split into
+      # two independent PRs.
       #
       # Still human-reviewed like everything else this project pushes to
       # main (not auto-merged) — there is no automated correctness check on
@@ -177,7 +176,7 @@ jobs:
             whether a new model candidate is promoted this run (see the
             separate, gated PR for that, opened only when promotion
             succeeds). No model-quality judgment involved here, only
-            "current vs. stale" (Decision 030 / Tranche D):
+            "current vs. stale":
 
             - `artifacts/display/` — dashboard names/results/standings
             - `artifacts/features.parquet` — runtime feature snapshot (which
@@ -189,7 +188,7 @@ jobs:
       # Never lets a refusal fail the JOB — captured explicitly so the
       # steps below can react (PR vs. clean "nothing to review" stop)
       # rather than the job just going red with no explanation.
-      - name: Promote (gated — Tranche C metric-regression + Tranche D model-class checks)
+      - name: Promote (gated — metric-regression + model-class checks)
         run: |
           set +e
           python scripts/promote_model.py --alias Staging 2>&1 | tee /tmp/promote_output.txt
@@ -230,18 +229,18 @@ jobs:
               f.write(summary)
           PYEOF
 
-      # Part 1 fix: add-paths is now narrowed to JUST artifacts/serving/ —
+      # add-paths is narrowed to JUST artifacts/serving/ —
       # display data, the features snapshot, and the tracking set already
       # traveled (unconditionally) in their own PR above, so this PR is
       # purely the model-quality-gated artifact. This is a deliberate split
-      # from the single-PR "everything travels together" design Decision
-      # 030 originally shipped: that bug was a HUMAN forgetting to run one
-      # of two independent MANUAL commands together, a failure mode this
+      # from an earlier single-PR "everything travels together" design:
+      # that design's real failure mode was a HUMAN forgetting to run one
+      # of two independent MANUAL commands together — a failure mode this
       # fully-automated pipeline (refresh_and_freeze.py always runs both
       # refreshes, every run, in the same process) cannot reproduce — only
       # WHICH of the two deterministic outputs gets gated on push changes
-      # here, not whether both get produced. The genuine coupling Decision
-      # 030 cared about (a model bundle staying consistent with its own
+      # here, not whether both get produced. The genuine coupling that
+      # matters (a model bundle staying consistent with its own
       # manifest/schema) lives entirely inside artifacts/serving/<alias>/,
       # untouched by this split. `base: main` set explicitly — see the note
       # on the PR step above.

@@ -1,14 +1,14 @@
 """
-Tests for src/models/evaluate.py (Phase 4 module 3 — Decision 012).
+Tests for src/models/evaluate.py.
 
-Design-doc Section 12 requirements: per-race top-1/top-3/MRR on
-hand-computable synthetic races (including tie probabilities, a race
-violating the one-winner invariant raising, single-driver race edge);
-log-loss/Brier against the sklearn reference; calibration binning.
+Per-race top-1/top-3/MRR on hand-computable synthetic races (including tie
+probabilities, a race violating the one-winner invariant raising,
+single-driver race edge); log-loss/Brier against the sklearn reference;
+calibration binning.
 
-Plus the module-2-review additions: per-season summaries, winner rank
-distribution, average winner probability, ECE, and model-agnosticism
-(pole baseline from MODEL_ZOO evaluated through the same functions).
+Plus: per-season summaries, winner rank distribution, average winner
+probability, ECE, and model-agnosticism (pole baseline from MODEL_ZOO
+evaluated through the same functions).
 """
 
 import numpy as np
@@ -220,7 +220,7 @@ def test_evaluate_by_season_length_mismatch_raises():
 
 
 # ---------------------------------------------------------------------------
-# Spearman rank correlation (Phase 4 Tranche A item 3): predicted probability
+# Spearman rank correlation: predicted probability
 # ranking vs. actual full-field positionOrder, per race then averaged.
 #   Race 1: position_order = [1,2,3,4] exactly matches the prob-descending
 #            ranking -> spearman = +1.0
@@ -316,7 +316,7 @@ def test_pole_baseline_through_evaluation():
     y = pd.Series(y_true)
 
     # feature_columns=FEATURE_COLUMNS: X above is built from the full
-    # declared feature set (Decision 041's training-exclusion default is a
+    # declared feature set (the training-exclusion default is a
     # separate concern from this model-agnosticism test).
     pipeline = get_model("pole_baseline", y, feature_columns=FEATURE_COLUMNS).fit(X, y)
     y_prob = pipeline.predict_proba(X)[:, 1]

@@ -2,8 +2,7 @@
 src/features/circuit_history.py
 
 Circuit history — how a driver/constructor has performed at THIS circuit on
-prior visits only, any season before the current race
-(reports/master_dataset_design.md Section 5.6).
+prior visits only, any season before the current race.
 
 Leakage rule: "prior visits only" is implemented with the cumulative-minus-
 current pattern (`cumsum() - current_value`, `cumcount()`) over rows sorted by
@@ -14,7 +13,7 @@ Constructor circuit wins are aggregated to (constructorId, raceId) grain
 FIRST, for the same reason as constructor_form.py: a row-level cumulative sum
 would leak the teammate's result from the current race.
 
-Known limitation (documented in the design doc, not worked around): many
+Known limitation, by design, not worked around: many
 (driver, circuit) pairs have 0-2 prior visits, so these features are sparse
 and noisy for rookies and at new circuits. First visit ever = 0 starts /
 0 wins / NaN average finish.

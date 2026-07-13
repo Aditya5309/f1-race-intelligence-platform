@@ -1,22 +1,22 @@
 """
 app/config.py
 
-Application-layer configuration (Decision 016; application_design.md §11).
+Application-layer configuration.
 
 Every knob the API or dashboard reads comes through this Settings class —
 environment variables prefixed `F1_` (e.g. F1_SERVING_BUNDLE_PATH=...), with
 `.env`-file support for local development (.env is gitignored). No hardcoded
-paths in app code (project guiding principle): the first local run and a
-future container run use identical code, different environments.
+paths in app code: the first local run and a container run use identical
+code, different environments.
 
-Decision 026/027: serving no longer resolves a live MLflow registry alias —
-there is deliberately no `tracking_uri`/`model_alias` setting here anymore.
-`serving_bundle_path` points at a frozen bundle (src.models.serving_bundle);
-the API doesn't know what alias or experiment produced it.
+Serving never resolves a live MLflow registry alias — there is deliberately
+no `tracking_uri`/`model_alias` setting here. `serving_bundle_path` points
+at a frozen bundle (src.models.serving_bundle) instead; the API doesn't
+know or care what alias or experiment produced it.
 
-Decision 029: both `serving_bundle_path` and `features_path` default under
-`artifacts/` — a runtime artifact tree that is committed to git (contrast
-with `data_dir`, `data/`, `mlruns/`, `mlflow.db`, all gitignored). A freshly
+Both `serving_bundle_path` and `features_path` default under `artifacts/`
+— a runtime artifact tree that is committed to git (contrast with
+`data_dir`, `data/`, `mlruns/`, `mlflow.db`, all gitignored). A freshly
 cloned repository (source + `artifacts/` only, no `data/`) has everything
 the deployed API requires to serve predictions.
 """
@@ -30,6 +30,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ARTIFACTS_ROOT = _PROJECT_ROOT / "artifacts"
 
+#: The API's versioned URL prefix. Not a Settings field — this is internal
+#: wiring, not an operator-configurable knob. Shared by app/api.py (mounts
+#: every route under this prefix) and app/views/common.py (the dashboard's
+#: HTTP client prepends it to every request) so both sides can never drift
+#: apart. Lives here, not in app/api.py, because app/views/ must never
+#: import app.api (that would pull src/ imports into the dashboard process
+#: — the whole point of the dashboard-never-imports-src/ boundary) but both
+#: already import app.config for Settings.
+API_V1_PREFIX = "/api/v1"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -37,31 +47,31 @@ class Settings(BaseSettings):
     )
 
     # --- model --------------------------------------------------------------
-    #: Frozen serving bundle directory (Decision 026/027/029) — no MLflow
-    #: tracking URI or registry alias needed at request time. Committed to
-    #: git under artifacts/ (unlike the gitignored data/ and mlruns/ trees).
+    #: Frozen serving bundle directory — no MLflow tracking URI or registry
+    #: alias needed at request time. Committed to git under artifacts/
+    #: (unlike the gitignored data/ and mlruns/ trees).
     serving_bundle_path: Path = _ARTIFACTS_ROOT / "serving" / "staging"
 
     # --- data --------------------------------------------------------------
-    #: Frozen serving feature matrix (Decision 029) — a committed snapshot
-    #: exported by train.py::register_model(), NOT the live training-side
+    #: Frozen serving feature matrix — a committed snapshot exported by
+    #: train.py::register_model(), NOT the live training-side
     #: data/processed/features.parquet (which stays gitignored).
     features_path: Path = _ARTIFACTS_ROOT / "features.parquet"
     #: Directory holding the display-name/metadata CSVs (drivers, races,
-    #: standings, etc.) — an OPTIONAL enrichment only (Decision 016): names
-    #: degrade to a fallback string if the files are absent, never a hard
-    #: requirement to serve predictions. Defaults to the committed frozen
-    #: snapshot (artifacts/display/, scripts/export_display_data.py) rather
-    #: than the gitignored data/ tree, so a fresh clone (Streamlit Cloud,
-    #: Render, CI) resolves real names out of the box — mirrors how
-    #: features_path/serving_bundle_path already default under artifacts/.
-    #: Point at the full data/ tree locally via .env (F1_DATA_DIR=data) if
-    #: wanted; nothing requires it.
+    #: standings, etc.) — an OPTIONAL enrichment only: names degrade to a
+    #: fallback string if the files are absent, never a hard requirement to
+    #: serve predictions. Defaults to the committed frozen snapshot
+    #: (artifacts/display/, scripts/export_display_data.py) rather than the
+    #: gitignored data/ tree, so a fresh clone resolves real names out of
+    #: the box — mirrors how features_path/serving_bundle_path already
+    #: default under artifacts/. Point at the full data/ tree locally via
+    #: .env (F1_DATA_DIR=data) if wanted; nothing requires it.
     data_dir: Path = _ARTIFACTS_ROOT / "display"
 
     # --- serving policy ----------------------------------------------------
-    #: Forward-holdout guard (application_design.md §5.1): races after this
-    #: year return 409. Raise deliberately in Phase 8, never by accident.
+    #: Forward-holdout guard: races after this year return 409. The
+    #: 2025-2026 seasons are held out as an unseen evaluation window — raise
+    #: this deliberately, with a real evaluation plan, never by accident.
     serve_max_year: int = 2024
     #: Enables GET /debug/* (development only — keep false in production).
     debug_endpoints: bool = False
@@ -72,3 +82,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     #: Dashboard-side: where the API lives.
     api_url: str = "http://localhost:8000"
+
+    # --- API hardening -------------------------------------------------------
+    #: Comma-separated list of allowed CORS origins, e.g.
+    #: "https://example.com,https://foo.example.com". Empty (default)
+    #: means no origin is allowed cross-origin access — CORSMiddleware is
+    #: still registered either way, but with an empty allow-list this is
+    #: behaviorally identical to not having CORS middleware at all (no
+    #: browser ever gets an Access-Control-* header back). CORS only
+    #: matters for browser JS callers; it has no effect on this project's
+    #: own dashboard (a server-side httpx client, never a browser), curl,
+    #: or tests. Set "*" to allow any origin — reasonable for this
+    #: read-only public demo API; never combine "*" with credentials
+    #: (this API never uses cookies/auth headers, so that risk doesn't
+    #: apply here regardless).
+    cors_allow_origins: str = ""

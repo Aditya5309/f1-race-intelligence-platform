@@ -1,5 +1,5 @@
 """
-Tests for src/data/build_interim.py (Decision 007 repair logic + pipeline)
+Tests for src/data/build_interim.py (raw results.csv repair logic + pipeline)
 
 Covers:
   - _repair_duplicates: Finished preferred over non-Finished, ties broken by
@@ -54,7 +54,7 @@ def _cleaned_df(*rows: dict) -> pd.DataFrame:
 
 def _raw_results_df() -> pd.DataFrame:
     """
-    Raw results.csv-shaped frame exercising both Decision-007 repairs:
+    Raw results.csv-shaped frame exercising both repairs:
       - driver 2 has a duplicate (raceId, driverId) pair: one Finished row
         (resultId=2) and one Retired row with a HIGHER resultId (5) — the
         Finished row must win despite the lower resultId.
@@ -86,7 +86,7 @@ def _raw_qualifying_df() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# _repair_duplicates — Decision 007 arbitration order
+# _repair_duplicates — arbitration order
 # ---------------------------------------------------------------------------
 
 class TestRepairDuplicates:
@@ -196,7 +196,7 @@ class TestRepairDuplicates:
 
 
 # ---------------------------------------------------------------------------
-# _repair_positions — Decision 007 positionText fill
+# _repair_positions — positionText fill
 # ---------------------------------------------------------------------------
 
 class TestRepairPositions:

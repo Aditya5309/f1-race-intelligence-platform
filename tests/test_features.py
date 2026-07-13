@@ -1,13 +1,12 @@
 """
-Tests for src/features/ (Phase 3b — feature engineering).
+Tests for src/features/ (feature engineering).
 
-Every leakage risk documented in reports/master_dataset_design.md Section 6
-has an explicit test here, as that document requires:
+Every leakage risk in the feature pipeline has an explicit test here:
 
-  6.1  Post-race outcome columns never appear as features
+  Post-race outcome columns never appear as features
        -> test_feature_columns_disjoint_from_post_race_outcomes
        -> test_validate_features_rejects_post_race_column
-  6.2  Rolling windows / standings use strict prior-race ordering
+  Rolling windows / standings use strict prior-race ordering
        -> test_rolling_wins_exclude_current_race
        -> test_rolling_window_spans_season_boundary
        -> test_first_career_race_rolling_is_nan
@@ -15,15 +14,15 @@ has an explicit test here, as that document requires:
        -> test_round1_uses_prior_season_final_standings
        -> test_constructor_form_excludes_teammate_same_race
        -> test_constructor_circuit_wins_exclude_teammate_same_race
-  6.3  is_home_circuit deferred (no direct join key)
+  is_home_circuit deferred (no direct join key)
        -> test_home_circuit_deferred
-  6.4  Sprint enrichment deferred
+  Sprint enrichment deferred
        -> test_sprint_features_deferred
-  6.5  grid == 0 pit-lane sentinel handled explicitly
+  grid == 0 pit-lane sentinel handled explicitly
        -> test_pit_lane_start_sentinel
-  6.6  Driver form intentionally spans mid-season constructor changes
+  Driver form intentionally spans mid-season constructor changes
        -> test_driver_form_spans_constructor_change
-  6.7  Per-race field-size normalization
+  Per-race field-size normalization
        -> test_grid_position_norm_uses_per_race_field_size
 
 Plus unit tests per module and an end-to-end smoke test on the real data.
@@ -460,7 +459,7 @@ def test_sprint_features_deferred():
 
 
 # ---------------------------------------------------------------------------
-# Weather (Phase 4 Tranche B): per-race left-join, missing raceId -> NaN
+# Weather: per-race left-join, missing raceId -> NaN
 # ---------------------------------------------------------------------------
 
 def test_weather_broadcasts_to_every_driver_in_the_race():
@@ -496,7 +495,7 @@ def test_weather_merge_rejects_duplicate_raceid():
 
 
 # ---------------------------------------------------------------------------
-# Wet-condition form (Phase 4 Tranche B item 2): shrunk wet-minus-dry delta
+# Wet-condition form: shrunk wet-minus-dry delta
 # ---------------------------------------------------------------------------
 
 def _solo_driver_race(race_id, rnd, driver_id, position_order, precip_mm, year=2020):

@@ -1,7 +1,7 @@
 """
 src/features/constructor_form.py
 
-Rolling constructor form (reports/master_dataset_design.md Section 5.5).
+Rolling constructor form.
 
 A constructor fields (usually) two cars per race, so the master dataset has
 two rows per (constructorId, raceId). Rolling directly over driver-grain rows
@@ -9,8 +9,7 @@ would create TWO bugs:
 
 1. A "last 5" window would cover 5 rows ≈ 2.5 races, not 5 races.
 2. shift(1) at row level would let a row see its TEAMMATE's result from the
-   SAME race — an outcome of the race being predicted, i.e. leakage
-   (design doc Section 6.1/6.2).
+   SAME race — an outcome of the race being predicted, i.e. leakage.
 
 So this module first aggregates outcomes to (constructorId, raceId) grain —
 one row per constructor per race — then applies the shift-before-rolling
@@ -53,7 +52,7 @@ def add_constructor_form_features(
     Requires columns: raceId, driverId, constructorId, year, round, winner,
     positionOrder, finished. Returns a copy with CONSTRUCTOR_FORM_FEATURES
     added; row count and order unchanged. `windows` applies to the win counts;
-    podiums and DNF rate use a fixed 5-race window per the design doc.
+    podiums and DNF rate use a fixed 5-race window.
     """
     out = df.copy()
 

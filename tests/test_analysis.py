@@ -1,10 +1,10 @@
 """
-Tests for src/models/analysis.py (Phase 4 explainability/timing — Decision 014).
+Tests for src/models/analysis.py (explainability/timing).
 
 Covers:
   - measure_timing: one row per zoo candidate, timing columns, tuned-params
     override recorded in the output
-  - permutation_importance_top1: one row per feature, Decision-013 class
+  - permutation_importance_top1: one row per feature, feature-class
     mapping, baseline attr, signal feature shows a positive top-1 drop
   - _case_study_rows: highest/lowest-confidence winner and the 2022-round-1
     regulation-reset race selection
@@ -113,7 +113,7 @@ class TestPermutationImportance:
         return permutation_importance_top1(fitted_logreg, split.val, n_repeats=2)
 
     def test_one_row_per_feature(self, perm):
-        # Decision 041: fitted_logreg was fit via the default (exclusion-
+        # fitted_logreg was fit via the default (exclusion-
         # applied) feature set, not the raw full FEATURE_COLUMNS.
         assert sorted(perm["feature"]) == sorted(active_feature_columns())
 

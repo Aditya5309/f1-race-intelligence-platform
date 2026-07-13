@@ -1,8 +1,7 @@
 """
 src/models/predict.py
 
-Inference for Phase 4/5 (Decision 012 module 5; design Section 2; Decision
-026/027/029) — the serving contract app/api.py will call. The CLI defaults
+Inference — the serving contract app/api.py calls. The CLI defaults
 to the committed runtime artifacts (artifacts/serving/<alias>/,
 artifacts/features.parquet) — the exact same files the deployed API reads.
 
@@ -15,16 +14,16 @@ Responsibilities:
   src.models.serving_bundle) from a local directory and return
   (model, ModelInfo). No MLflow tracking URI, no registry client, no
   network — this is what app/api.py calls, and it has no concept of
-  experiments or aliases (Decision 026/027). `load_from_registry(alias,
+  experiments or aliases. `load_from_registry(alias,
   tracking_uri)` is kept alongside it for ad-hoc dev/CLI use directly
   against a live MLflow registry — app/api.py never calls it.
 - `predict_race(model, race_df)` — score one or more races' fields and
   return per-race SUM-NORMALIZED win probabilities sorted descending
-  (design Section 6: normalization is monotone within a race, so it never
+  (normalization is monotone within a race, so it never
   changes top-1/top-3; the normalized number is the user-facing "share of
   win chance").
 
-Schema discipline (design Section 11.1): the design matrix is built from
+Schema discipline: the design matrix is built from
 THE ARTIFACT'S OWN stored schema (`registry.training_schema`, recorded by
 ColumnGuard at fit time) — not from repository constants — so a model
 trained on an older FEATURE_COLUMNS keeps validating input against what it
@@ -33,7 +32,7 @@ names/order and casts dtypes on every call; anything non-numeric raises.
 
 Model-agnostic by construction: everything the module needs from the
 artifact is predict_proba + the guard's recorded schema, both shared by all
-zoo pipelines and the CalibratedModel wrapper (Decision 015).
+zoo pipelines and the CalibratedModel wrapper.
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ CARRIED_ID_COLUMNS = ("raceId", "driverId", "constructorId", "year", "round")
 
 
 def load_model(bundle_dir: Path | str | None = None):
-    """Load the frozen serving bundle FastAPI depends on (Decision 026/027).
+    """Load the frozen serving bundle FastAPI depends on.
 
     A plain local-filesystem read — no MLflow tracking URI, no registry
     client, no network. Raises FileNotFoundError if the bundle is missing
@@ -79,7 +78,7 @@ def load_from_registry(alias: str = DEFAULT_ALIAS, tracking_uri: str | None = No
 
     Dev/CLI convenience only (e.g. scoring a freshly-tuned model before it's
     been exported as a bundle) — app/api.py never calls this; it always
-    uses load_model()'s frozen bundle instead (Decision 026/027). Imports of
+    uses load_model()'s frozen bundle instead. Imports of
     mlflow and train.py's constants are deferred here so the serving path
     (load_model/predict_race) never needs them.
 
@@ -171,7 +170,7 @@ def predict_race(model, race_df: pd.DataFrame) -> pd.DataFrame:
     out = race_df.loc[:, carried].copy()
     out["win_probability_raw"] = raw
 
-    # Per-race sum normalization (design Section 6). An all-zero race (e.g.
+    # Per-race sum normalization. An all-zero race (e.g.
     # the pole heuristic scoring a field with no pole sitter) normalizes to
     # a uniform share — deterministic and honest about total ignorance.
     def _normalize(s: pd.Series) -> pd.Series:

@@ -1,9 +1,8 @@
 """
-Tests for src/models/predict.py (Phase 4 module 5; design Sections 2, 12;
-Decision 026/027).
+Tests for src/models/predict.py.
 
-Coverage per design Section 12 + Decision 015:
-  - bundle loading (Decision 026/027): ModelInfo metadata (version, run id,
+Coverage:
+  - bundle loading: ModelInfo metadata (version, run id,
     calibration status), missing bundle raises FileNotFoundError
   - registry loading (load_from_registry, dev/CLI convenience only): alias
     resolution, missing alias raises MlflowException
@@ -110,7 +109,7 @@ def staging(registry):
 
 
 # ---------------------------------------------------------------------------
-# Bundle loading + metadata (Decision 026/027 — the primary serving path)
+# Bundle loading + metadata (the primary serving path)
 # ---------------------------------------------------------------------------
 
 def test_load_model_reads_bundle_metadata(staging):
@@ -263,7 +262,7 @@ def test_schema_comes_from_artifact_not_repository(staging, race_frame, monkeypa
     # Even if repository constants changed, predict_race reads the artifact.
     out = predict_race(model, race_frame)
     recorded = model.named_steps["guard"].feature_names_in_
-    # Decision 041: the staging fixture is fit via the default
+    # The staging fixture is fit via the default
     # (exclusion-applied) feature set, not the raw full FEATURE_COLUMNS.
     assert recorded == list(active_feature_columns())   # today they coincide
     assert len(out) == len(race_frame)
@@ -308,7 +307,7 @@ def test_staging_predictions_are_calibrated_not_raw(staging, race_frame):
     model, info = staging
     assert info.calibration == "isotonic-oof"
     out = predict_race(model, race_frame)
-    # Decision 041: the staging fixture's base_pipeline was fit via the
+    # The staging fixture's base_pipeline was fit via the
     # default (exclusion-applied) feature set, not the raw full
     # FEATURE_COLUMNS — its ColumnGuard expects exactly that.
     X = race_frame.loc[:, list(active_feature_columns())]

@@ -1,10 +1,10 @@
 """
-Tests for scripts/refresh_and_freeze.py (Phase 4 Tranche D, Part 2).
+Tests for scripts/refresh_and_freeze.py.
 
 Unit-level: mocks subprocess.run to verify sequencing, stop-on-first-failure,
-and the --automated/manual export-mode wiring — NOT a real pipeline run (see
-the real end-to-end verification performed manually against this project's
-actual data/ tree and reported in Decision 035 / the session's own report).
+and the --automated/manual export-mode wiring — NOT a real pipeline run (the
+real end-to-end path is verified manually against this project's actual
+data/ tree before each release).
 
 scripts/ is not a package — loaded via importlib, same pattern as
 promote_model.py's and ingest_jolpica.py's test files.

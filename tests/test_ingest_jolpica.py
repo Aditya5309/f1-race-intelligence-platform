@@ -1,5 +1,5 @@
 """
-Tests for scripts/ingest_jolpica.py (Phase 4 Tranche D, Part 2).
+Tests for scripts/ingest_jolpica.py.
 
 No live network calls — fixtures below mirror the REAL jolpica-f1 JSON
 shapes verified directly against api.jolpi.ca while building this script
@@ -36,7 +36,7 @@ ingest_jolpica = _load_module()
 
 
 # ---------------------------------------------------------------------------
-# normalize_finish — the Decision 035 positionText/status handling
+# normalize_finish — positionText/status handling
 # ---------------------------------------------------------------------------
 
 def test_normalize_finish_classified_row():

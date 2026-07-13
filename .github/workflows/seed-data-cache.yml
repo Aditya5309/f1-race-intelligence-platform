@@ -1,11 +1,11 @@
-# One-off cache seeding for the scheduled retrain workflow (Phase 4
-# Tranche D). workflow_dispatch only — never runs on a schedule. Run this
+# One-off cache seeding for the scheduled retrain workflow.
+# workflow_dispatch only — never runs on a schedule. Run this
 # ONCE before the first real run of retrain.yml, and again any time you
 # want to replace the cached data/ tree with a fresh manual snapshot (e.g.
 # after a cache eviction, or a large manual data/ rebuild locally).
 #
 # Reads data/ from a GitHub Release asset (tag: DATA_RELEASE_TAG below),
-# never from a committed branch — data/ stays gitignored (Decision 002)
+# never from a committed branch — data/ stays gitignored
 # and never touches ANY branch's git history, main or otherwise. See
 # docs/retrain_workflow_setup.md for the exact commands to create/update
 # that release asset from your local data/ tree before running this.

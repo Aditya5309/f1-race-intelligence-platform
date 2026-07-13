@@ -1,19 +1,19 @@
 """
-Tests for src/models/train.py (Phase 4 module 4 — Decision 012).
+Tests for src/models/train.py.
 
-Design-doc Section 12 requirements:
+Coverage:
   - end-to-end smoke on a tiny synthetic feature frame with MLflow pointed
     at a tmp store: runs, logs expected params/metrics/artifacts, is
     deterministic on re-run
-  - test-set discipline (Section 11.3): training runs never emit test_*
+  - test-set discipline: training runs never emit test_*
     metrics; final_test tags final=true; CLI refuses --final-test/--tune/
     --register without an explicit --model
-  - fold-fit containment (Section 11.4): imputer statistics are fit inside
+  - fold-fit containment: imputer statistics are fit inside
     each fold's train window only
-  - shuffled-target canary (Section 11.5): within-race-permuted winners
+  - shuffled-target canary: within-race-permuted winners
     collapse per-race top-1 toward chance
-  - tripwire (Section 11.6): top-1 above 70% warns loudly
-Plus: feature-importance frame with Decision-013 classes and missing-
+  - tripwire: top-1 above 70% warns loudly
+Plus: feature-importance frame with feature classes and missing-
 indicator mapping; tune_candidate selection; model registration + alias.
 """
 
@@ -227,7 +227,7 @@ def test_tripwire_silent_below_threshold(recwarn):
 
 
 # ---------------------------------------------------------------------------
-# Feature importance with Decision-013 classes
+# Feature importance with feature classes
 # ---------------------------------------------------------------------------
 
 def test_feature_importance_frame_boosted_trees():
@@ -235,7 +235,7 @@ def test_feature_importance_frame_boosted_trees():
     X, y, _ = to_xy(df)
     pipeline = get_model("lightgbm", y).fit(X, y)
     frame = feature_importance_frame(pipeline)
-    # Decision 041: to_xy()/get_model() default to active_feature_columns()
+    # to_xy()/get_model() default to active_feature_columns()
     # (the training-exclusion-applied set), not the raw full FEATURE_COLUMNS.
     assert set(frame["feature"]) == set(active_feature_columns())      # no imputer -> 1:1
     assert set(frame["feature_class"]) <= {"stable", "era_sensitive", "experimental"}
@@ -311,7 +311,7 @@ def test_register_rejects_unknown_alias(tmp_mlflow):
 
 
 # ---------------------------------------------------------------------------
-# Decision 041 — automated retraining reads and honours the training
+# Automated retraining reads and honours the training
 # configuration (the exact path scripts/refresh_and_freeze.py's automated
 # mode and a manual `train.py --register` both go through: neither passes
 # any special feature_columns override, so both must get the safe default).
@@ -321,7 +321,7 @@ def test_register_model_honors_training_exclusion_by_default(tmp_mlflow, tmp_pat
     """A real register_model() call — no feature_columns override, exactly
     how the scheduled retrain workflow and a manual --register both invoke
     it — must produce a candidate whose recorded schema excludes wet_form.
-    This is Decision 036's exact regression path, now structurally closed:
+    This is the real regression's exact path, now structurally closed:
     the automated pipeline can no longer silently retrain on wet_form."""
     split = temporal_split(_full_frame())
     version = register_model("logreg", split, alias="Staging",
@@ -333,14 +333,15 @@ def test_register_model_honors_training_exclusion_by_default(tmp_mlflow, tmp_pat
     assert "driver_wet_dry_delta" not in schema["feature_names"]
     assert "constructor_wet_dry_delta" not in schema["feature_names"]
     assert schema["feature_names"] == list(active_feature_columns())
-    # teammate_form/grid_penalty_applied must stay included — Decision 040's
-    # own evidence, not just Decision 036's original regression.
+    # teammate_form/grid_penalty_applied must stay included — the
+    # per-group ablation study's own evidence, not just the original
+    # wet_form regression.
     assert "qualifying_gap_to_teammate" in schema["feature_names"]
     assert "grid_penalty_applied" in schema["feature_names"]
 
 
 def test_register_model_logs_excluded_feature_groups_to_mlflow(tmp_mlflow, tmp_path):
-    """MLflow reproducibility (Decision 041): every training run is tagged
+    """MLflow reproducibility: every training run is tagged
     with which groups were excluded, queryable across experiments — the
     ground-truth record is training_schema()'s own recorded column list
     (already saved as feature_schema.json/training_schema.json), this tag
@@ -361,7 +362,7 @@ def test_register_model_logs_excluded_feature_groups_to_mlflow(tmp_mlflow, tmp_p
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 Tranche D — register_model(export=False): version created, nothing
+# register_model(export=False): version created, nothing
 # touched under artifacts/ (the automated-pipeline path that lets
 # promote_model.py be the only thing that writes the served bundle).
 # ---------------------------------------------------------------------------
@@ -399,7 +400,7 @@ def test_cli_register_no_export_skips_bundle(tmp_mlflow, monkeypatch, tmp_path, 
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 Tranche C Item 1 — manifest.json evaluation metrics
+# manifest.json evaluation metrics
 # ---------------------------------------------------------------------------
 
 def test_register_model_records_val_metrics_in_manifest(tmp_mlflow, tmp_path):
@@ -506,7 +507,7 @@ def test_cli_rejects_bad_params_combinations():
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 Tranche D — --params-file / load_registered_model_config
+# --params-file / load_registered_model_config
 # ---------------------------------------------------------------------------
 
 def test_load_registered_model_config_reads_the_real_committed_file():

@@ -14,20 +14,20 @@ Design notes
   parsing computed deterministically from history. There is nothing to fit,
   so this is a functional composition + CLI (like src/pipelines/
   build_dataset.py), not a fitted sklearn Pipeline. Fitted preprocessing
-  (imputation, scaling — fit on the 2010-2021 training window only, per
-  Decision 008) belongs in the Phase 4 model pipeline, where the estimator
-  lives. Recorded as Decision 011.
+  (imputation, scaling — fit on the 2010-2021 training window only)
+  belongs in the model training pipeline, where the estimator
+  lives, not here.
 - The output covers the FULL race history, like the master dataset — rolling
-  features for 2010+ rows are computed using pre-2010 races as context
-  (Decision 010); the Decision-008 year split is applied at training time.
+  features for 2010+ rows are computed using pre-2010 races as context;
+  the training-window year split is applied at training time, not here.
 - POST_RACE_OUTCOME_COLUMNS is imported from the integration layer — the
   single source of truth for what is not pre-race-safe — and the disjointness
   of FEATURE_COLUMNS is asserted at import time: the pipeline cannot even be
   imported in a state that leaks a same-race outcome column into the feature
-  set (design doc Section 6.1).
+  set.
 - Deferred by design, deliberately absent from FEATURE_COLUMNS:
-  `is_home_circuit` (needs a hand-built nationality->country mapping, design
-  doc Section 6.3) and sprint enrichment (Section 6.4).
+  `is_home_circuit` (needs a hand-built nationality->country mapping) and
+  sprint-weekend enrichment.
 """
 
 from __future__ import annotations
@@ -94,9 +94,9 @@ FEATURES_DATASET_COLUMNS: tuple[str, ...] = (
     ID_COLUMNS + FEATURE_COLUMNS + (TARGET_COLUMN,)
 )
 
-# Import-time leakage guard (design doc Section 6.1): no same-race outcome
-# column may ever be a feature. Note this also keeps raw `grid` (pit-lane
-# sentinel, Section 6.5) and raw q1/q2/q3 strings out of the model's view —
+# Import-time leakage guard: no same-race outcome
+# column may ever be a feature. Note this also keeps raw `grid` (a pit-lane
+# sentinel value) and raw q1/q2/q3 strings out of the model's view —
 # only their engineered, safe forms are in FEATURE_COLUMNS.
 _leaked = set(FEATURE_COLUMNS) & POST_RACE_OUTCOME_COLUMNS
 assert not _leaked, f"Post-race outcome column(s) in FEATURE_COLUMNS: {sorted(_leaked)}"

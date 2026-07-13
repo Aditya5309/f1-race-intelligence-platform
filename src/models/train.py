@@ -1,8 +1,7 @@
 """
 src/models/train.py
 
-Training orchestration for Phase 4 (Decision 012;
-reports/model_development_design.md Sections 1, 2, 7, 8, 11).
+Training orchestration.
 
     python -m src.models.train                              # stage 1: all candidates
     python -m src.models.train --model xgboost              # one candidate
@@ -14,32 +13,33 @@ Orchestration only — splitting lives in splits.py, model definitions in
 registry.py, metrics in evaluate.py. This module wires them together and
 talks to MLflow.
 
-MLflow layout (design Section 8): experiment `f1-winner-prediction`; one
+MLflow layout: experiment `f1-winner-prediction`; one
 parent run per candidate training invocation with one child run per CV fold
 (tune mode logs per-fold metrics on the config's parent run instead of
 spawning 240 child runs). Tags carry ModelSpec.to_metadata() plus a data
 fingerprint (row count + file hash of features.parquet) so every result is
 attributable to a dataset version. Artifacts: the fitted pipeline
 (mlflow.sklearn), the training schema recorded by ColumnGuard, per-season
-evaluation, calibration table + plot, and feature importances grouped by the
-Decision-013 class.
+evaluation, calibration table + plot, and feature importances grouped by
+era-robustness class.
 
-Tracking store: defaults to `sqlite:///mlflow.db` in the project root —
-still a local store per Decision 004, chosen over the bare `mlruns/` file
-store because the MLflow Model Registry (needed by --register / predict.py)
-does not work on the file store. Artifacts still land in ./mlruns.
+Tracking store: defaults to `sqlite:///mlflow.db` in the project root — a
+local store, chosen over the bare `mlruns/` file store because the MLflow
+Model Registry (needed by --register / predict.py) does not work on the
+file store. Artifacts still land in ./mlruns.
 
-Leakage guards implemented here (design Section 11):
-- 11.3 test-set discipline: ONLY final_test() ever touches split.test, only
+Leakage guards implemented here:
+- Test-set discipline: ONLY final_test() ever touches split.test, only
   behind the explicit --final-test flag, and it tags the run final=true.
   train_candidate()/tune_candidate() are structurally unable to see test
   rows — their signatures take train/val frames only.
-- 11.4 fitted-state containment: a fresh pipeline is built and fit inside
+- Fitted-state containment: a fresh pipeline is built and fit inside
   every fold, so imputer/scaler statistics never see the fold's future.
-- 11.6 too-good-to-be-true tripwire: any per-race top-1 above
+- Too-good-to-be-true tripwire: any per-race top-1 above
   TOP1_TRIPWIRE (0.70) emits a loud warning demanding investigation —
   pole predicts ~50% in-window; >70% smells like leakage, not brilliance.
-(11.5, the shuffled-target canary, is a test in tests/test_train.py.)
+(A shuffled-target canary — fitting on a permuted target should destroy all
+signal — is a test in tests/test_train.py.)
 """
 
 from __future__ import annotations
@@ -86,10 +86,10 @@ REGISTERED_MODEL_NAME = "f1-winner"
 # silently split experiment history across stray mlflow.db files).
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRACKING_URI = f"sqlite:///{(_PROJECT_ROOT / 'mlflow.db').as_posix()}"
-TOP1_TRIPWIRE = 0.70           # design Section 11.6
-DEFAULT_TUNE_ITER = 40         # design Section 7
+TOP1_TRIPWIRE = 0.70           # >70% top-1 is a leakage alarm, not a win
+DEFAULT_TUNE_ITER = 40
 SEED = 42
-#: Shared source of truth for retrain hyperparameters (Phase 4 Tranche D) —
+#: Shared source of truth for retrain hyperparameters —
 #: {"model", "calibrate", "params"}. Read by the manual `--params-file` CLI
 #: flag below AND by scripts/refresh_and_freeze.py's automated retrain path,
 #: so both cannot silently drift onto different configs. Update this file
@@ -130,14 +130,14 @@ def _align_position_order(df: pd.DataFrame, position_order: pd.Series | None) ->
 
 def load_registered_model_config(path: Path = DEFAULT_PARAMS_CONFIG_PATH) -> dict:
     """Read {"model", "calibrate", "params"} from the shared retrain-config
-    file (Phase 4 Tranche D) — the source both the manual `--params-file`
+    file — the source both the manual `--params-file`
     CLI flag and scripts/refresh_and_freeze.py's automated retrain read, so
     a real re-tune's chosen config only needs updating in one place."""
     return json.loads(path.read_text())
 
 
 def check_tripwire(metrics: dict[str, float], context: str) -> None:
-    """Design Section 11.6 — top-1 above 70% is a leakage alarm, not a win."""
+    """Top-1 accuracy above 70% is a leakage alarm, not a win — see the module docstring."""
     top1 = metrics.get("top1_accuracy", 0.0)
     if top1 > TOP1_TRIPWIRE:
         warnings.warn(
@@ -178,7 +178,7 @@ def run_cv(
 
     A FRESH pipeline is built per fold — with class weights computed from
     that fold's own training target and any imputer/scaler fit inside the
-    fold (Section 11.4). Returns per-fold metric dicts (with 'val_year') and
+    fold. Returns per-fold metric dicts (with 'val_year') and
     the fitted fold pipelines (kept for tests and diagnostics).
     """
     fold_metrics: list[dict] = []
@@ -213,7 +213,7 @@ def _cv_aggregate(fold_metrics: list[dict]) -> dict[str, float]:
 
 def feature_importance_frame(pipeline: Pipeline) -> pd.DataFrame | None:
     """
-    Importances with Decision-013 classes. Uses the preprocessing steps'
+    Importances with era-robustness classes. Uses the preprocessing steps'
     get_feature_names_out so imputer missing-indicator columns are named and
     mapped back to their base feature's class. Returns None for estimators
     with no importance concept (the pole heuristic).
@@ -287,7 +287,7 @@ def _log_common(name: str, fingerprint: str, stage: str) -> None:
         "data_fingerprint": fingerprint,
         "feature_count": str(len(FEATURE_CLASSIFICATION)),
         "code_phase": "phase4",
-        # Decision 041: which FEATURE_GROUPS this run's design matrix
+        # Which FEATURE_GROUPS this run's design matrix
         # actually excluded, and how many columns that left — the
         # queryable, human-readable side of reproducibility. The
         # ground-truth side is training_schema()'s own recorded column
@@ -319,7 +319,7 @@ def train_candidate(
     """
     CV on the training split -> refit on the full training split -> score
     validation. Logs one MLflow parent run with per-fold child runs. Never
-    sees test data (Section 11.3 — the signature makes it impossible).
+    sees test data — the signature makes it impossible.
     Returns the logged metrics (cv_* aggregates + val_*).
 
     `position_order` (see load_position_order), if given, adds val_* Spearman
@@ -381,14 +381,14 @@ def tune_candidate(
     seed: int = SEED,
 ) -> tuple[dict, dict[str, float]]:
     """
-    Randomized search (design Section 7): sample n_iter configs from the
+    Randomized search: sample n_iter configs from the
     zoo's declared distributions; score each by expanding-window CV.
     Selection statistic: mean CV per-race top-1, ties broken by mean CV
     log-loss. Each config is one MLflow run tagged stage=tune (per-fold
     metrics logged flat on the run, not as child runs, to keep the run count
     sane). Validation data is deliberately NOT an argument — the val split
     arbitrates finalists via train_candidate afterwards, it is not searched
-    against (Section 7).
+    against.
 
     Returns (best_params, best_cv_metrics).
     """
@@ -438,8 +438,8 @@ def final_test(
     position_order: pd.Series | None = None,
 ) -> dict[str, float]:
     """
-    THE one-time 2024 evaluation (design Sections 4 and 11.3). Fits the
-    selected configuration on the training split (pre-refit, per Section 4)
+    THE one-time 2024 evaluation. Fits the
+    selected configuration on the training split (pre-refit)
     and scores the test split once. Tags the run final=true. Callable only
     from the --final-test CLI path — nothing else in this module touches
     split.test.
@@ -489,29 +489,29 @@ def register_model(
     Register a fitted pipeline as `f1-winner` and point `alias` at it.
 
     alias="Staging": fit on train only (pre-test finalist).
-    alias="Production": fit on train+val 2010-2023 (the post-test refit,
-    design Section 4 — the registered model must not ignore the two most
+    alias="Production": fit on train+val 2010-2023 (the post-test refit —
+    the registered model must not ignore the two most
     recent completed seasons it was validated on).
 
-    calibrate=True (Decision 015): wrap the fitted pipeline in the design-
-    Section-5 OOF isotonic calibrator. The calibrator is ALWAYS learned from
+    calibrate=True: wrap the fitted pipeline in the OOF isotonic
+    calibrator. The calibrator is ALWAYS learned from
     the training split's season folds (calibration.py enforces this), even
     when the base model is refit on train+val for Production.
 
     Requires a registry-capable tracking store (the default sqlite URI is).
 
-    Phase 4 Tranche C Item 1: the manifest ALSO records honest evaluation
+    The manifest ALSO records honest evaluation
     metrics (evaluate_all on split.val) — what this bundle's model actually
     scored, not just identity fields. Scored on a model fit on split.train
     ONLY, regardless of alias: for alias="Staging" that's model_obj itself
     (fit_df == split.train, so scoring it on val is safe); for
     alias="Production" (fit_df == train+val) model_obj has already seen val,
     so scoring IT on val would leak — a throwaway train-only refit is used
-    for the metrics instead, never touching split.test (Section 11.3).
+    for the metrics instead, never touching split.test.
     `position_order` (see load_position_order), if given, adds the Spearman
     metric to that dict, same convention as train_candidate/final_test.
 
-    Decision 026/027: registration ALSO exports a frozen serving bundle
+    Registration ALSO exports a frozen serving bundle
     (src.models.serving_bundle) to bundle_root/alias.lower() — the SAME
     already-fitted in-memory model_obj, no extra MLflow round trip. This is
     what src/models/predict.py's serving-side load_model() reads; the API
@@ -519,7 +519,7 @@ def register_model(
     defaults to artifacts/serving/ — TESTS MUST pass an explicit tmp
     bundle_root or they will write into the real project directory.
 
-    NOTE (Phase 4 Tranche C): this export is UNCHECKED — it overwrites
+    NOTE: this export is UNCHECKED — it overwrites
     whatever bundle_root/alias.lower() currently holds with zero validation.
     For a real promotion (as opposed to a routine registration during
     development), use `scripts/promote_model.py` instead, which gates the
@@ -528,7 +528,7 @@ def register_model(
     register_model() directly still works — it's what promote_model.py's
     own candidates are registered with — but bypasses that gate.
 
-    export=False (Phase 4 Tranche D): skip both the bundle export AND the
+    export=False: skip both the bundle export AND the
     features snapshot freeze — only create the MLflow version/alias, touch
     nothing under artifacts/. For automated pipelines (scripts/
     refresh_and_freeze.py's scheduled-workflow path) that route the
@@ -536,10 +536,10 @@ def register_model(
     export=True, this function would ALREADY have overwritten
     artifacts/serving/ before promote_model.py's gate ever runs, making the
     gate a no-op. Manual/interactive use (the CLI's --register, ad-hoc
-    Tranche-B-style retrain sessions) keeps the default True — a human is
+    exploratory retrain sessions) keeps the default True — a human is
     already about to inspect the result.
 
-    Decision 029: registration ALSO freezes a runtime features snapshot
+    Registration ALSO freezes a runtime features snapshot
     (src.models.serving_bundle.export_features_snapshot) by copying
     features_source (default: the training pipeline's own
     data/processed/features.parquet — the file `split` was itself built
@@ -636,7 +636,7 @@ def register_model(
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Phase 4 training orchestration.")
+    parser = argparse.ArgumentParser(description="Model training orchestration.")
     parser.add_argument("--model", default="all",
                         help=f"Zoo candidate or 'all'. Available: {sorted(MODEL_ZOO)}")
     parser.add_argument("--tune", action="store_true",
@@ -649,20 +649,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="Register a single --model under this alias.")
     parser.add_argument("--calibrate", action="store_true",
                         help="With --register: wrap the model in the OOF "
-                             "isotonic calibrator (design Section 5, "
-                             "Decision 015) before registering.")
+                             "isotonic calibrator before registering.")
     parser.add_argument("--bundle-root", type=Path, default=None,
                         help="With --register: where to export the frozen "
-                             "serving bundle (Decision 026/027/029). "
+                             "serving bundle. "
                              "Default: artifacts/serving/.")
     parser.add_argument("--artifacts-root", type=Path, default=None,
                         help="With --register: where to freeze the runtime "
-                             "features snapshot (Decision 029). Default: "
+                             "features snapshot. Default: "
                              "artifacts/ (writes artifacts/features.parquet).")
     parser.add_argument("--no-export", action="store_true",
                         help="With --register: create the MLflow version/"
                              "alias only — skip the (unchecked) bundle/"
-                             "features-snapshot export (Phase 4 Tranche D). "
+                             "features-snapshot export. "
                              "For automated pipelines that gate the export "
                              "through scripts/promote_model.py afterward; "
                              "manual use should omit this flag.")
@@ -676,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Read the 'params' dict from a JSON file "
                              "instead of inlining it on the command line — "
                              f"e.g. --params-file {DEFAULT_PARAMS_CONFIG_PATH} "
-                             "(Phase 4 Tranche D's shared retrain-config "
+                             "(the shared retrain-config "
                              "source of truth). Mutually exclusive with "
                              "--params.")
     parser.add_argument("--tracking-uri", default=DEFAULT_TRACKING_URI)
@@ -731,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # positionOrder for the Spearman metric — an evaluation-time join from
     # master_dataset.parquet, not a feature. Optional: data/ is gitignored
-    # (Decision 016) and legitimately absent in some environments (fresh
+    # and legitimately absent in some environments (fresh
     # clones, CI), so degrade to no Spearman reporting rather than error.
     position_order = (
         load_position_order() if MASTER_DATASET_PATH.exists() else None

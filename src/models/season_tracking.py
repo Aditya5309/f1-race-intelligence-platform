@@ -2,9 +2,7 @@
 src/models/season_tracking.py
 
 Continuous out-of-sample tracking for the current, ONGOING regulation era
-(the "Phase 8 monitoring/retraining rehearsal" named in
-reports/model_development_design.md S13.1/S14; era boundaries from
-src/models/eras.py, Decision 019). Scores each newly completed race under
+(era boundaries from src/models/eras.py). Scores each newly completed race under
 the live era with whatever model is CURRENTLY SERVED
 (artifacts/serving/<alias>) and appends one row per race to a running CSV —
 e.g. artifacts/tracking/2026_running_eval.csv while `future_engine` (start
@@ -41,8 +39,9 @@ across each race's own evaluate_all() output — an approximation for
 row-count-sensitive metrics (log_loss, brier_score, ece), clearly named
 `mean_*` for that reason — not a row-level pooled recomputation.
 
-Sample-size honesty (same discipline as the Tranche B ablation's "1/24 test
-races" framing): the ongoing era starts with a handful of races.
+Sample-size honesty (the same discipline this project applies to every
+small-sample finding — always report the denominator alongside a rate):
+the ongoing era starts with a handful of races.
 `summarize()` always returns the race count alongside every aggregate, and
 the CLI never prints a headline number without that count on the same
 line, plus an explicit small-sample banner below SMALL_SAMPLE_THRESHOLD.

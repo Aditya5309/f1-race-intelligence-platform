@@ -88,7 +88,7 @@ _QUALIFYING_REQUIRED_COLUMNS: tuple[str, ...] = ("raceId", "driverId", "construc
 
 # qualifying.csv dtypes. q1/q2/q3 are intentionally left as raw "M:SS.sss"
 # strings (or NaN) — parsing them into seconds is a feature-engineering
-# transform (reports/master_dataset_design.md Section 5.3), not a cleaning
+# transform, not a cleaning
 # concern, so it does not happen here.
 _QUALIFYING_DTYPE_MAP: dict[str, str] = {
     "raceId":        "Int64",
@@ -234,8 +234,8 @@ def clean_qualifying(df: pd.DataFrame) -> pd.DataFrame:
 
     ``q1``, ``q2``, ``q3`` are intentionally left as raw "M:SS.sss" strings
     (or NaN for a session a driver didn't reach). Parsing them into seconds
-    and deriving a gap-to-pole percentage are feature-engineering transforms
-    (reports/master_dataset_design.md Section 5.3) — out of scope here.
+    and deriving a gap-to-pole percentage are feature-engineering transforms,
+    out of scope here.
 
     A null ``q3`` is not missing data: only the top 10 qualifiers reach Q3.
     Downstream consumers must treat it as informative, not impute it.

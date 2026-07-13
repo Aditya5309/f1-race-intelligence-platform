@@ -1,8 +1,8 @@
 """
 src/models/registry.py
 
-Model zoo for Phase 4 (Decision 012; reports/model_development_design.md
-Sections 2, 3, 7, 11.1).
+Model zoo: candidate model definitions and the training-time inference
+contract (schema-guarded pipelines, feature-column resolution).
 
 Each candidate is a ModelSpec: name -> estimator factory (`build`) +
 hyperparameter distributions for the stage-2 randomized search. Adding a
@@ -11,20 +11,20 @@ candidate model = one MODEL_ZOO entry; train.py never changes.
 Design rules enforced here:
 - Every pipeline starts with a ColumnGuard that asserts, at fit AND predict
   time, that the design matrix is exactly FEATURE_COLUMNS in canonical order
-  (Section 11.1 — no identifier or post-race column can ever reach an
+  (no identifier or post-race column can ever reach an
   estimator), then casts to plain float64 (nullable Float64 -> NaN-bearing
   float, booleans -> 0/1) so every estimator sees one uniform dtype.
 - Class imbalance is handled by weighting computed FROM THE TRAINING TARGET
-  at build time (`compute_scale_pos_weight`), never hardcoded (Section 5).
+  at build time (`compute_scale_pos_weight`), never hardcoded.
   LogReg/RF use class_weight='balanced' (equivalent, sklearn-native).
 - Informative NaNs are preserved for the tree boosters (native NaN handling);
   LogReg gets a median imputer WITH missing-indicator flags so "no prior
   history" stays visible as a signal instead of dissolving into the median
-  (Section 3 rationale).
-- The pole-sitter heuristic (Section 3, candidate 0b) implements the same
+  — informative missingness matters more than the imputed value.
+- The pole-sitter heuristic implements the same
   predict_proba interface as the real models so it flows through identical
   CV/evaluation/MLflow plumbing. It is the bar every model must beat
-  (~50% per-race top-1 in-window, Section 14.1).
+  (~50% per-race top-1 in-window).
 - 0a (always-negative dummy) is deliberately NOT a zoo entry: it exists to
   make a rhetorical point about row-level metrics, which evaluate.py's
   per-race metrics already make structurally.
@@ -71,15 +71,15 @@ class ColumnGuard(BaseEstimator, TransformerMixin):
     documentation (everything is cast to float64, so Float64-vs-float64
     differences are not errors).
 
-    `expected_columns` (Decision 041): callers normally never set this
+    `expected_columns`: callers normally never set this
     directly — `get_model()` resolves and injects it via
     `set_params(guard__expected_columns=...)`, defaulting to
-    `active_feature_columns()` (the training-exclusion-applied set) unless
+    `active_feature_columns()` (a curated subset) unless
     an explicit override is given. Left as `None`, this guard falls back to
-    the full `FEATURE_COLUMNS`, unchanged from pre-Decision-041 behavior —
-    every direct `ColumnGuard()` construction outside `get_model()` (there
-    are none in this repository today, but the fallback exists for that
-    case and for old serialized artifacts) keeps working exactly as before.
+    the full `FEATURE_COLUMNS` — every direct `ColumnGuard()` construction
+    outside `get_model()` (there are none in this repository today, but the
+    fallback exists for that case and for old serialized artifacts) keeps
+    working exactly as before.
     """
 
     def __init__(self, expected_columns: tuple[str, ...] | None = None):
@@ -194,7 +194,7 @@ class ModelSpec:
     family: str                    # "heuristic" | "linear" | "bagged-trees" | "boosted-trees"
     handles_nan_natively: bool     # estimator accepts NaN without imputation
     requires_scaling: bool         # estimator needs standardized inputs
-    explainability: str            # how to explain it (design doc Section 10)
+    explainability: str            # how to explain it, for the dashboard/report
     training_cost: str             # "trivial" | "low" | "medium" — relative, this dataset
     build: Callable[[pd.Series], Pipeline]
     # Stage-2 randomized-search distributions, keyed by pipeline param path.
@@ -266,7 +266,7 @@ def _build_xgboost(y_train: pd.Series) -> Pipeline:
             min_child_weight=2, subsample=0.9, colsample_bytree=0.9,
             scale_pos_weight=compute_scale_pos_weight(y_train),
             tree_method="hist", eval_metric="logloss",
-            importance_type="gain",     # design Sections 8/10: gain, not split count
+            importance_type="gain",     # gain, not split count — reflects actual predictive contribution
             random_state=RANDOM_STATE, n_jobs=-1,
         )),
     ])
@@ -282,13 +282,13 @@ def _build_lightgbm(y_train: pd.Series) -> Pipeline:
             n_estimators=400, learning_rate=0.05, num_leaves=31,
             min_child_samples=10, subsample=0.9, colsample_bytree=0.9,
             scale_pos_weight=compute_scale_pos_weight(y_train),
-            importance_type="gain",     # design Sections 8/10: gain, not split count
+            importance_type="gain",     # gain, not split count — reflects actual predictive contribution
             random_state=RANDOM_STATE, n_jobs=-1, verbose=-1,
         )),
     ])
 
 
-# Design doc Section 7: distributions for the stage-2 randomized search,
+# Distributions for the stage-2 randomized search,
 # declared per candidate. Keys use sklearn pipeline param paths.
 _XGBOOST_DISTRIBUTIONS = {
     "model__n_estimators": randint(150, 800),
@@ -328,7 +328,7 @@ MODEL_ZOO: dict[str, ModelSpec] = {
     "pole_baseline": ModelSpec(
         name="pole_baseline",
         description="Heuristic: pole sitter wins (~50% per-race top-1 in-window). "
-                    "The bar every trained model must beat (design Section 9.1).",
+                    "The bar every trained model must beat.",
         family="heuristic",
         handles_nan_natively=True,     # reads grid_adjusted only; NaN -> not pole
         requires_scaling=False,
@@ -392,16 +392,16 @@ def get_model(
 ) -> Pipeline:
     """Build a ready-to-fit pipeline for one zoo candidate.
 
-    `feature_columns` (Decision 041): the design matrix's expected column
+    `feature_columns`: the design matrix's expected column
     set, injected into the pipeline's `ColumnGuard` step. Defaults —
-    when NOT given — to `active_feature_columns()` (the training-exclusion
-    -applied set, e.g. currently `FEATURE_COLUMNS` minus `wet_form`), never
+    when NOT given — to `active_feature_columns()` (a curated subset,
+    currently `FEATURE_COLUMNS` minus one experimental group), never
     to the raw, full `FEATURE_COLUMNS`. This default is deliberately the
     SAFE one: getting the full, unexcluded set requires an explicit,
     deliberate `feature_columns=FEATURE_COLUMNS` (or another explicit
-    tuple) — the inversion that makes a silent repeat of Decision 036
-    structurally impossible for any caller that doesn't ask for the raw
-    set by name.
+    tuple) — an inversion that makes a silent, automated repeat of a past
+    training regression structurally impossible for any caller that
+    doesn't ask for the raw set by name.
     """
     if name not in MODEL_ZOO:
         raise KeyError(

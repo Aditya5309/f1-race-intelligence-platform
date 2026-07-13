@@ -1,8 +1,7 @@
 """
 app/dashboard.py
 
-Streamlit dashboard entry point (Decision 016; UI/UX redesign, Decision
-023/024; Phase 2 new pages). Eight pages (st.navigation), user-facing first:
+Streamlit dashboard entry point. Eight pages (st.navigation), user-facing first:
 
     streamlit run app/dashboard.py
 

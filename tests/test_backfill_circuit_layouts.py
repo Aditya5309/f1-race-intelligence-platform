@@ -1,7 +1,7 @@
 """
 Tests for scripts/backfill_circuit_layouts.py's pure graph/geometry logic —
 no network calls (the live Overpass query path is exercised manually, not
-in CI; see the Phase 4 Tranche A verification notes).
+in CI).
 """
 
 import sys

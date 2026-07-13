@@ -6,8 +6,7 @@ Overpass — enrichment data for the Circuit Explorer dashboard page, in the
 same category as artifacts/display/ (committed, not a runtime dependency).
 
 Why OpenStreetMap and not FastF1: licensing consistency with the rest of
-this project (Ergast/ODbL-compatible sourcing), per the Phase 4 Tranche A
-investigation.
+this project (Ergast/ODbL-compatible sourcing).
 
 Why GeoJSON and not SVG: Overpass returns raw lat/lon node coordinates.
 GeoJSON stores that losslessly as source data — defensible ODbL provenance
@@ -122,8 +121,7 @@ def modeling_window_circuits(
     """The circuits raced in MODELING_WINDOW, with circuitId/name/lat/lng.
 
     No existing repo constant enumerates these — derived fresh each run from
-    races.csv joined to circuits.csv, same as the Phase 4 Tranche A
-    investigation did.
+    races.csv joined to circuits.csv.
     """
     races = pd.read_csv(races_csv, na_values=["\\N"])
     circuits = pd.read_csv(circuits_csv, na_values=["\\N"])

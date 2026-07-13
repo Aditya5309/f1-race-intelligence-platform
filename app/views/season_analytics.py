@@ -3,7 +3,7 @@
 "What's happening this season" and "who's trending" — model views built from
 client-side aggregation over GET /races + GET /predictions/{race_id} (the
 same season_predictions() helper Driver Explorer uses); championship
-standings come from display metadata (app/views/metadata.py, Decision 024)
+standings come from display metadata (app/views/metadata.py)
 and degrade gracefully when data/ is absent. No new endpoints, no
 ML-pipeline changes.
 """
