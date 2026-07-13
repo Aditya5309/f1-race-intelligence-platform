@@ -34,7 +34,7 @@ dependencies = [
     "pydantic-settings~=2.14.2",
     "matplotlib~=3.10.9",
     "pyarrow~=23.0.1",
-    "plotly~=6.7.0",
+    "plotly>=6.7,<6.10",
 ]
 
 [project.optional-dependencies]
