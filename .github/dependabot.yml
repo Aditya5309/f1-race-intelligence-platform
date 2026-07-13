@@ -1,0 +1,45 @@
+# Dependency update automation.
+#
+# Opens PRs, never merges anything automatically — same human-review
+# convention this project already applies to every other automated PR
+# (.github/workflows/retrain.yml). ci.yml runs unmodified
+# against every Dependabot PR exactly like any other PR (same `on: pull_
+# request` trigger), so a bump that breaks lint/tests/coverage/smoke is
+# caught before merge, not after.
+#
+# Three ecosystems, matching this repo's actual dependency surfaces:
+#   - pip: pyproject.toml (the single source of truth for pins)
+#   - github-actions: the actions ci.yml/retrain.yml/seed-data-cache.yml
+#     pin by tag (actions/checkout, actions/setup-python, gitleaks-action,
+#     peter-evans/create-pull-request, ...)
+#   - docker: docker/Dockerfile.{api,dashboard}'s python:3.11-slim base
+#     image
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "docker"

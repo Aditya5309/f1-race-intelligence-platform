@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1
+#
+# FastAPI serving image.
+#
+# Base image choice: python:3.11-slim (Debian "bookworm-slim", glibc).
+#   - 3.11 matches this project's actual floor (`requires-python = ">=3.11"`,
+#     pyproject.toml) and the exact interpreter CI already runs against
+#     (`.github/workflows/ci.yml`, ubuntu-latest + Python 3.11) — no new
+#     version to validate.
+#   - "slim" over the full `python:3.11` image: strips build toolchains and
+#     docs this image never needs at runtime, while staying Debian/glibc
+#     (not Alpine). scikit-learn/scipy/pandas/numpy/pyarrow all publish
+#     manylinux (glibc) wheels for cp311 on both x86_64 and aarch64; Alpine's
+#     musl libc has no matching wheels for several of these, which would
+#     force slow, fragile from-source builds (and pyarrow in particular has
+#     no practical musl build path). slim gets prebuilt-wheel installs with
+#     a much smaller footprint than the full image.
+#   - Multi-stage build: a throwaway `builder` stage may need a C toolchain
+#     if a platform is ever missing a prebuilt wheel; the final `runtime`
+#     stage never ships one.
+#
+# Local package installation: deliberately NOT `pip install`-ed (editable or
+# otherwise). app/config.py resolves `_ARTIFACTS_ROOT` from its own
+# `__file__`'s parent — a non-editable install would copy app/config.py into
+# site-packages and silently break that resolution against the real
+# artifacts/ directory. Instead PYTHONPATH=/app makes `src`/`app` importable
+# exactly as plain packages on disk, mirroring how `uvicorn app.api:app` run
+# locally from the project root already works (uvicorn's CLI adds the cwd to
+# sys.path itself — see pyproject.toml's [tool.setuptools] comment). The only
+# cost is a cosmetic one: `importlib.metadata.version(...)` in app/api.py
+# can't find a distribution record, so `/health`'s `api_version` reports
+# "0.0.0+uninstalled" — a fallback app/api.py already handles by design.
+
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Discarded after this stage — the runtime image never sees a compiler.
+# Defensive only: cp311 manylinux/musllinux wheels normally cover this
+# dependency set, but a missing wheel on an uncommon platform would
+# otherwise fail the build instead of falling back to a source build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY docker/requirements-api.txt /tmp/requirements-api.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-api.txt
+
+# --- runtime -----------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH"
+
+RUN useradd --create-home --uid 1000 appuser
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Only what the serving path actually reads:
+# src/ + app/ (source, no install needed — see header comment) and the
+# committed artifacts/ tree (frozen model bundle, features snapshot,
+# display-metadata CSVs). No data/, mlruns/, mlflow.db, reports/, notebooks/,
+# or tests/ — none of it is on the serving path, and .dockerignore excludes
+# them from the build context regardless.
+COPY src/ ./src/
+COPY app/ ./app/
+COPY artifacts/ ./artifacts/
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# GET /health always returns HTTP 200, even when the model failed to load
+# (design intent: report degradation via the body, not a 5xx — see
+# app/api.py's module docstring). A plain connectivity check would
+# therefore never catch a degraded model, so this checks the JSON body's
+# own `status` field instead. No curl in the image; stdlib urllib avoids
+# adding one just for this.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "\
+import json, urllib.request, sys; \
+body = json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)); \
+sys.exit(0 if body.get('status') == 'ok' else 1)" || exit 1
+
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]

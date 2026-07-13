@@ -1,0 +1,31 @@
+# Runtime dependencies for the FastAPI serving image (Dockerfile.api).
+#
+# Deliberately NOT the full pyproject.toml `dependencies` list. The serving
+# path is already decoupled from training/tracking:
+# app/api.py -> src/models/predict.py -> src/models/serving_bundle.py loads
+# a frozen model via plain stdlib pickle, never MLflow, and the currently
+# served model is a scikit-learn Pipeline (no xgboost/lightgbm needed to
+# unpickle it). Confirmed by reading the actual import graph reached from
+# app/api.py (registry.py's xgboost/lightgbm imports are lazy, inside the
+# candidate-building functions only). xgboost, lightgbm,
+# shap, mlflow, streamlit, and plotly are TRAINING/DASHBOARD-only and are
+# intentionally absent here.
+#
+# Pins are copied by hand from pyproject.toml's `dependencies` array
+# (the single source of truth) — keep these two in sync whenever
+# pyproject.toml's pins change. This file does not replace pyproject.toml;
+# `pip install -e .[dev]` (full stack, training included) is unaffected.
+#
+# IMPORTANT: if a future promoted model requires xgboost/lightgbm to
+# unpickle (scripts/promote_model.py's --allowed-model-modules gate is the
+# mechanism that would need to allow it), add the matching pin here too —
+# this file and that gate describe the same "what can this deployment
+# target actually load" contract from two different angles.
+pandas~=2.3.3
+numpy~=2.4.6
+scikit-learn~=1.8.0
+scipy~=1.17.1
+pyarrow~=23.0.1
+fastapi~=0.136.3
+uvicorn~=0.48.0
+pydantic-settings~=2.14.2

@@ -1,0 +1,47 @@
+# Production-shape default. Baked images only —
+# no source bind-mounts, no --reload. `docker compose up` also picks up
+# docker-compose.override.yml automatically (Compose's own convention) and
+# gets the dev ergonomics on top of this; run
+# `docker compose -f docker-compose.yml up` alone to get exactly this file,
+# unmodified, the way a real deployment target would.
+#
+# Persistent volumes: intentionally none. The served model, features
+# snapshot, and display CSVs are the committed artifacts/ tree, baked into
+# each image at build time — there is no
+# database or other mutable serving-side state to persist. artifacts/ only
+# becomes a *bind mount* in docker-compose.override.yml, and only for local
+# dev convenience (see that file for why).
+#
+# F1_API_URL is deliberately hardcoded to the Compose service DNS name
+# (http://api:8000), not an env var — it must always point at the sibling
+# `api` service on this network, never an operator-supplied value.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    image: f1-race-winner-api:${TAG:-latest}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      F1_LOG_LEVEL: ${F1_LOG_LEVEL:-INFO}
+      F1_SERVE_MAX_YEAR: ${F1_SERVE_MAX_YEAR:-2024}
+      F1_DEBUG_ENDPOINTS: ${F1_DEBUG_ENDPOINTS:-false}
+      F1_PREDICTION_CACHE_SIZE: ${F1_PREDICTION_CACHE_SIZE:-512}
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    image: f1-race-winner-dashboard:${TAG:-latest}
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    environment:
+      F1_API_URL: http://api:8000
+      F1_LOG_LEVEL: ${F1_LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

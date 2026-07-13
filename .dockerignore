@@ -1,0 +1,67 @@
+# Build context for both docker/Dockerfile.api and docker/Dockerfile.dashboard
+# is the repository root (docker-compose.yml sets `context: .`) — one shared
+# .dockerignore covers both; there is nothing image-specific to say here
+# (each Dockerfile's own COPY lines already pick only what that image needs
+# from whatever reaches the daemon).
+#
+# None of this is a training-vs-serving distinction (that's what the two
+# COPY lists in the Dockerfiles do) — this file exists purely to keep the
+# build context small and the images free of local/secret/dev-only state
+# that should never end up in an image layer.
+
+# --- Training-side data and model artifacts (gitignored; never needed to
+# serve). NEVER add /artifacts/ here — that's the
+# committed runtime tree both Dockerfiles explicitly COPY in.
+/data/
+/models/
+mlruns/
+mlflow.db
+/ingest_report/
+/reports/
+
+# --- VCS / editor / OS
+.git/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Environment / secrets — never bake a real .env into an image
+.env
+.env.*
+!.env.example
+
+# --- Python build & cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+
+# --- Local dev-launcher logs (scripts/dev.py)
+/logs/
+
+# --- Jupyter
+.ipynb_checkpoints/
+notebooks/
+
+# --- Internal engineering notes (machine-local)
+.ai/
+.claude/
+.agents/
+/context/
+
+# --- Not needed inside either image (neither Dockerfile COPYs these —
+# excluded here only to keep the context sent to the daemon small)
+tests/
+docs/
+.github/
+*.md

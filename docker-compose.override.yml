@@ -1,0 +1,42 @@
+# Local development overrides. Compose merges this
+# automatically on top of docker-compose.yml whenever it's present in the
+# same directory — `docker compose up` gets BOTH files by default, no flag
+# needed. This is the "development image" half of the dev/prod split: same
+# built image as production, but run with source bind-mounted read-only and
+# auto-reload enabled, so local edits show up without a rebuild.
+#
+# To run the production shape instead (what docker-compose.yml alone
+# describes): `docker compose -f docker-compose.yml up` (explicitly naming
+# only that file skips this override).
+
+services:
+  api:
+    volumes:
+      # Read-only: the container never needs to write into these.
+      - ./src:/app/src:ro
+      - ./app:/app/app:ro
+      - ./artifacts:/app/artifacts:ro
+    environment:
+      F1_LOG_LEVEL: DEBUG
+      F1_DEBUG_ENDPOINTS: "true"
+    command:
+      - uvicorn
+      - app.api:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --reload
+      - --reload-dir=/app/src
+      - --reload-dir=/app/app
+
+  dashboard:
+    volumes:
+      - ./app:/app/app:ro
+      - ./artifacts/display:/app/artifacts/display:ro
+      # Optional, gitignored, non-reproducible — the Model
+      # Insights page already degrades gracefully when this is absent or
+      # empty (app/views/insights.py). Mounted here only so a contributor
+      # who has generated reports/ locally (see docs/user_guide.md) can see
+      # them rendered inside the container too.
+      - ./reports:/app/reports:ro
+    environment:
+      F1_LOG_LEVEL: DEBUG

@@ -1,0 +1,76 @@
+# syntax=docker/dockerfile:1
+#
+# Streamlit dashboard image.
+#
+# Same base-image rationale as Dockerfile.api: python:3.11-slim (glibc,
+# matches the project's Python floor and CI's interpreter; avoids Alpine's
+# musl wheel gaps for pandas/pyarrow-adjacent packages). See
+# docker/Dockerfile.api's header comment for the full justification —
+# not repeated here to avoid the two files drifting out of sync in prose
+# while their actual settings differ.
+#
+# Local package installation: also deliberately NOT pip-installed. Unlike
+# Streamlit Community Cloud (a real constraint there — its launcher
+# only ever adds app/dashboard.py's own directory to sys.path, never the
+# project root, which is why app/ became an installed package there),
+# this container is fully self-controlled: PYTHONPATH=/app is set directly
+# in the image, which Python honors before Streamlit's own bootstrap ever
+# runs — no dependency on Streamlit's launcher behavior either way. This
+# also sidesteps the same site-packages path-resolution trap Dockerfile.api
+# documents for app/config.py's `_ARTIFACTS_ROOT`.
+
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY docker/requirements-dashboard.txt /tmp/requirements-dashboard.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-dashboard.txt
+
+# --- runtime -----------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH" \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+RUN useradd --create-home --uid 1000 appuser
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+# app/ only — the dashboard never imports src/ (a strict architectural
+# guardrail, confirmed against every app/views/*.py import). artifacts/display/ is the
+# read-only display-metadata CSV subset app/views/metadata.py reads
+# directly; the model bundle/features snapshot under
+# artifacts/serving/ and artifacts/features.parquet are API-only and
+# skipped here to keep this image lean. reports/ (Model Insights'
+# analysis figures) is gitignored/non-reproducible from a clean checkout
+# and is NOT baked in — mount it as an optional read-only
+# volume for local dev (see docker-compose.override.yml); the page already
+# degrades gracefully without it, by design.
+COPY app/ ./app/
+COPY artifacts/display/ ./artifacts/display/
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8501
+
+# Streamlit's own liveness endpoint (confirmed present at this exact path
+# in the pinned 1.57.0 install: web/server/starlette/starlette_routes.py).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "\
+import urllib.request, sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).status == 200 else 1)" || exit 1
+
+CMD ["streamlit", "run", "app/dashboard.py", \
+     "--server.address=0.0.0.0", "--server.port=8501"]
