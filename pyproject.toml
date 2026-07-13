@@ -1,5 +1,5 @@
 # Packaging (PEP 621) — single source of truth for version, Python floor,
-# and dependencies (Decision 020). requirements.txt is a thin installer shim.
+# and dependencies. requirements.txt is a thin installer shim.
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -17,8 +17,7 @@ authors = [{ name = "Aditya Joshi", email = "adityajoshi334@gmail.com" }]
 requires-python = ">=3.11"
 
 # Runtime: data pipeline, training/analysis, serving, dashboard.
-# Compatible-release pins (~=) hold minor versions, allow patches
-# (Decision 012 point 5 pinning policy carried over from requirements.txt).
+# Compatible-release pins (~=) hold minor versions, allow patches.
 dependencies = [
     "pandas~=2.3.3",
     "numpy~=2.4.6",
@@ -44,6 +43,7 @@ dev = [
     "pytest-cov~=7.0",
     "ruff~=0.14",
     "notebook~=7.5.6",
+    "pip-audit~=2.10",
 ]
 
 [project.urls]
@@ -63,7 +63,7 @@ Repository = "https://github.com/Aditya5309/f1-race-intelligence-platform"
 # Streamlit Community Cloud does not invoke `python -m streamlit`; it drives
 # Streamlit's server directly, so that `-m` side effect never happens there,
 # and `from app.views import ...` fails with ModuleNotFoundError. Installing
-# app/ as a real package (Decision 030) removes the dependency on any
+# app/ as a real package removes the dependency on any
 # launcher's incidental sys.path behavior, on any platform.
 packages = { find = { include = ["src", "src.*", "app", "app.*"] } }
 
@@ -71,7 +71,7 @@ packages = { find = { include = ["src", "src.*", "app", "app.*"] } }
 testpaths = ["tests"]
 
 # ---------------------------------------------------------------------------
-# Ruff — lint only (Phase B quality tooling). The ruff FORMATTER is
+# Ruff — lint only. The ruff FORMATTER is
 # deliberately not adopted: it would churn a reviewed, working codebase.
 # Whitespace/alignment (E1/E2) and line length (E5) are likewise off —
 # the code uses intentional column alignment and long documented lines.
@@ -90,7 +90,7 @@ ignore = [
     # mismatch), strict=False is pure churn. Every zip in this codebase pairs
     # equal-length-by-construction sequences.
     "B905",
-    # EvaluationObjective(str, Enum) is deliberate (Decision 019): the str
+    # EvaluationObjective(str, Enum) is deliberate: the str
     # mixin keeps MLflow-logged values as plain strings; converting to
     # StrEnum would change str(member) semantics.
     "UP042",

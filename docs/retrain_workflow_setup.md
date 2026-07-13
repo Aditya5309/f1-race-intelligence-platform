@@ -1,12 +1,12 @@
 # Scheduled Retrain Workflow — Manual Setup & First-Run Runbook
 
-_Operational runbook for `.github/workflows/retrain.yml` (Phase 4 Tranche D,
-Part 3). Covers the one-time manual steps that workflow cannot do for
-itself, and what to watch for on its first real run._
+_Operational runbook for `.github/workflows/retrain.yml`. Covers the
+one-time manual steps that workflow cannot do for itself, and what to watch
+for on its first real run._
 
 ## Why manual steps are needed at all
 
-`data/` is entirely gitignored (Decision 002) — a fresh GitHub Actions
+`data/` is entirely gitignored — a fresh GitHub Actions
 checkout has none of it. `scripts/ingest_jolpica.py` only **backfills races
 missing from an existing `data/` tree**; it is not a full-history bootstrap
 (jolpica-f1's unauthenticated rate limit is 200 requests/hour, and a full
@@ -67,7 +67,7 @@ First time:
 gh release create data-seed data-seed.tar.gz \
   --repo Aditya5309/f1-race-intelligence-platform \
   --title "Training data snapshot (CI cache seed — not a real release)" \
-  --notes "Seed snapshot for .github/workflows/seed-data-cache.yml. data/ is deliberately gitignored (Decision 002) and never committed to any branch — this release asset is the only place a full data/ snapshot lives outside your local machine."
+  --notes "Seed snapshot for .github/workflows/seed-data-cache.yml. data/ is deliberately gitignored and never committed to any branch — this release asset is the only place a full data/ snapshot lives outside your local machine."
 ```
 
 Re-seeding later (cache evicted, or you want to refresh from a bigger local

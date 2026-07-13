@@ -1,4 +1,4 @@
-# Dependency pins live in pyproject.toml (single source of truth, Decision 020).
+# Dependency pins live in pyproject.toml (single source of truth).
 # This file is kept so the documented one-command setup keeps working:
 #
 #     pip install -r requirements.txt      # editable install + dev tools

@@ -3,30 +3,30 @@
 **A production-style Machine Learning, MLOps, and Data Engineering platform that predicts Formula 1 race winners from pre-race information.**
 
 [![CI](https://github.com/Aditya5309/f1-race-intelligence-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Aditya5309/f1-race-intelligence-platform/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.3.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-398%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-540%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/src%20coverage-95%25-brightgreen)
 
 **Contents:**
 [Project Overview](#1-project-overview) ·
 [Key Features](#2-key-features) ·
-[Dashboard Overview](#3-dashboard-overview) ·
+[Dashboard](#3-dashboard) ·
 [Architecture](#4-architecture) ·
 [Technology Stack](#5-technology-stack) ·
 [Repository Structure](#6-repository-structure) ·
 [Data & ML Pipeline](#7-data--ml-pipeline) ·
 [Installation & Quick Start](#8-installation--quick-start) ·
-[API Usage](#9-api-usage) ·
-[Model Performance](#10-model-performance) ·
-[Testing & Code Quality](#11-testing--code-quality) ·
-[Continuous Integration](#12-continuous-integration) ·
-[Screenshots](#13-screenshots) ·
-[Documentation](#14-documentation) ·
-[Roadmap](#15-roadmap) ·
-[Future Work](#16-future-work) ·
-[Repository Highlights](#17-repository-highlights) ·
+[Docker](#9-docker) ·
+[API Usage](#10-api-usage) ·
+[Model Performance](#11-model-performance) ·
+[Testing & Code Quality](#12-testing--code-quality) ·
+[Continuous Integration](#13-continuous-integration) ·
+[Screenshots](#14-screenshots) ·
+[Documentation](#15-documentation) ·
+[Project Status & Roadmap](#16-project-status--roadmap) ·
+[Contributing & Security](#17-contributing--security) ·
 [License](#18-license) ·
 [Acknowledgements](#19-acknowledgements)
 
@@ -36,17 +36,17 @@
 
 **What it is.** An end-to-end ML system that scores every driver entered in a Formula 1 Grand Prix using only information available *before* lights out (grid position, qualifying results, rolling form, lagged championship standings) and ranks them by win probability. One binary classification row per `(race, driver)`; the highest-probability driver is the predicted winner.
 
-**Why it exists.** The goal is not just a model — it is a portfolio-quality demonstration of how a real ML product is engineered: layered data pipelines with validation and repair, leakage-audited temporal feature engineering, disciplined model selection with a guarded hold-out, probability calibration, experiment tracking and a model registry, a typed inference API, and a dashboard that consumes it like a real client.
+**Why it exists.** The goal is not just a model — it is a demonstration of how a real ML product is engineered end to end: layered data pipelines with validation and repair, leakage-audited temporal feature engineering, disciplined model selection with a guarded hold-out, probability calibration, experiment tracking and a model registry, a versioned inference API, a dashboard client, containerized deployment, and a hardened CI pipeline.
 
-**Current capabilities (implemented and tested):**
+**Current capabilities:**
 
-- Reproducible batch pipeline from raw Ergast-format CSVs to a 27,279-row feature store (31 leakage-controlled features).
-- Five-candidate model zoo compared under season-grouped temporal cross-validation; final model calibrated and registered in MLflow.
-- Historical race predictions (through 2024) served via FastAPI and a five-page Streamlit dashboard.
-- 398 automated tests (95% measured `src/` coverage), including one explicit leakage test per identified risk.
-- GitHub Actions CI running the full quality gate on every push and pull request.
+- Reproducible batch pipeline from raw Ergast-format CSVs to a leakage-controlled feature store covering every season back to 1950.
+- A five-candidate model zoo compared under season-grouped temporal cross-validation; the final model is calibrated and registered through MLflow.
+- Historical race predictions (through 2024) served via a versioned FastAPI service and an eight-page Streamlit dashboard, including an interactive grid-position simulator and a model-vs-baseline comparison view.
+- 540 automated tests (95% measured `src/` coverage, enforced in CI), including one explicit leakage test per identified risk.
+- Docker images for both services, weekly automated data ingestion and retraining with a promotion gate, and a hardened GitHub Actions pipeline (linting, secret scanning, dependency vulnerability scanning, test coverage enforcement).
 
-> This is currently **local, trusted-use software**: no authentication, containers, automated ingestion, or monitoring yet — those are roadmap items (see [Roadmap](#15-roadmap)).
+> **Trust posture:** this is a public, read-only demonstration deployment. There is no authentication and no user-write path by design — every route is `GET` except a single reserved, always-`501` `POST /predict` stub. See [API Usage](#10-api-usage) for the reasoning.
 
 ---
 
@@ -54,33 +54,38 @@
 
 | Area | What is implemented |
 |---|---|
-| **End-to-end ML pipeline** | Raw CSV → cleaning/repair/validation → master dataset → temporal features → training/calibration → registry → API → dashboard, each as an independently tested layer |
-| **Data engineering** | Central `\N`-null handling, dtype enforcement, deterministic repair of real data defects (duplicate entries, null positions), custom validators with `ValidationResult` reporting, idempotent interim parquet builds |
-| **Feature engineering** | 31 pre-race features across 5 modular groups (qualifying, driver form, constructor form, circuit history, lagged standings); import-time assertion that no post-race column can ever become a feature |
-| **Model training & evaluation** | Pole-sitter baseline + LogReg + Random Forest + XGBoost + LightGBM; season-grouped expanding-window CV; per-race top-1 / top-3 / MRR metrics; one-time guarded final test; SHAP + permutation-importance analysis |
+| **End-to-end ML pipeline** | Raw CSV → cleaning/repair/validation → master dataset → temporal features → training/calibration → registry → API → dashboard, each an independently tested layer |
+| **Data engineering** | Central `\N`-null handling, dtype enforcement, deterministic repair of real data defects (duplicate entries, null positions), custom validators with structured reporting, idempotent interim parquet builds |
+| **Feature engineering** | Pre-race features across five modular groups (qualifying, driver form, constructor form, circuit history, lagged standings, teammate deltas), plus experimental weather features; an import-time assertion guarantees no post-race column can ever become a feature |
+| **Model training & evaluation** | Pole-sitter baseline + logistic regression + random forest + XGBoost + LightGBM; season-grouped expanding-window cross-validation; per-race top-1 / top-3 / MRR / Spearman-correlation metrics; a one-time guarded final test; SHAP and permutation-importance analysis |
 | **Probability calibration** | Out-of-fold isotonic calibration fit strictly on training-fold predictions (validation ECE 0.153 → 0.012) |
-| **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; artifacts store the trained schema (`ColumnGuard`) and re-validate it at inference |
-| **Frozen runtime artifacts** | Registration exports a plain local model bundle (`artifacts/serving/<alias>/`) plus a features snapshot (`artifacts/features.parquet`) that FastAPI loads directly — no live MLflow tracking server, SQLite registry, `mlruns/`, or gitignored `data/` needed at request time; `artifacts/` is committed to git (Decision 026/027/029) |
-| **FastAPI inference API** | `GET /health`, `/model`, `/races`, `/predictions/{race_id}`; degraded-mode startup; FIFO prediction cache keyed by `(model_version, race_id)`; forward-holdout guard (409 for years > 2024) |
-| **Streamlit dashboard** | Five fan-first pages (see [Dashboard Overview](#3-dashboard-overview)); predictions consumed from the API over HTTP only — zero imports from model code |
-| **Continuous integration** | GitHub Actions: Ruff lint + 398-test suite + coverage report + synthetic end-to-end smoke on every push and pull request — currently green (see [Continuous Integration](#12-continuous-integration)) |
-| **Automated testing** | 398 tests across 17 modules covering loading, cleaning, interim repairs, integration, features (leakage suite), splits, training, calibration, prediction, serving-bundle export/load, analysis, CLI entry points, and the API — 95% measured `src/` coverage |
+| **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; each artifact stores its trained schema and re-validates it at inference |
+| **Frozen runtime artifacts** | Registration exports a self-contained model bundle plus a features snapshot that the API loads directly — no live MLflow tracking server or database needed at request time; the runtime artifact tree is committed to git so a fresh clone can serve real predictions immediately |
+| **Versioned inference API** | FastAPI, every route under `/api/v1`, with automatic backward compatibility for the pre-versioning paths; degraded-mode startup instead of crash-looping; a FIFO prediction cache; a forward-holdout guard rejecting seasons the model has never been evaluated against |
+| **Interactive "what-if" views** | A grid-position/pit-lane prediction simulator and a model-vs-pole-baseline comparison, both reusing the same scoring contract as historical predictions — no separate model needed |
+| **Streamlit dashboard** | Eight pages (see [Dashboard](#3-dashboard)); predictions consumed from the API over HTTP only — the dashboard never imports the model code directly |
+| **Automated data operations** | Weekly ingestion from a maintained upstream source, an atomic rebuild-and-freeze pipeline, and a promotion gate that blocks any retrained candidate whose accuracy regresses versus what is currently served |
+| **Containerized deployment** | Separate, minimal Docker images for the API and the dashboard, each carrying only the dependencies it actually needs at runtime; Docker Compose for local orchestration |
+| **Hardened CI/CD** | GitHub Actions: secret scanning, linting, dependency vulnerability scanning, the full test suite with an enforced coverage floor, and an end-to-end smoke test on every push and pull request; automated weekly dependency-update pull requests |
 
 ---
 
-## 3. Dashboard Overview
+## 3. Dashboard
 
-The dashboard is designed as a Formula 1 analytics product first: four user-facing pages answer *who wins, why, and what's trending*, while all ML internals are confined to one clearly-labeled advanced page.
+The dashboard is a Formula 1 analytics product first: fan-facing pages answer *who wins, why, and what's trending*, while ML internals are confined to one clearly labeled advanced page.
 
 | Page | What it shows |
 |---|---|
-| 🏠 **Dashboard** | System status cards (model stage, API health, latest version, supported seasons) and headline evaluation metrics |
-| 🏎 **Race Center** | Grand-Prix-name header, hero favorite card with confidence level, top-5 contender cards (grid/qualifying/trend), "why did the model choose this driver?" factor badges, race facts, constructor-colored full-field chart |
-| 👤 **Driver Explorer** | Driver profile with championship position; wins/podiums/poles/points/average-qualifying/average-finish tiles; qualifying, finishing, points, and win-share trend charts |
-| 📊 **Season Analytics** | Championship standings, most-predicted winners, most surprising races, win-share distribution, model accuracy round by round |
-| 🤖 **Model Insights** | *Advanced:* model card, validation results, model comparison, SHAP/importance/calibration artifacts, feature classification |
+| 🏠 **Dashboard** | System status (model stage, API health, supported seasons) and headline evaluation metrics |
+| 🏎 **Race Center** | Grand Prix header, favorite/contender cards, "why did the model choose this driver?" factor badges, a full-field chart, an interactive grid-position simulator, and a model-vs-pole-baseline comparison |
+| 👤 **Driver Explorer** | Driver profile, career/season tiles (wins, podiums, poles, points, average qualifying/finish), and a skill radar chart (qualifying pace, race pace, consistency) |
+| ⚖️ **Compare Drivers** | Side-by-side, season-scoped comparison of two drivers with overlaid radar charts |
+| 🏭 **Team** | Constructor-grain season and career view |
+| 🏟 **Circuit Explorer** | One circuit's all-time history, including a rendered track-layout map where available |
+| 📊 **Season Analytics** | Championship standings, most-predicted winners, most surprising races, and round-by-round model accuracy |
+| 🤖 **Model Insights** | *Advanced:* model card, validation results, model comparison, SHAP/importance/calibration artifacts, and feature classification |
 
-Predictions come exclusively from the FastAPI service over HTTP; display metadata (Grand Prix names, grids, standings) is read from local CSVs in read-only form and degrades gracefully when absent.
+Display metadata (Grand Prix names, grids, standings) is read from local, read-only CSVs and degrades gracefully when absent — every prediction still comes from the API.
 
 ---
 
@@ -88,28 +93,28 @@ Predictions come exclusively from the FastAPI service over HTTP; display metadat
 
 ```mermaid
 flowchart TB
-    subgraph DATA["Data Layer — src/data (gitignored data/)"]
+    subgraph DATA["Data Layer — src/data"]
         A[Ergast-format CSVs] --> B[Load · Clean · Repair · Validate]
-        B --> C[(data/interim/*.parquet)]
+        B --> C[(interim parquet, training-side)]
     end
     subgraph INT["Integration Layer — src/integration + src/pipelines"]
-        C --> D[Join-only master dataset<br/>27,279 rows × 43 cols]
+        C --> D[Join-only master dataset]
     end
     subgraph FEAT["Feature Layer — src/features"]
-        D --> E[Temporal transforms + leakage validation<br/>31 pre-race features]
-        E --> F[(data/processed/features.parquet<br/>training-side, gitignored)]
+        D --> E[Temporal transforms + leakage validation]
+        E --> F[(features.parquet, training-side)]
     end
     subgraph MODEL["Model Layer — src/models"]
         F --> G[Temporal CV · model zoo · tuning · analysis]
-        G --> H[(MLflow tracking + registry<br/>f1-winner v2 @ Staging)]
-        H --> H2["register_model() freezes BOTH:"]
-        H2 --> RB[(Serving bundle<br/>artifacts/serving/staging)]
-        H2 --> RF[(Features snapshot<br/>artifacts/features.parquet)]
+        G --> H[(MLflow tracking + registry)]
+        H --> H2["Registration freezes BOTH:"]
+        H2 --> RB[(Serving bundle)]
+        H2 --> RF[(Features snapshot)]
         RB --> I[predict.py — schema-validated scoring]
         RF --> I
     end
-    subgraph APP["Application Layer — app/ (reads ONLY artifacts/)"]
-        I --> J[FastAPI service]
+    subgraph APP["Application Layer — app/ (reads only the frozen artifacts)"]
+        I --> J[FastAPI service — /api/v1]
         J -->|HTTP/JSON| K[Streamlit dashboard]
     end
 ```
@@ -118,13 +123,21 @@ flowchart TB
 |---|---|
 | `src/data` | Load raw CSVs, enforce types, derive result status, repair known defects, validate, publish interim parquet |
 | `src/integration` + `src/pipelines` | Pure key-joins of cleaned sources into one `(raceId, driverId)`-grain master table — no feature logic |
-| `src/features` | All temporal feature construction: shift-before-roll windows, race-grain constructor aggregation (no teammate leakage), prior-visits-only circuit history, standings lagged to the previous round |
-| `src/models` | Temporal splits, model zoo, training/tuning, evaluation, SHAP analysis, OOF isotonic calibration, MLflow registration, and the single model-agnostic inference contract |
-| `app/` | Thin serving adapter: FastAPI translates HTTP into `predict.py` calls, which load a frozen serving bundle and features snapshot — no live MLflow tracking server/registry and no gitignored `data/` needed at request time (Decision 026/027/029); five Streamlit views plus shared `components`/`charts`/`metadata` modules consume the API over HTTP for all predictions |
+| `src/features` | All temporal feature construction: shift-before-roll windows, race-grain constructor aggregation, prior-visits-only circuit history, standings lagged to the previous round |
+| `src/models` | Temporal splits, model zoo, training/tuning, evaluation, SHAP analysis, out-of-fold isotonic calibration, MLflow registration, continuous accuracy monitoring for the live season, and a single model-agnostic inference contract |
+| `app/` | Thin serving adapter: FastAPI translates HTTP requests into inference calls against the frozen bundle; the Streamlit dashboard consumes the API over HTTP for every prediction |
 
-**Temporal discipline** is the platform's #1 correctness constraint: strictly year-based splits (train 2010–2021, validation 2022–2023, one-shot test 2024), 2025–2026 held out entirely, and every feature computable at the moment the starting grid is known.
+**Temporal discipline** — the platform's #1 *correctness* constraint:
 
-**Training vs. runtime artifacts** is the platform's #1 *deployment* correctness constraint (Decision 029): `data/`, `mlruns/`, `mlflow.db`, and `models/` hold every training-time artifact and stay fully gitignored; `artifacts/` holds only the two files the deployed API reads (`serving/<alias>/` and `features.parquet`) and is committed to git. Registration (`train.py --register`) is the one place that bridges the two, freezing a training-side snapshot into the committed runtime tree — the API and dashboard never read from `data/` for predictions.
+- Strictly year-based splits: train 2010–2021, validation 2022–2023, one-shot test 2024.
+- The 2025–2026 seasons are held out from training and tuning entirely.
+- Every feature must be computable the moment the starting grid is known.
+
+**Training vs. runtime artifacts** — the platform's #1 *deployment* constraint:
+
+- Raw data, the MLflow tracking store, and training-only intermediates all stay out of version control.
+- The deployed API and dashboard read *only* a small, committed `artifacts/` tree — the frozen model bundle plus a features snapshot.
+- Registration bridges the two, freezing a training-side snapshot into that committed tree; a separate, gated promotion step is the only thing that changes what's actually served.
 
 ---
 
@@ -134,158 +147,129 @@ flowchart TB
 |---|---|
 | Data processing | pandas, NumPy, PyArrow / Parquet |
 | Modeling | scikit-learn, XGBoost, LightGBM |
-| Experiment tracking / registry | MLflow (SQLite backend) |
+| Experiment tracking / registry | MLflow (SQLite backend, training-side only) |
 | Explainability | SHAP, per-race permutation importance |
 | API | FastAPI, Uvicorn, Pydantic |
 | Dashboard | Streamlit, Plotly, httpx |
-| Configuration | pydantic-settings (`F1_` env prefix) |
-| Testing | pytest + pytest-cov (398 tests, 95% `src/` coverage) |
-| Linting | Ruff (configured in `pyproject.toml`; lint-only, formatter not adopted) |
-| Continuous integration | GitHub Actions (Ubuntu, Python 3.11) |
+| Configuration | pydantic-settings (`F1_`-prefixed environment variables) |
+| Containers | Docker, Docker Compose |
+| Testing | pytest + pytest-cov (540 tests, 95% `src/` coverage) |
+| Linting | Ruff (lint-only; formatter not adopted) |
+| Security | gitleaks (secret scanning), pip-audit (dependency vulnerability scanning) |
+| CI/CD | GitHub Actions (Ubuntu, Python 3.11), Dependabot |
 
 ---
 
 ## 6. Repository Structure
 
 ```text
-.github/workflows/   ci.yml — GitHub Actions CI (lint, tests, coverage, smoke)
-app/                 FastAPI service, settings, five-page Streamlit dashboard
-                     (views + components/charts/metadata modules)
-artifacts/           COMMITTED runtime artifacts — features.parquet snapshot +
-                     serving/<alias>/ frozen model bundle (Decision 029); the
-                     deployed API needs only this + source, nothing from data/
-data/                Raw / interim / processed training datasets (gitignored)
-docs/                User guide, API reference, EDA images, CI screenshot
-notebooks/           Exploratory analysis only — no business logic
-reports/             Design docs, model-selection evidence, SHAP artifacts
-                     (gitignored — local only, not in a fresh clone)
-scripts/             dev.py — single-command local dev launcher (API + dashboard)
-                     smoke.py — end-to-end smoke test on a synthetic stack
-src/data/            Loading, cleaning, validation, interim parquet builders
-src/integration/     Join-only master dataset builder
-src/pipelines/       Dataset build orchestration
-src/features/        Modular feature groups + pipeline + feature metadata
-src/models/          Splits, eras, registry, training, evaluation, analysis,
-                     calibration, prediction, frozen runtime-artifact export/load
-tests/               398 pytest tests mirroring every implemented layer
-Makefile             make lint / test / coverage / quality / smoke / all
-pyproject.toml       PEP 621 packaging — version, dependencies, Ruff config
-requirements.txt     Installer shim (-e .[dev]); pins live in pyproject.toml
+src/            Data, integration, feature, and model layers (see Architecture above)
+app/            FastAPI service + Streamlit dashboard (dashboard never imports src/)
+tests/          540 pytest tests mirroring src/ and app/
+docs/           User guide, API reference, command reference, retraining runbook
+artifacts/      COMMITTED runtime tree — the only thing a deployed instance needs
+scripts/        Ingestion, promotion, artifact export, local dev launcher, smoke test
+docker/         Dockerfile.api, Dockerfile.dashboard
 ```
+
+Full annotated directory listing, including every config file and its purpose: [CONTRIBUTING.md](CONTRIBUTING.md#repository-structure).
 
 ---
 
 ## 7. Data & ML Pipeline
 
-| Stage | Module | Output artifact |
-|---|---|---|
-| Load · clean · repair · validate | `src/data` | `data/interim/*.parquet` (gitignored) |
-| Master join (integration only) | `src/integration` + `src/pipelines` | `master_dataset.parquet` (27,279 rows × 43 cols, gitignored) |
-| Temporal feature engineering | `src/features` | `data/processed/features.parquet` (31 pre-race features, gitignored) |
-| Train · tune · calibrate · register | `src/models/train.py` + `calibration.py` | MLflow registry — `f1-winner` v2 @ `Staging` |
-| Freeze runtime artifacts (Decision 026/027/029) | `src/models/serving_bundle.py` | `artifacts/serving/staging/` (model + manifest) and `artifacts/features.parquet` (snapshot) — both committed; no live MLflow or `data/` needed to serve |
-| Score | `src/models/predict.py` | Per-race normalized win probabilities |
+Raw CSVs flow through cleaning/validation, a join-only master dataset, temporal feature engineering, and model training/calibration/registration before being frozen into the runtime artifacts the API actually serves (see [Architecture](#4-architecture) for the layer breakdown and temporal-discipline guarantees).
 
-Every stage enforces temporal discipline: rolling windows shift before they roll, championship standings are lagged to the previous round, circuit history uses prior visits only, and fitted preprocessing state is learned from the training window alone. The 2024 test season was scored exactly once behind a guarded flag, and 2025–2026 data is excluded from every split and from serving by default.
+The served model was trained on 31 pre-race features — a curated subset of the 41-column feature pipeline, after an ablation study found one experimental group (wet-weather deltas) didn't generalize from the training window.
+
+Full stage-by-stage breakdown (module, output artifact, and what each stage guarantees) and the commands to rebuild each one: [docs/user_guide.md](docs/user_guide.md#data--ml-pipeline).
 
 ---
 
 ## 8. Installation & Quick Start
 
-**Prerequisites:** Python ≥ 3.11. That's it for *serving* — the committed
-`artifacts/` tree (Decision 029) ships a frozen model bundle and features
-snapshot, so a fresh clone can install and serve predictions immediately.
-The Ergast-format CSV files in `data/` (not committed to git) are only
-needed if you want to rebuild the datasets or retrain from scratch (steps
-3–5 below).
+**Prerequisites:** Python ≥ 3.11. That's it for *serving* — the committed `artifacts/` tree ships a frozen model bundle and features snapshot, so a fresh clone can install and serve predictions immediately. The Ergast-format CSV files in `data/` (not committed to git) are only needed to rebuild the datasets or retrain from scratch.
 
 ```bash
-# 1. Install
+# Install
 pip install -r requirements.txt
 pip install -e .
 
-# 2. Quality checks: tests + lint (both expected clean)
+# Verify: tests + lint + end-to-end smoke test (all pass with no data/ needed)
 pytest tests/
 python -m ruff check .
-
-# 2b. End-to-end smoke test — synthetic stack, works BEFORE data/ exists
 python scripts/smoke.py
-# (with make: `make quality` / `make smoke` / `make all`)
 
-# --- Everything below this line is OPTIONAL: only needed to rebuild data/
-# or retrain a model. Skip straight to step 6 to serve the committed
-# artifacts/ that ship with the repository. ---
-
-# 3. Build the datasets (idempotent; run in order)
-python -m src.data.build_interim --target all   # interim parquet
-python -m src.pipelines.build_dataset           # master dataset
-python -m src.features.pipeline                 # feature store
-
-# 4. Train and inspect models
-python -m src.models.train                      # stage 1: full model zoo
-python -m src.models.train --model logreg --tune  # stage 2: randomized search
-mlflow ui                                       # browse experiments
-
-# 4b. Register a candidate in MLflow (Decision 026/027/029) — this ALSO
-#     immediately overwrites artifacts/serving/staging/ + artifacts/features.parquet,
-#     unchecked. Fine for routine dev iteration; NOT the sanctioned path for
-#     a real promotion (see 4c and "Promotion & rollback" below).
-#     --params-file reads config/registered_model_params.json (Phase 4
-#     Tranche D's shared source of truth for the tuned config — also read
-#     by the scheduled retrain workflow, so both stay in sync).
-python -m src.models.train --model logreg --register Staging --calibrate \
-    --params-file config/registered_model_params.json
-
-# 4c. Promote a registered candidate to the live serving bundle, gated
-#     (Phase 4 Tranche C) — smoke-tests the candidate on real races and
-#     refuses if top1_accuracy/spearman_corr regressed vs. what's currently
-#     served; only touches artifacts/serving/ on success.
-python scripts/promote_model.py --alias Staging
-
-# 5. Score a race directly from the committed runtime artifacts
-python -m src.models.predict --race-id 1120
-
-# 6. Serve — one command, starts the API if needed and waits for it to be
-#    healthy before launching the dashboard (dev tooling only, Decision 025
-#    — production still runs the two services independently)
+# Serve — starts the API if needed, waits for it to be healthy, then runs
+# the dashboard (local development only)
 python scripts/dev.py                           # UI → http://localhost:8501
-# (with make: `make dev`)
 
-# ...or the two processes separately, as before:
-uvicorn app.api:app                             # API  → http://localhost:8000
-streamlit run app/dashboard.py                  # UI   → http://localhost:8501
-# If the console scripts aren't on your PATH, the module forms always work:
-#   python -m uvicorn app.api:app
-#   python -m streamlit run app/dashboard.py
+# ...or the two services separately:
+uvicorn app.api:app                             # API → http://localhost:8000
+streamlit run app/dashboard.py                  # UI  → http://localhost:8501
+
+# ...or in Docker instead of a local Python environment — see Docker below
+docker compose up --build
 ```
+
+Rebuilding the datasets, training/tuning a model, registering a candidate, and promoting it to the live serving bundle are all optional — only needed if you're changing the data pipeline or retraining. Every command for that, plus the full setup/testing/linting/release reference: [docs/commands.md](docs/commands.md).
 
 ---
 
-## 9. API Usage
+## 9. Docker
+
+Two images, `docker/Dockerfile.api` and `docker/Dockerfile.dashboard`, each a minimal `python:3.11-slim` multi-stage build carrying only the dependencies that image actually imports at runtime — the API image has no xgboost/lightgbm/shap/mlflow/streamlit; the dashboard image has no scikit-learn/scipy/mlflow. Both bake in the same committed `artifacts/` tree the non-Docker path already reads, so nothing extra needs configuring to get real predictions from the real served model.
+
+```bash
+# Build + run both services (development shape: source bind-mounted,
+# live-reload, docker-compose.override.yml auto-merged by `up`)
+docker compose up --build
+
+# Production shape only — no bind mounts, no reload — name the base file
+# explicitly to skip the development override
+docker compose -f docker-compose.yml up --build -d
+
+# Tear down
+docker compose down
+```
+
+- Every `F1_*` setting is overridable via a `.env` file at the project root (copy `.env.example`) — Compose picks it up automatically.
+- The dashboard's API URL always points at the sibling `api` Compose service by name, never an operator-supplied value; ports, log level, and cache size are all overridable.
+- No persistent volumes are needed for serving — there's no database, only the baked-in `artifacts/` tree. The development override mounts it (and the source tree) read-only, purely so local edits show up without a rebuild.
+
+---
+
+## 10. API Usage
+
+All routes are versioned under `/api/v1`:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Liveness plus serving-model identity (reports degraded mode instead of crashing) |
-| GET | `/model` | Full metadata of the registered serving model |
-| GET | `/races?year=` | Races available for scoring (seasons through 2024) |
-| GET | `/predictions/{race_id}` | Win probabilities for the full field of one historical race |
-| GET | `/debug/features/{race_id}` | Exact feature vectors fed to the model — disabled by default (`F1_DEBUG_ENDPOINTS=true`) |
-| POST | `/predict` | Reserved for upcoming-race scoring — intentional `501` until the pre-race feature pipeline exists |
+| GET | `/api/v1/health` | Liveness plus serving-model identity (reports degraded mode instead of crashing) |
+| GET | `/api/v1/model` | Full metadata of the registered serving model |
+| GET | `/api/v1/races?year=` | Races available for scoring (seasons through 2024) |
+| GET | `/api/v1/predictions/{race_id}` | Win probabilities for the full field of one historical race |
+| GET | `/api/v1/predictions/{race_id}/simulate/{driver_id}` | Prediction simulator — grid/qualifying-position "what if" |
+| GET | `/api/v1/predictions/{race_id}/vs-baseline` | The model's predictions next to the pole-only baseline |
+| GET | `/api/v1/debug/features/{race_id}` | Exact feature vectors fed to the model — disabled by default |
+| POST | `/api/v1/predict` | Reserved for upcoming-race scoring — intentional `501` until the pre-race feature pipeline exists |
 
-Requests for seasons after 2024 return `409` (forward-holdout guard). Prediction responses are cached FIFO, keyed by `(model_version, race_id)`.
+Every route above is also reachable at its equivalent pre-versioning path with no `/api/v1` prefix (for example, plain `/health`) — same handler, same response — kept for backward compatibility but not listed in the interactive API docs, which only ever show the versioned contract.
+
+Requests for seasons after 2024 return `409` (forward-holdout guard). Prediction responses are cached, keyed by `(model_version, race_id)`.
 
 ```bash
-curl http://localhost:8000/predictions/1120
+curl http://localhost:8000/api/v1/predictions/1120
 ```
 
-Abridged response (full contract in the API reference below):
+Abridged response (full contract in the API reference):
 
 ```json
 {
   "race_id": 1120,
   "year": 2023,
   "round": 22,
-  "model": { "name": "f1-winner", "version": "2", "alias": "Staging" },
+  "model": { "name": "f1-winner", "version": "4", "alias": "Staging" },
   "predictions": [
     {
       "driver_name": "Max Verstappen",
@@ -300,59 +284,80 @@ Abridged response (full contract in the API reference below):
 
 Full request/response contracts: [docs/api_reference.md](docs/api_reference.md).
 
+### Security & error handling
+
+- **CORS** is configurable via `F1_CORS_ALLOW_ORIGINS` (comma-separated origins, or `*`). The default is empty — no cross-origin browser access.
+- **Every error response is logged server-side.** Unexpected server errors return a generic `{"detail": "Internal server error."}` at `500` — nothing internal is ever exposed to the client.
+- **Authentication is intentionally not implemented.** This is a public, read-only demo API (every route is `GET` except the always-`501` `POST /predict`) — no accounts, no write path, nothing private to protect (F1 results are public record). Adding auth now would mean credential management with nothing real to guard; this would be revisited if `POST /predict` ever became a genuine write endpoint.
+
 ---
 
-## 10. Model Performance
+## 11. Model Performance
 
-The registered serving model is **`f1-winner` v2 @ `Staging`**: a tuned logistic regression (`C ≈ 0.0165`, class-weighted) wrapped in out-of-fold isotonic calibration. The `Production` alias is intentionally unset pending a deliberate promotion decision.
+The registered serving model is **`f1-winner` v4 @ `Staging`** — a tuned logistic regression (`C ≈ 0.0165`, class-weighted) wrapped in out-of-fold isotonic calibration.
+
+- The `Production` alias is intentionally left unset.
+- The deployed API serves a version-controlled bundle committed to the repository, not a live MLflow registry lookup.
+- Changing what's served always requires the gated promotion workflow below.
 
 | Metric | Validation (2022–2023, 44 races) | Final test (2024, 24 races) |
 |---|---|---|
 | Top-1 accuracy (winner picked) | **68.2%** (pole baseline: 54.5%) | 45.8% (equal to pole baseline) |
-| Top-3 winner recall | **88.6%** | 75.0% |
-| Winner MRR | — | 0.643 |
+| Top-3 winner recall | **86.4%** | 75.0% |
+| Winner MRR | 0.793 | 0.643 |
+| Spearman rank correlation | 0.597 | 0.749 |
 
-**Calibration impact** (validation): ECE 0.153 → **0.012**, log-loss 0.268 → **0.088**, Brier 0.088 → 0.026, with top-1 accuracy unchanged.
+**Notes:**
 
-**Honest limitation, stated by design:** the model's top-1 edge over the pole-sitter baseline is concentrated in dominance seasons (2023: 90.9% vs 63.6%). In competitive seasons it reaches pole-baseline parity on top-1 while still adding top-3 recall and far better probability quality. The 2024 test set was evaluated exactly once and is not reused for tuning.
+- 2024's lower top-1 accuracy reflects a substantially more competitive season than validation, not a regression — the model still beats the baseline on top-3 recall and probability quality.
+- **Calibration impact** (validation): ECE 0.153 → **0.012**, log-loss 0.268 → **0.088**, Brier score 0.088 → **0.026**, top-1 accuracy unchanged — probabilities are far more trustworthy for downstream decisions, without any change to ranking performance.
+- **Honest limitation, by design:** the model's top-1 edge over the pole-sitter baseline concentrates in dominance seasons (2023: 90.9% vs. 63.6%). In competitive seasons it's top-1 parity with pole, while still adding top-3 recall and materially better probability quality. The 2024 test set was scored exactly once and is never reused for tuning.
+- **Live-season monitoring:** the served model is continuously scored against every newly completed race in the current regulation era — an early, honest read on live performance, separate from the fixed 2022–2024 windows above.
 
 ### Promotion & rollback
 
-`python -m src.models.train --register` creates a real MLflow registry version and alias (Staging/Production), but it also **unconditionally overwrites** `artifacts/serving/<alias>/` the moment it runs — no validation in between. Since the deployed API only ever reads that frozen bundle (Decision 026/027; it never resolves a live registry alias), the registry's version history and what's actually served can silently diverge. `scripts/promote_model.py` (Phase 4 Tranche C) is the sanctioned gate for changing what's actually served: it loads an already-registered candidate, smoke-tests it against real races, and refuses to promote if `top1_accuracy`/`spearman_corr` regress vs. the currently-served bundle's own recorded metrics — see the script's docstring for the full check list and tolerance justification. Only on success does it touch `artifacts/serving/`.
+Registering a candidate in MLflow does **not**, by itself, change what is served. Only the gated promotion step (`scripts/promote_model.py`) can update the live serving bundle: it loads an already-registered candidate, validates it against held-out races, and refuses to promote if its metrics regress against the currently-served bundle's own recorded numbers.
 
-**Rollback = `git revert` the commit that last changed `artifacts/serving/staging/*`.** This works because `artifacts/` is committed to git (Decision 029) — unlike `data/`, `mlflow.db`, and `mlruns/`, which are gitignored — so the previous bundle's exact bytes are one revert away. There is deliberately **no MLflow-native rollback** (e.g. "point the alias back at version N-1 and have serving pick it up"): serving never consults the registry at request time, so moving an alias in MLflow wouldn't change anything being served. This is a consequence of Decision 026/027, not a gap to be filled later.
-
----
-
-## 11. Testing & Code Quality
-
-- **398 tests across 17 modules** — loading, cleaning, interim repairs, integration, features, splits, eras, training, calibration, prediction, serving-bundle export/load, analysis, CLI entry points, and the API — including **one explicit leakage test per identified risk**.
-- **Coverage:** 95% measured on `src/` (target ≥ 80%); `app/api.py` at 98%. Streamlit views are intentionally untested at unit level (presentation-only HTTP consumers).
-- **Linting:** Ruff, zero findings (`python -m ruff check .`); rule set and reason-commented exemptions live in `pyproject.toml`.
-- **Smoke test:** `python scripts/smoke.py` — a six-step synthetic end-to-end check (config → MLflow train/register + bundle export → frozen-bundle load → prediction contract → in-process FastAPI health + prediction → headless dashboard run via Streamlit's `AppTest`). Needs no `data/`, no ports, no services; ~20 seconds.
-- **Hermetic tests:** MLflow tracking artifacts and frozen serving bundles are both written into per-test temp directories (`tests/conftest.py`; explicit `bundle_root` in every `register_model()` call), so the full suite and smoke test write zero files into the checkout — verified by temporarily renaming the real MLflow store and local engineering-notes directories out of the way and re-running everything clean.
-- Shortcuts: `make quality` (lint + tests) and `make smoke`.
+**Rollback:** revert the commit that last changed the serving bundle — the runtime artifact tree is committed to git, so the previous bundle's exact bytes are one revert away. There is no registry-native rollback (moving an MLflow alias back to an older version): the deployed API never consults the registry at request time, so an alias change alone would not affect what's served.
 
 ---
 
-## 12. Continuous Integration
+## 12. Testing & Code Quality
 
-Every push and pull request runs the full quality gate on GitHub Actions (`.github/workflows/ci.yml`, Ubuntu, Python 3.11):
+- **540 tests** across the codebase — loading, cleaning, interim repairs, integration, features (including one explicit leakage test per identified risk), splits, regulation eras, training, calibration, prediction, serving-bundle export/load, analysis, ingestion, promotion, live-season monitoring, and the API.
+- **Coverage:** 95% measured on `src/` (target ≥ 80%, enforced in CI); `app/api.py` at 97%. Streamlit views are intentionally untested at the unit level — they're presentation-only HTTP consumers, exercised instead by the smoke test's headless dashboard run and by manual QA. The combined `src/`+`app/` figure is reported but not gated, since it dilutes as dashboard pages are added and would measure the wrong thing.
+- **Linting:** Ruff, zero findings; rule set and reason-commented exemptions live in `pyproject.toml`.
+- **Smoke test:** `python scripts/smoke.py` — a synthetic end-to-end check (config → MLflow train/register + bundle export → frozen-bundle load → prediction contract → in-process FastAPI health + prediction, both versioned and legacy paths → headless dashboard run). Needs no `data/`, no ports, no external services; well under a minute.
+- **Hermetic tests:** MLflow tracking artifacts and frozen serving bundles are written into per-test temporary directories, so the full suite and the smoke test write zero files into the checkout.
+- Shortcuts: `make quality` (lint + tests), `make coverage-gate`, `make smoke`.
 
-1. `pip install -e .[dev]`
-2. `python -m ruff check .`
-3. `pytest tests/` with coverage (`coverage.xml` uploaded as a build artifact)
-4. `python scripts/smoke.py`
+---
 
-On a clean runner the 4 tests that need the local `data/` files skip themselves — **394 passed / 4 skipped is the healthy CI baseline**. Coverage is reported, not yet gated.
+## 13. Continuous Integration
+
+Every push and pull request runs the full quality gate on GitHub Actions (Ubuntu, Python 3.11):
+
+1. **Secret scanning** (gitleaks) — blocking.
+2. Install dependencies.
+3. **Lint** (Ruff).
+4. **Dependency vulnerability scan** (pip-audit) — report-only for now; see [docs/commands.md](docs/commands.md) for the current known-vulnerability baseline and reasoning.
+5. **Test suite with coverage.**
+6. **Coverage threshold** — `src/` only, enforced at 80%, reusing the same coverage data with no second test run.
+7. **Smoke test.**
+
+A passing run with the four real-data-only tests skipped (they need the gitignored `data/` tree, which a clean CI runner never has) is the healthy baseline.
+
+**Dependency update automation:** a scheduled workflow opens weekly pull requests for Python, GitHub Actions, and Docker base-image updates — never auto-merged, reviewed like every other change.
+
+**Scheduled data operations:** a separate weekly workflow ingests newly completed race weekends from a maintained upstream source, rebuilds every downstream artifact, and attempts a retrain — opening a pull request only when the promotion gate passes, and always opening a second, independent pull request to refresh display data regardless of whether a new model was promoted.
 
 ![GitHub Actions — all checks green](docs/images/github-actions-success.png)
 
 ---
 
-## 13. Screenshots
+## 14. Screenshots
 
-**Dashboard — five pages:**
+The dashboard has grown to eight pages; five are illustrated below (Compare Drivers, Team, and Circuit Explorer are not yet screenshotted).
 
 | Page | Preview |
 |---|---|
@@ -362,76 +367,51 @@ On a clean runner the 4 tests that need the local `data/` files skip themselves 
 | 📊 Season Analytics | ![Season Analytics](docs/images/dashboard_season_analytics.png) |
 | 🤖 Model Insights | ![Model Insights](docs/images/dashboard_model_insights.png) |
 
-**Other artifacts:**
+**EDA:**
 
 | Artifact | Preview |
 |---|---|
-| Grid position vs win rate (EDA) | ![Grid vs win rate](docs/images/fig01_grid_vs_win_rate.png) |
-| CI pipeline green | See [Continuous Integration](#12-continuous-integration) |
+| Grid position vs. win rate | ![Grid vs win rate](docs/images/fig01_grid_vs_win_rate.png) |
+| Constructor dominance and championship concentration (HHI) | ![Constructor dominance](docs/images/fig02_constructor_dominance.png) |
+| Driver career win-rate distribution | ![Driver win rates](docs/images/fig03_driver_win_rates.png) |
+| Race finish/DNF status by season | ![Result status over time](docs/images/fig04_result_status_over_time.png) |
+| Structural changes: race calendar, field size, points system, pole conversion | ![Structural changes](docs/images/fig05_structural_changes.png) |
 
 ---
 
-## 14. Documentation
+## 15. Documentation
 
 | Document | Purpose |
 |---|---|
-| [docs/user_guide.md](docs/user_guide.md) | Running and using the platform, including the five-page dashboard |
-| [docs/api_reference.md](docs/api_reference.md) | Endpoint contracts and configuration |
-
-Detailed design documents, EDA findings, and model-selection evidence live in the local-only `reports/` directory (not distributed with the repository). The project also maintains an internal, append-only architectural decision log (29 entries) and an F1 domain-knowledge reference as local engineering notes — not part of this repository.
-
----
-
-## 15. Roadmap
-
-### Completed
-
-- [x] **Phase 0 — Setup:** production-oriented package layout and tooling
-- [x] **Phase 1 — Data:** loading, cleaning, repair, validation, interim outputs
-- [x] **Phase 2 — EDA:** structural analysis and temporal split strategy
-- [x] **Phase 3 — Features:** master dataset + 31-feature leakage-safe matrix
-- [x] **Phase 4 — Models:** zoo, temporal CV, tuning, calibration, MLflow registry, inference layer
-- [x] **Phase 5 — Application:** FastAPI, Streamlit dashboard, configuration, user docs
-- [x] **Quality baseline:** 95% measured `src/` coverage, Ruff clean, synthetic smoke test, Makefile
-- [x] **Continuous integration:** GitHub Actions running lint + tests + coverage + smoke — live and green
-- [x] **Dashboard redesign:** five-page fan-first analytics UI with an advanced Model Insights page
-- [x] **Training/serving decoupling (Decision 026/027):** the API loads a frozen serving bundle — no live MLflow tracking server, SQLite registry, or `mlruns/` directory required at request time; training/tracking/registration are unchanged
-- [x] **Repository self-containment (Decision 028):** no tracked file references this project's private local engineering-notes directories anymore — verified by temporarily removing them and re-running the full test/lint/smoke gate clean
-- [x] **Runtime/training artifact separation (Decision 029):** a new committed `artifacts/` tree (`serving/<alias>/` + `features.parquet`) is the *only* thing the deployed API reads — the gitignored `data/`, `mlruns/`, `mlflow.db`, and `models/` training-side trees are no longer a deployment dependency; `train.py --register` freezes both automatically. Verified by simulating a fresh clone (training trees temporarily hidden) and confirming the API, predictions, and dashboard are all unaffected
-
-### Current
-
-- [ ] **Deploy:** stand up the API on Render and the dashboard on Streamlit Community Cloud (artifact blocker resolved by Decision 029 — the repository is deployable without committing raw data)
-- [ ] **Docker:** containerized API and dashboard as separate services (artifact strategy resolved — bake the same `artifacts/` tree into the image)
-
-### Planned
-
-- [ ] **Deployment gate:** authentication, CORS/trusted-host, secrets handling, production ASGI topology
-- [ ] **ETL & incremental sync:** maintained upstream data source, idempotent ingestion, atomic dataset publication
-- [ ] **Upcoming-race prediction:** pre-race feature materialization and the reserved `POST /predict` endpoint (currently an intentional `501` stub)
-- [ ] **Monitoring:** data-quality, drift, latency, and model-performance tracking
-- [ ] **Automated retraining:** scheduled retraining with approval, promotion, and rollback controls
+| [docs/user_guide.md](docs/user_guide.md) | Running and using the platform, including the dashboard, Docker, and configuration |
+| [docs/api_reference.md](docs/api_reference.md) | Full endpoint request/response contracts |
+| [docs/commands.md](docs/commands.md) | The complete command reference — setup, testing, linting, security scanning, Docker, Git, and release workflows |
+| [docs/retrain_workflow_setup.md](docs/retrain_workflow_setup.md) | One-time setup and troubleshooting for the scheduled data-ingestion/retraining workflow |
 
 ---
 
-## 16. Future Work
+## 16. Project Status & Roadmap
 
-Beyond the roadmap milestones, measured candidates for the next model iteration include: teammate-delta features (the cleanest car-controlled driver-skill signal in this schema), a circuit pole-conversion-rate feature, grid-vs-qualifying penalty deltas, sprint-weekend features (format-aware), constructor lineage mapping across rebrands, era-aware training weights, weather-forecast integration via FastF1, and a learning-to-rank reformulation. Each requires a leakage review against the documented domain rules before implementation.
+**Implemented today:** the full pipeline described above — data engineering, feature engineering, model training and calibration, a versioned and hardened serving API, an eight-page dashboard, Docker images, automated weekly data ingestion with a gated retraining/promotion cycle, live-season accuracy monitoring, and a CI pipeline covering linting, secret scanning, dependency vulnerability scanning, and an enforced test-coverage floor.
+
+**Open work:**
+
+- Fixing the specific third-party dependencies the vulnerability scan currently flags on the actually-served path (Pillow, python-multipart, Starlette); the remaining flagged packages are development-only or training-only and lower priority.
+- Splitting the packaging manifest into serving/dashboard/training dependency groups, so each deployment target installs only what it needs without hand-maintained duplicate requirement files.
+- Extending CI with a container build-and-push job and choosing a hosting target for the Docker images.
+- A generic production authentication story, if a genuine write-capable endpoint is ever added.
+- Upcoming-race prediction: materializing pre-race features for a race that hasn't happened yet, and implementing the currently-reserved `POST /predict` contract against it.
+- Data-quality, drift, and latency monitoring beyond the accuracy tracking that already exists.
+- Revisiting the wet-weather feature group for training once more seasons of live data have accumulated.
+
+**Future model-quality candidates** (each would need its own leakage review before implementation): a circuit pole-conversion-rate feature, grid-vs-qualifying penalty deltas, sprint-weekend features, constructor-lineage mapping across rebrands, era-aware training weights, live weather-forecast integration, and a learning-to-rank reformulation of the problem.
 
 ---
 
-## 17. Repository Highlights
+## 17. Contributing & Security
 
-Pointers to the most interesting engineering, for reviewers:
-
-- **Leakage test suite** — `tests/test_features.py` maps one explicit test to every documented temporal-leakage risk (post-race columns, standings lag, teammate same-race exclusion, prior-visits-only circuit history).
-- **Schema-guarded inference** — every fitted pipeline starts with a `ColumnGuard` that records feature names/order/dtypes at training time and re-validates them at prediction time, so old artifacts always validate against what they were trained on.
-- **Calibration done strictly out-of-fold** — `CalibratedModel` wraps the base pipeline with an isotonic calibrator fit only on out-of-fold training predictions; a naive refit is deliberately impossible (`.fit()` raises).
-- **Regulation-aware evaluation** — `src/models/eras.py` + `SplitStrategy` presets encode F1 regulation eras as a code-level domain model with import-time contiguity asserts.
-- **Hermetic MLflow testing** — `tests/conftest.py` pins experiment artifact roots into temp directories, keeping 398 tests and the smoke script from writing a single file into the checkout.
-- **Headless dashboard verification** — the smoke test runs the real Streamlit entry point via `AppTest`, catching failures that only occur inside a live script context (this caught a real navigation bug).
-- **Runtime/training artifact separation** (Decision 029) — the deployed API reads only from the committed `artifacts/` tree; every gitignored training artifact (`data/`, `mlruns/`, `mlflow.db`, `models/`) can be deleted entirely and the API, predictions, and dashboard are unaffected.
-- **Decision discipline** — 29 append-only architectural decision records; superseding requires a new entry, never an edit.
+- **Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, coding standards, and how to propose a change.
+- **Security:** see [SECURITY.md](SECURITY.md) for how to report a vulnerability. Automated dependency and secret scanning run on every push (see [Continuous Integration](#13-continuous-integration)).
 
 ---
 
@@ -444,7 +424,3 @@ This project is licensed under the [MIT License](LICENSE). The underlying histor
 ## 19. Acknowledgements
 
 Historical race data follows the schema of the [Ergast Motor Racing Database](http://ergast.com/mrd/) (deprecated end of 2024; community continuations exist). Formula 1 and related marks belong to their respective owners; this is an unaffiliated educational/portfolio project.
-
----
-
-*Started June 2026 · Core ML Platform July 2026 · CI + five-page dashboard July 2026*

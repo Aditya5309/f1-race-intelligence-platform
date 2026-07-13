@@ -1,24 +1,31 @@
 # F1 Race Winner Prediction — API Reference
 
-Base URL (local default): `http://localhost:8000`. Interactive docs:
-`/docs` (Swagger UI), `/redoc`. All responses are JSON. No authentication
-in v1 (local use; see `reports/application_design.md` §13 for the planned
-API-key path).
+Base URL (local default): `http://localhost:8000`. Every route below is
+versioned under `/api/v1` — e.g. `http://localhost:8000/api/v1/health`.
+Interactive docs: `/docs` (Swagger UI), `/redoc` — both only ever list the
+versioned paths. Every route is ALSO reachable at its pre-versioning path
+with no `/api/v1` prefix (same handler, same response, not shown in
+`/docs`) for anything already hardcoded to it; new integrations should use
+the versioned paths shown here. All responses are JSON.
+
+No authentication is required or implemented — this is a public, read-only
+demonstration deployment, not a multi-user service. Every route is `GET`
+except the reserved, always-`501` `POST /predict`.
 
 ---
 
-## GET /health
+## GET /api/v1/health
 
 Liveness plus the identity of the serving model.
 
 ```json
 {
   "status": "ok",
-  "api_version": "1.0.0",
+  "api_version": "1.4.0",
   "model": {
-    "name": "f1-winner", "version": "2", "alias": "Staging",
-    "run_id": "0c16d584af9047fda616e0fa473b4dd9",
-    "trained_at": "2026-07-03T18:25:30+00:00",
+    "name": "f1-winner", "version": "4", "alias": "Staging",
+    "run_id": "9fd5c220dc2548bda6286ae27f5d31ed",
+    "trained_at": "2026-07-11T21:13:12+00:00",
     "calibration": "isotonic-oof", "model_class": "CalibratedModel"
   },
   "detail": null
@@ -28,11 +35,11 @@ Liveness plus the identity of the serving model.
 `status` is `"degraded"` (with `detail`) if the model or feature data failed
 to load — prediction routes then return **503**.
 
-## GET /model
+## GET /api/v1/model
 
 The `model` object above, alone. **503** when degraded.
 
-## GET /races
+## GET /api/v1/races
 
 Races available for scoring (seasons up to `F1_SERVE_MAX_YEAR`; the
 2025–2026 forward holdout is never listed).
@@ -43,7 +50,7 @@ Query parameters: `year` (optional int) — filter to one season.
 { "races": [ { "race_id": 1098, "year": 2023, "round": 1, "n_drivers": 20 } ] }
 ```
 
-## GET /predictions/{race_id}
+## GET /api/v1/predictions/{race_id}
 
 Score the full field of one historical race.
 
@@ -86,7 +93,66 @@ Errors: **404** unknown raceId · **409** forward-holdout race (config
 Responses are cached per `(model_version, race_id)` — repeated calls return
 the identical body.
 
-## GET /debug/features/{race_id} — development only
+## GET /api/v1/predictions/{race_id}/simulate/{driver_id}
+
+Re-scores one driver under a hypothetical grid position or a pit-lane
+start, holding every other feature at its real value for the race — the
+dashboard's "Prediction Simulator." Only the grid-position-derived
+features move; the rest of the qualifying group (lap times, Q2/Q3
+progression, gap to pole) stays frozen at what actually happened, since
+fabricating a lap the driver never set would misrepresent the model.
+
+Query parameters: `grid_position` (int, 1..field size) or `pit_lane=true`.
+
+```json
+{
+  "race_id": 1120, "driver_id": 830, "driver_name": "Max Verstappen",
+  "field_size": 20,
+  "real_grid_position": 1.0,
+  "simulated_grid_position": 5.0,
+  "pit_lane_start": false,
+  "real_win_probability": 0.7634,
+  "simulated_win_probability": 0.4108,
+  "field": [ "...same shape as GET /predictions/{race_id}'s predictions array, re-normalized under the override" ],
+  "locked_qualifying_features": ["qualifying_position", "q1_sec", "..."],
+  "locked_features": ["driver_form_5race", "constructor_form_5race", "..."],
+  "model": { "...": "as in /health" }
+}
+```
+
+Requesting the driver's own real grid position exactly reproduces their
+real `win_probability` — this is a regression-tested guarantee, not a
+coincidence.
+
+Errors: **404** unknown race or driver · **422** missing/out-of-range
+`grid_position` · **409** forward-holdout race.
+
+## GET /api/v1/predictions/{race_id}/vs-baseline
+
+The full model's predictions next to a simple pole-only baseline (predicts
+the pole sitter wins with certainty) for the same race and driver set —
+the dashboard's "Qualifying Impact" view, illustrating what the model adds
+beyond grid position alone.
+
+```json
+{
+  "race_id": 1120, "year": 2023, "round": 22,
+  "model": { "...": "as in /health" },
+  "baseline_name": "pole_baseline",
+  "baseline_description": "Predicts the pole sitter wins with certainty.",
+  "model_predictions": [ "...same shape as GET /predictions/{race_id}'s predictions array" ],
+  "baseline_predictions": [ "...same shape, always ranking the pole sitter first" ],
+  "actual_winner_driver_id": 830,
+  "model_top1_hit": true,
+  "baseline_top1_hit": true
+}
+```
+
+Errors: **404** unknown raceId · **409** forward-holdout race · **503**
+if the baseline itself failed to initialize (degrades independently of the
+main model).
+
+## GET /api/v1/debug/features/{race_id} — development only
 
 Disabled by default (returns 404). Enable with `F1_DEBUG_ENDPOINTS=true`.
 Returns the exact feature vectors fed to the model for a race:
@@ -103,9 +169,17 @@ Returns the exact feature vectors fed to the model for a race:
 `null` feature values are informative missingness (e.g. eliminated before
 Q3, no prior history at this circuit) — the model consumes them as signals.
 
-## POST /predict — reserved
+## POST /api/v1/predict — reserved
 
-Always returns **501 Not Implemented** in v1. The route is reserved as the
+Always returns **501 Not Implemented**. The route is reserved as the
 future entry point for *upcoming-race* predictions (races that haven't run
 yet), which require the feature pipeline to materialize pre-race feature
-rows first. See `reports/application_design.md` §5/§12.
+rows first — not implemented today.
+
+## Errors
+
+Every error response is a JSON body of the shape `{"detail": "..."}`, with
+the exception of an unexpected server error, which always returns a
+generic `{"detail": "Internal server error."}` at `500` — no internal
+detail (message, type, or traceback) is ever included in the response body;
+the real cause is logged server-side only.
