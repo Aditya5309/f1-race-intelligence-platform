@@ -1,8 +1,8 @@
 """
-Tests for src/models/materialize.py (the Materializer — Phase 3 of the
-pre-race materialization plan, Decisions 049/050).
+Tests for src/models/materialize.py (the Materializer — see
+docs/pre_race_materialization.md for the full architecture).
 
-Coverage, per the design doc's own input tiers (§3):
+Coverage, across the Materializer's input tiers:
   - structural (identity/historical aggregates): a rookie with zero prior
     results gets null driver-form features, never a fabricated one; an
     ambiguous/duplicate dimension key raises via the REUSED
@@ -10,17 +10,18 @@ Coverage, per the design doc's own input tiers (§3):
   - session-dependent (qualifying/grid): a driver with no qualifying row
     yet gets null qualifying/grid-derived features, never fabricated
   - entry-list: an explicit entry list drives which rows get built, not
-    inference (Phase 1's concern, exercised here only via its output shape)
+    inference (src.features.upcoming's concern, exercised here only via its
+    output shape)
 Plus: output contract (schema, no target column, sorted, one row per
 entrant), the grid-proxy invariant (grid == qualifying_position, so
 pit_lane_start/grid_penalty_applied always read False), reuse of
 `validate_features()`/`validate_output()` (a genuinely bad frame raises
 through the REUSED validator, never a new check), the qualifying join's
-scoping fix (an unrelated duplicate elsewhere in qualifying history must
-NOT block materializing the target race — a `/review` finding, resolved),
-and the ValueError paths (empty entry list, duplicate raceId in
-historical_master, an unresolved driver reference, a duplicate driverId in
-the entry list, a validate_features() failure).
+scoping (an unrelated duplicate elsewhere in qualifying history must NOT
+block materializing the target race), and the ValueError paths (empty
+entry list, duplicate raceId in historical_master, an unresolved driver
+reference, a duplicate driverId in the entry list, a validate_features()
+failure).
 
 No network calls, no file I/O anywhere in this file — every input is an
 in-memory synthetic DataFrame, by construction.
@@ -97,8 +98,8 @@ def _empty_weather() -> pd.DataFrame:
 def two_driver_scenario():
     """Two completed historical races (raceId 1, 2), drivers 1 & 2, driver 1
     wins both. Upcoming race 3: both entered; only driver 1's qualifying has
-    landed (Phase 2 already ran for driver 1, not driver 2 — the
-    session-dependent-tier test case)."""
+    landed (driver 2 has not qualified yet — the session-dependent-tier test
+    case)."""
     historical_master = pd.DataFrame([
         _historical_row(raceId=1, driverId=1, constructorId=10, driver_ref="driver1",
                         constructor_ref="team10", positionOrder=1, winner=1),
@@ -194,7 +195,7 @@ def test_prior_wins_and_experience_reflect_historical_races_only(two_driver_scen
 def test_rookie_with_no_history_gets_null_form_features():
     """Entry-list tier: a genuinely new driver (never raced) gets NaN
     driver-form features, not zero -- 'no information' and '0 wins' are
-    different signals (context/domain_knowledge.md)."""
+    different signals (docs/pre_race_materialization.md)."""
     historical_master = pd.DataFrame([_historical_row(raceId=1, driverId=1, constructorId=10)])
     race = UpcomingRace(race_id=2, year=2026, round=2, circuit_id=100, name="Race 2", date="2026-01-08")
     entry_list = [EntryListEntry(driver_id=99, constructor_id=10)]  # rookie, never raced
@@ -240,8 +241,8 @@ def test_driver_with_qualifying_gets_real_values(two_driver_scenario):
 
 
 def test_qualifying_join_ignores_unrelated_duplicate_elsewhere_in_history(two_driver_scenario):
-    """/review finding (Important, resolved): validate="one_to_one" checks
-    the right side's key uniqueness GLOBALLY, not just the matched subset.
+    """validate="one_to_one" checks the right side's key uniqueness
+    GLOBALLY, not just the matched subset.
     A duplicate (raceId, driverId) pair for a completely unrelated,
     already-completed race must NOT block materializing the target race —
     the qualifying table is pre-filtered to `race.race_id` before the
@@ -266,7 +267,8 @@ def test_qualifying_join_ignores_unrelated_duplicate_elsewhere_in_history(two_dr
 
 
 # ---------------------------------------------------------------------------
-# Grid-penalty-proxy invariant (design doc §1/§3, still unresolved)
+# Grid-penalty-proxy invariant (disclosed limitation, still unresolved —
+# see docs/pre_race_materialization.md)
 # ---------------------------------------------------------------------------
 
 def test_grid_equals_qualifying_position_proxy_so_penalty_never_detected(two_driver_scenario):
@@ -314,10 +316,11 @@ def test_duplicate_dimension_key_propagates_join_and_check_error(two_driver_scen
 
 
 def test_unresolved_driver_reference_raises(two_driver_scenario):
-    """/review finding (Important, resolved): an entry_list driverId absent
-    from the drivers dimension table must hard-fail (design doc §3's
-    "structural, always-available identity" rule), not silently carry a
-    null driver_ref through to the feature pipeline. Caught by reusing
+    """An entry_list driverId absent from the drivers dimension table must
+    hard-fail (identity fields are structural and always-available — a
+    driver who doesn't exist in the dimension table is a data-integrity bug,
+    not a missingness case), not silently carry a null driver_ref through to
+    the feature pipeline. Caught by reusing
     build_master_dataset.validate_output()'s own referential-integrity
     check, not a new one."""
     entry_list = [EntryListEntry(driver_id=999, constructor_id=10)]  # not in "drivers" below

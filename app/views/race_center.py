@@ -91,7 +91,7 @@ def _reasons_for_favorite(top: dict, grid: int | None, quali: int | None,
 
 
 def _normalize_upcoming_response(raw: dict, race_id: int) -> dict:
-    """Phase 8 view-model adapter: UpcomingPredictionResponse (POST
+    """View-model adapter: UpcomingPredictionResponse (POST
     /predict) -> the same shape PredictionResponse (GET /predictions/
     {race_id}) already provides, PLUS the upcoming-only extras
     (materialization_status, missing_inputs, caveats, provenance) — so
@@ -100,8 +100,9 @@ def _normalize_upcoming_response(raw: dict, race_id: int) -> dict:
     `actual_winner_driver_id`/`model_top1_hit` are always None here: a
     race with no result has no winner to compare against by definition —
     the correct value, not a degraded placeholder. `race_id` isn't part
-    of UpcomingPredictionResponse's own schema (deliberately — see
-    Decision 052) but the picker already knows it, so it's threaded
+    of UpcomingPredictionResponse's own schema (deliberately kept out of
+    the API contract, since every route already knows which race it's
+    scoring) but the picker already knows it, so it's threaded
     through here rather than re-derived."""
     return {
         **raw,
@@ -113,7 +114,7 @@ def _normalize_upcoming_response(raw: dict, race_id: int) -> dict:
 
 def _upcoming_status_banner(status: str, missing_inputs: list[str],
                             caveats: list[str], provenance: dict) -> None:
-    """Phase 8: materialization status + prediction caveats + ETL-snapshot
+    """Materialization status + prediction caveats + ETL-snapshot
     freshness for the upcoming-race view. Built from existing Streamlit
     primitives (st.info/st.warning/st.caption, the same ones empty_state()
     and every other caveat elsewhere on this page already use) — a
@@ -137,7 +138,8 @@ def _upcoming_status_banner(status: str, missing_inputs: list[str],
 
 
 def _provenance_expander(provenance: dict) -> None:
-    """Full structured provenance detail (Decision 049 Refinement 6). The
+    """Full structured provenance detail — every prediction must be
+    reconstructable later from its own recorded metadata alone. The
     compact footer caption (existing, unchanged) covers the casual reader;
     this is for anyone who wants to audit exactly what produced this
     prediction. Reuses st.expander — already used for "Full field table"/
@@ -166,14 +168,15 @@ def render() -> None:
     # Default landing race (first load, no ?race_id= param): the latest
     # COMPLETED race — computed BEFORE the upcoming race (if any) is
     # appended below, so this stays byte-for-byte what it was before
-    # Phase 8, even though the upcoming race is now also selectable.
+    # upcoming-race prediction existed, even though the upcoming race is
+    # now also selectable.
     historical_sorted = sorted(races, key=lambda r: (r["year"], r["round"]))
     default_race_id = historical_sorted[-1]["race_id"]
 
-    # Phase 8: the single next race with no result yet, if resolvable —
-    # additive only. upcoming_race_or_none() soft-fails (never st.stop()s)
-    # so an unavailable lookup (e.g. this deployment has no data/ tree,
-    # Decision 052) leaves everything below byte-for-byte what it is today.
+    # The single next race with no result yet, if resolvable — additive
+    # only. upcoming_race_or_none() soft-fails (never st.stop()s) so an
+    # unavailable lookup (e.g. this deployment has no data/ tree) leaves
+    # everything below byte-for-byte what it is today.
     upcoming = upcoming_race_or_none()
     upcoming_race_id = upcoming["race_id"] if upcoming else None
     if upcoming is not None:

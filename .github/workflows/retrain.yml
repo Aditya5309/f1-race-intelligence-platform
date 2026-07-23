@@ -21,7 +21,8 @@
 # entire `f1-data-` prefix evicted and the job hard-failed. Root cause
 # and the rejected alternative (a periodic re-seed on a timer, which
 # would have silently rolled back real ingested progress) are recorded in
-# `context/decisions.md`'s ADR for this incident.
+# docs/retrain_workflow_setup.md's "Cache eviction and the automatic
+# recovery path" section.
 #
 # THE FIX: this workflow now SELF-HEALS on a cache miss. "Restore data/
 # cache" below is unchanged and stays the fast path on every normal week.
@@ -115,7 +116,7 @@ jobs:
             echo "restored=true" >> "$GITHUB_OUTPUT"
           else
             echo "restored=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::data/ Actions cache (key prefix f1-data-) was empty or evicted — falling back to the data-seed release asset instead of failing. ingest_jolpica.py will backfill anything missing since that snapshot was built. If this keeps happening, GitHub's ~7-day cache eviction may be racing this workflow's own weekly schedule — see docs/retrain_workflow_setup.md and context/decisions.md's ADR for this incident."
+            echo "::warning::data/ Actions cache (key prefix f1-data-) was empty or evicted — falling back to the data-seed release asset instead of failing. ingest_jolpica.py will backfill anything missing since that snapshot was built. If this keeps happening, GitHub's ~7-day cache eviction may be racing this workflow's own weekly schedule — see docs/retrain_workflow_setup.md's 'Cache eviction and the automatic recovery path' section."
           fi
 
       # Self-healing fallback (see the top-of-file note): recovers data/

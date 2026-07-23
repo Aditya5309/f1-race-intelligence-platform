@@ -1,6 +1,7 @@
 """
-Tests for app/views/common.py's upcoming_race()/upcoming_race_or_none()
-(Phase 8, Decision Point A).
+Tests for app/views/common.py's upcoming_race()/upcoming_race_or_none() --
+the shared helpers every dashboard view uses to fetch the upcoming race's
+identity from GET /races/upcoming.
 
 app/views/*.py has 0% unit coverage by design elsewhere in this project —
 presentation-only HTTP consumers, exercised via scripts/smoke.py's headless

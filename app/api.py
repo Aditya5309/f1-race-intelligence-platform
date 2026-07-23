@@ -12,7 +12,7 @@ rows are looked up SERVER-SIDE from the frozen runtime features snapshot
 (settings.features_path, default artifacts/features.parquet) by raceId —
 clients never send feature payloads, since features are derived artifacts
 of the leakage-audited pipeline, not something a caller should be able to
-inject. `POST /predict` (Phase 7) is the one exception to "clients never
+inject. `POST /predict` is the one exception to "clients never
 send anything feature-shaped": callers may optionally send an entry-list
 override (driver/constructor pairs, not feature values) — everything
 feature-shaped is still built server-side, by `materialize_features()`,
@@ -31,7 +31,7 @@ Endpoints, all under /api/v1:
     GET  /api/v1/health                              liveness + serving model metadata
     GET  /api/v1/model                               full ModelInfo
     GET  /api/v1/races?year=                         races available to score (<= serve_max_year)
-    GET  /api/v1/races/upcoming                      Phase 8: identity only (year/round/
+    GET  /api/v1/races/upcoming                      identity only (year/round/
                                               name/circuit/date) of the single next race
                                               with no result yet — NOT a prediction, no
                                               materialization_status/caveats/provenance;
@@ -51,22 +51,24 @@ Endpoints, all under /api/v1:
                                               only heuristic) for the same race.
     GET  /api/v1/debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
                                     the exact feature vectors fed to the model
-    POST /api/v1/predict            Upcoming-race prediction (Phase 7,
-                                    Decisions 049/050): materializes the
+    POST /api/v1/predict            Upcoming-race prediction: materializes the
                                     single next race with no result yet
-                                    (Decision 050's horizon=1) and scores it
-                                    with the same served bundle. See the
+                                    (this pipeline only ever resolves the
+                                    earliest unplayed race — a materialization
+                                    horizon of one race, not a forward
+                                    schedule) and scores it with the same
+                                    served bundle. See the
                                     "Upcoming-race prediction" section below.
 
-Upcoming-race prediction (`POST /predict`, Phase 7): unlike every route
+Upcoming-race prediction (`POST /predict`): unlike every route
 above, this one needs training-side data (`settings.master_dataset_path`,
 `raw_data_dir`, etc.) that has no committed `artifacts/`-tree equivalent
-today — see `app/config.py`'s own comment and `context/decisions.md`
-Decision 052 for why. That data is LAZILY loaded on the first `POST
-/predict` request (not at startup — a stability-review finding: no other
-route reads it, so paying its full read/memory cost unconditionally at
+today — see `app/config.py`'s own comment and
+`docs/pre_race_materialization.md` for why. That data is LAZILY loaded on
+the first `POST /predict` request rather than at startup, since no other
+route reads it — paying its full read/memory cost unconditionally at
 every process start would be wasted work on a process that never receives
-this request) and cached thereafter by
+this request — and cached thereafter by
 `app.upcoming_prediction_service.ensure_materialization_data()`. This
 route itself is a genuinely thin transport layer: it parses the request,
 delegates ALL orchestration (calendar/entry-list resolution,
@@ -114,7 +116,7 @@ server log via `logger.exception(...)`.
 **Authentication is deliberately NOT implemented.** This is a public
 demonstration deployment of a read-only, historical-data prediction
 service — not a multi-user production system: every historically-served
-route is GET; `POST /predict` (Phase 7) is the one exception, but it
+route is GET; `POST /predict` is the one exception, but it
 doesn't write or persist anything server-side — like every GET route, it
 computes and returns a prediction, just via a POST because it accepts a
 request body. There is no concept of a user account, no genuine write/
@@ -220,7 +222,7 @@ class RaceListResponse(BaseModel):
 
 
 class UpcomingRaceSchema(BaseModel):
-    """Identity only (Phase 8, GET /races/upcoming) — no prediction, no
+    """Identity only (GET /races/upcoming) — no prediction, no
     materialization_status/caveats/provenance. Those come from POST
     /predict once the caller actually asks for a scored prediction."""
     race_id: int
@@ -313,12 +315,13 @@ class PredictRequest(BaseModel):
     year: int
     round: int
     #: Omit to resolve the current-season roster (see
-    #: `resolve_entry_list()`'s backward-looking inference — Phase 1).
+    #: `resolve_entry_list()`'s backward-looking inference in
+    #: src/features/upcoming.py).
     entry_list: list[EntryListEntrySchema] | None = None
     #: ISO-8601, MUST be timezone-aware (e.g. "2026-07-23T10:00:00Z" or
     #: "...+00:00") — a naive timestamp's offset is genuinely unknown to
     #: this API and is rejected with 422 rather than silently assumed to
-    #: be UTC (Decision 052). Optional — reserved for a future historical-
+    #: be UTC. Optional — reserved for a future historical-
     #: cutoff override; validated (never later than the latest local ETL
     #: snapshot) but does not yet change which data is used (see the
     #: route's own docstring for why — no per-row ETL-ingestion timestamp
@@ -327,8 +330,9 @@ class PredictRequest(BaseModel):
 
 
 class ProvenanceSchema(BaseModel):
-    """Decision 049 Refinement 6: every prediction must be reconstructable
-    later from its own recorded metadata alone."""
+    """Every prediction must be reconstructable later from its own recorded
+    metadata alone: which model, which feature schema, which ETL snapshot,
+    and when each step ran."""
     model_version: str
     model_alias: str
     feature_schema_version: str
@@ -611,9 +615,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @router.get("/races/upcoming", response_model=UpcomingRaceSchema)
     def upcoming_race():
-        """Phase 8: identity of the single next race with no result yet
-        (Decision 050 horizon=1), for the dashboard's picker — NOT a
-        prediction. Thin transport only, same as POST /predict: delegates
+        """Identity of the single next race with no result yet (this
+        pipeline only ever resolves the earliest unplayed race), for the
+        dashboard's picker — NOT a prediction. Thin transport only, same as
+        POST /predict: delegates
         to app.upcoming_prediction_service.resolve_upcoming_race(), maps
         RuntimeError -> 503 (materialization data unavailable, mirrors
         POST /predict's own degraded-state handling) and "no upcoming
@@ -829,8 +834,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @router.post("/predict", response_model=UpcomingPredictionResponse)
     def predict_upcoming(body: PredictRequest):
-        """Score the single next race with no result yet (Decision 050's
-        horizon=1) with the served bundle.
+        """Score the single next race with no result yet (this pipeline
+        only ever resolves the earliest unplayed race) with the served
+        bundle.
 
         Thin transport only: parses the request, delegates every bit of
         orchestration (calendar/entry-list resolution, materialization,
@@ -872,13 +878,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         caveats = [
             "grid_adjusted/grid_position_norm are sourced from qualifying_position — a "
             "post-qualifying grid penalty or pit-lane start is not yet reflected "
-            "(Decision 049/050's documented interim proxy).",
+            "(a documented, interim proxy — see docs/pre_race_materialization.md).",
         ]
         if result.materialization_status == "pre_qualifying":
             caveats.append(
                 "Qualifying has not been fully recorded for this race yet; this prediction "
                 "relies on informative-missingness handling that has not been separately "
-                "validated for a pre-qualifying regime (design doc Phase 9, deferred)."
+                "validated for a pre-qualifying regime (deliberately deferred — scoring "
+                "before qualifying results exist at all is a future extension, not yet "
+                "implemented)."
             )
 
         response = UpcomingPredictionResponse(

@@ -1,14 +1,15 @@
 """
 src/models/materialize.py
 
-The Materializer (Decision 049 Refinement 2; Phase 3 of
-`.ai/pre_race_materialization_design.md` §7): the ONLY place
+The Materializer (see `docs/pre_race_materialization.md` for the full
+architecture): the ONLY place
 feature-construction logic for a race that has not yet happened lives.
 Wires the EXISTING, unmodified feature-engineering pipeline
 (`src.features.pipeline.build_features`/`validate_features`) against a
 single synthetic row per entrant. The synthetic row is always the
-chronologically LAST row fed into that pipeline (Decision 050's horizon=1:
-there is never a real race after it in the frame), so every rolling/lag
+chronologically LAST row fed into that pipeline (the materialization
+horizon is always exactly one race: there is never a real race after it
+in the frame), so every rolling/lag
 feature's own shift(1)/cumsum-minus-current leakage guard treats it exactly
 like any real historical row — no additional temporal-safety logic is
 needed or added here.
@@ -21,9 +22,9 @@ driver_standings, constructor_standings, weather) -> pd.DataFrame`
 
 Inputs
 ------
-- `race: UpcomingRace` — from `src.features.upcoming.next_race()` (Phase 1).
+- `race: UpcomingRace` — from `src.features.upcoming.next_race()`.
 - `entry_list: list[EntryListEntry]` — from
-  `src.features.upcoming.resolve_entry_list()` (Phase 1).
+  `src.features.upcoming.resolve_entry_list()`.
 - `dimension_inputs: dict[str, pd.DataFrame]` — keys "races", "circuits",
   "drivers", "constructors", "qualifying". Same shape as
   `src.integration.build_master_dataset.load_inputs()`'s return value MINUS
@@ -43,8 +44,9 @@ Outputs
 One `pd.DataFrame`, one row per `entry_list` entry, columns =
 `src.features.pipeline.ID_COLUMNS + FEATURE_COLUMNS` (`FEATURES_DATASET_COLUMNS`
 minus the target column, `MATERIALIZED_COLUMNS` below) — matching
-`features.parquet`'s real schema exactly, minus the target, so a future
-golden-row-parity check (Phase 4) can diff column-for-column. NEVER
+`features.parquet`'s real schema exactly, minus the target, so a
+golden-row-parity check (see `tests/test_materialize_golden_row_parity.py`)
+can diff column-for-column. NEVER
 contains a target/outcome column: a real race's `winner` is unknown here
 by definition; the placeholder value used internally for feature
 computation (see Invariants) is discarded before returning, never exposed.
@@ -68,8 +70,9 @@ Invariants
   (`_ref_checks`) the real batch pipeline already runs, not a new one. A
   driverId absent from `dimension_inputs["drivers"]` (a stale snapshot, a
   typo) raises instead of silently carrying a null `driver_ref` through to
-  the feature pipeline — the "structural, always-available identity"
-  hard-fail the design doc (§3) requires.
+  the feature pipeline — every feature in this project treats identity
+  columns as structurally always-available, so a missing one must hard-fail
+  loudly rather than degrade silently.
 - The qualifying join is scoped to `race.race_id` BEFORE calling
   `_join_and_check(..., validate="one_to_one")` — that helper and its
   validate spec are unchanged from `build_master_dataset()`'s own usage;
@@ -81,14 +84,16 @@ Invariants
   historical race would raise here and block materializing THIS race for
   a reason that has nothing to do with it.
 - `grid` (final starting position) is set equal to `qualifying_position`
-  for every entrant — the documented interim proxy (design doc §1/§3) for
-  the still-unresolved lack of any pre-race grid-penalty data source.
+  for every entrant — a documented interim proxy (see
+  `docs/pre_race_materialization.md`) for the still-unresolved lack of any
+  pre-race grid-penalty data source.
   Structural consequence, inherited not introduced here: `pit_lane_start`
   and `grid_penalty_applied` can never read true for a materialized race —
   both reflect "nothing special happened" regardless of what actually
   happens on the day. Not a bug; a known limitation of this proxy.
 - A driver with no qualifying row yet gets null qualifying/grid-derived
-  features — never fabricated (`context/domain_knowledge.md` §8).
+  features — never fabricated (see "Design discipline this pipeline
+  follows" in `docs/pre_race_materialization.md`).
 - `historical_master` is trusted, not re-validated, to contain only
   already-completed races strictly before `race` — this function only
   checks it does not ALREADY contain a row for `race.race_id`.
@@ -220,7 +225,7 @@ def _build_synthetic_master_rows(
     df = _join_and_check(df, qualifying, on=["raceId", "driverId"], validate="one_to_one",
                          step_name="qualifying", expected_row_count=base_row_count)
 
-    # Interim grid-penalty proxy (design doc §1/§3, still unresolved): no
+    # Interim grid-penalty proxy, still unresolved: no
     # pre-race grid-penalty data source exists, so `grid` (final starting
     # position) is set equal to `qualifying_position`. See module
     # docstring's Invariants for the structural consequence.
@@ -283,7 +288,7 @@ def materialize_features(
     # Same referential-integrity/row-count/duplicate-pair/identifier-null
     # checks build_master_dataset()'s own real output goes through — the
     # entry list is exactly the kind of "structural, always-available"
-    # identity input the design doc (§3) says must hard-fail loudly on any
+    # identity input that must hard-fail loudly on any
     # gap (e.g. a driverId absent from the drivers dimension table), not
     # silently carry a null reference through to the feature pipeline.
     synthetic_validation = validate_output(synthetic_rows, expected_row_count=len(entry_list))

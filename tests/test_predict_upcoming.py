@@ -1,6 +1,6 @@
 """
-Tests for src/models/predict_upcoming.py (Phase 5 of the pre-race
-materialization plan — Decisions 049/050).
+Tests for src/models/predict_upcoming.py, the composition step of the
+pre-race materialization pipeline (see docs/pre_race_materialization.md).
 
 Coverage:
   - pure composition: predict_upcoming_race() produces byte-identical

@@ -89,7 +89,7 @@ def api_get_or_stop(path: str, params: dict | None = None) -> dict:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def predict_upcoming(year: int, round_: int) -> dict:
-    """POST {api_url}{API_V1_PREFIX}/predict -> parsed JSON (Phase 8, the
+    """POST {api_url}{API_V1_PREFIX}/predict -> parsed JSON (the
     dashboard's first-ever POST call — every other route here is GET).
     Raises httpx.HTTPError on failure (409/422/503 from the real
     exception-to-status mapping in app/api.py, or unreachable).
@@ -97,8 +97,8 @@ def predict_upcoming(year: int, round_: int) -> dict:
     Short TTL relative to api_get's 300s: an upcoming race's inputs can
     genuinely change within a browsing session (qualifying landing, a
     grid penalty adjudicated) — this is a client-side cache independent
-    of, and much shorter than, the server's own pre_race_cache (Decision
-    052), not a substitute for it."""
+    of, and much shorter than, the server's own pre_race_cache, not a
+    substitute for it."""
     response = _http_client().post(
         f"{API_V1_PREFIX}/predict", json={"year": year, "round": round_})
     response.raise_for_status()
@@ -133,7 +133,7 @@ def list_races_or_empty(year: int | None = None) -> list[dict]:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def upcoming_race() -> dict | None:
-    """GET /races/upcoming (Phase 8) -> {race_id, year, round, name,
+    """GET /races/upcoming -> {race_id, year, round, name,
     circuit_id, date}, or None if there is no upcoming race, the API is
     unreachable, or POST /predict's training-side data isn't available on
     this deployment (503 — the same degraded state POST /predict itself

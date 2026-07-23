@@ -29,8 +29,7 @@ cache entry and re-saving a fresh one. The fifth scheduled run
 nothing about the setup had changed. Investigated via the actual GitHub
 state (`gh cache list`, `gh run view --log`), not guesswork: the entire
 `f1-data-*` cache prefix had been evicted between the fourth and fifth
-runs. See `context/decisions.md`'s ADR for this incident for the full
-investigation.
+runs. The rest of this section is that investigation's full record.
 
 ### Why: GitHub Actions cache eviction, racing this workflow's own schedule
 
@@ -41,6 +40,16 @@ cron triggers are documented to slip; a single delayed or skipped run is
 enough to push the gap since the last successful save past 7 days). This
 is a real, confirmed platform behavior, not a bug in this repo's own
 scripts — but the *design* gave it zero margin, which was the actual gap.
+
+### Alternative considered and rejected
+
+A periodic re-seed on a timer (re-running `seed-data-cache.yml` on its own
+schedule, independent of evictions) was considered and rejected: it would
+silently roll back any real ingestion progress made since the last seed —
+re-seeding always replaces `data/` with whatever snapshot the release
+asset holds, which is only ever refreshed manually (Part 1 below), not
+continuously. A self-healing fallback that recovers exactly once, only
+when the cache genuinely comes back empty, has no such side effect.
 
 ### The fix: a self-healing fallback, not a hard failure
 

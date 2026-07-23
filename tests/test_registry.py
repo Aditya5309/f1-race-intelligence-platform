@@ -229,7 +229,7 @@ def test_sklearn_models_use_balanced_class_weight():
 
 def test_logreg_keeps_missingness_visible():
     # The imputer must add missing-indicator columns so "no history" stays a
-    # signal (design Section 3; domain_knowledge Section 2).
+    # visible signal to the model, not silently imputed away.
     _, y = _training_data()
     imputer = get_model("logreg", y).named_steps["imputer"]
     assert imputer.get_params()["add_indicator"] is True

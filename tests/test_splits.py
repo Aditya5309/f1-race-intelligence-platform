@@ -152,7 +152,7 @@ def test_folds_expand_monotonically_and_precede_val():
 
 def test_folds_reject_non_training_input():
     # Passing val/test years into the fold generator would leak them into
-    # model selection — must be loud (design doc Section 11.2).
+    # model selection — must be loud, not a silent no-op.
     with pytest.raises(ValueError, match="training split only"):
         season_folds(_frame([2010, 2011, 2022]))
 

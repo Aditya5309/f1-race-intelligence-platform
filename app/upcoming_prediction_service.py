@@ -1,7 +1,7 @@
 """
 app/upcoming_prediction_service.py
 
-Orchestration layer for `POST /predict` (Phase 7, Decisions 049/050/052).
+Orchestration layer for `POST /predict`.
 
 `app/api.py` is a thin HTTP transport layer (request parsing, status-code
 mapping, response assembly) and `src.models.predict_upcoming.
@@ -18,12 +18,12 @@ needs the INTERMEDIATE materialized frame to derive those fields by
 inspecting already-computed null-ness.
 
 Also owns `POST /predict`'s training-side data loading (settings.
-master_dataset_path, raw_data_dir, etc. — see app/config.py's own comment
-+ Decision 052) — LAZILY, on first request rather than at app startup.
-Stability-review finding: this data (a full master_dataset.parquet + 6 raw
-CSVs + a weather CSV) is read by no other route; loading it unconditionally
-at startup would pay that full read/memory cost even for a process that
-never receives a single POST /predict request. `ensure_materialization_data()`
+master_dataset_path, raw_data_dir, etc. — see app/config.py's own comment)
+— LAZILY, on first request rather than at app startup, since this data
+(a full master_dataset.parquet + 6 raw CSVs + a weather CSV) is read by no
+other route; loading it unconditionally at startup would pay that full
+read/memory cost even for a process that never receives a single
+POST /predict request. `ensure_materialization_data()`
 loads and caches it exactly once per process — including caching a FAILURE,
 since a missing/misconfigured data/ tree does not self-heal between
 requests, and retrying would just repeat the same expensive disk I/O on
@@ -271,17 +271,19 @@ def materialize_and_score(
 
 
 # ---------------------------------------------------------------------------
-# Upcoming-race IDENTITY lookup (Phase 8 — GET /races/upcoming)
+# Upcoming-race IDENTITY lookup (GET /races/upcoming)
 # ---------------------------------------------------------------------------
 
 def resolve_upcoming_race(state, settings: Settings) -> UpcomingRace | None:
-    """Identity of the single next race with no result yet (Decision 050
-    horizon=1), or None if every calendar race already has a result.
+    """Identity of the single next race with no result yet (this pipeline
+    only ever resolves the earliest unplayed race — a materialization
+    horizon of one race), or None if every calendar race already has a
+    result.
 
     Deliberately identity-only — no materialization_status/caveats/
     provenance here, and no call to materialize_and_score(). Those stay
     owned exclusively by POST /predict (the same "single source of truth,
-    no duplicated status logic" principle Decision 052 established for
+    no duplicated status logic" principle that governs
     materialize_and_score() vs. predict_upcoming_race()). This function
     exists so a client (the dashboard) can cheaply discover WHICH race to
     ask POST /predict about, without that being a full, cache-populating
@@ -313,9 +315,10 @@ def resolve_upcoming_prediction(
     entry_list_override: list[EntryListEntry] | None,
     as_of: str | None,
 ) -> tuple[UpcomingPredictionResult, bool]:
-    """Full Phase 7 orchestration for one POST /predict request: resolve
-    the target race, validate it against Decision 050's horizon=1 policy,
-    resolve its entry list, and materialize+score it (cached).
+    """Full orchestration for one POST /predict request: resolve
+    the target race, validate it against the materialization-horizon=1
+    policy (only the single earliest unplayed race can be scored), resolve
+    its entry list, and materialize+score it (cached).
 
     Returns (result, cache_hit). Raises RuntimeError if materialization
     data isn't available (app/api.py maps this to 503),
@@ -349,7 +352,7 @@ def resolve_upcoming_prediction(
             f"{year} round {round_} is beyond the current materialization "
             f"horizon (={settings.materialization_horizon}) — only "
             f"{resolved_next.year} round {resolved_next.round} can be materialized "
-            "right now (Decision 050)."
+            "right now."
         )
 
     etl_snapshot = _etl_snapshot_version(settings)
@@ -358,7 +361,7 @@ def resolve_upcoming_prediction(
             as_of_dt = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
         except ValueError as exc:
             raise ValueError(f"as_of '{as_of}' is not a valid ISO-8601 timestamp.") from exc
-        # Contract (Decision 052): as_of must be timezone-aware. A naive
+        # Contract: as_of must be timezone-aware. A naive
         # timestamp's UTC offset is genuinely unknown to this API — this
         # field exists to pin a precise provenance cutoff, so silently
         # assuming UTC would be a guess dressed up as a fact. Comparing a
