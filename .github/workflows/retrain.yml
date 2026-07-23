@@ -4,19 +4,41 @@
 # runs on push/PR, only on a schedule or manual dispatch, and it is the
 # only workflow in this repo allowed to open a PR against main.
 #
-# KNOWN GAP — read before relying on this in production:
-# `data/` is entirely gitignored and does
-# not exist on a fresh GitHub-hosted runner checkout, but
-# scripts/ingest_jolpica.py requires the existing data/*.csv files to
-# already be present (it only backfills races MISSING from them — it is
-# not a full-history bootstrap, and a full historical pull would need
-# ~4,700 jolpica-f1 requests against its 200/hour unauthenticated rate
-# limit, over 24 hours, wildly impractical for a weekly job). THE CACHE
-# MUST BE SEEDED ONCE before the first run can succeed — see
-# .github/workflows/seed-data-cache.yml and docs/retrain_workflow_setup.md.
-# This workflow cannot bootstrap that itself; the "Confirm data/ was
-# restored" step below fails loudly and explains this rather than letting
-# ingestion crash with a confusing FileNotFoundError.
+# `data/` IS EVENTUALLY CONSISTENT, NOT PERMANENT — read before touching
+# the restore/fallback steps below:
+# `data/` is entirely gitignored and does not exist on a fresh
+# GitHub-hosted runner checkout, but scripts/ingest_jolpica.py requires
+# the existing data/*.csv files to already be present (it only backfills
+# races MISSING from them — it is not a full-history bootstrap, and a
+# full historical pull would need ~4,700 jolpica-f1 requests against its
+# 200/hour unauthenticated rate limit, over 24 hours, wildly impractical
+# for a weekly job). This workflow persists data/ across runs via a
+# GitHub Actions cache — but GitHub evicts cache entries unused for
+# ~7 days, the SAME interval as this workflow's own weekly schedule,
+# leaving no margin against ordinary scheduling jitter. A real production
+# incident (2026-07-20) confirmed this: four consecutive weekly runs
+# restored/re-saved the cache successfully, then the fifth found the
+# entire `f1-data-` prefix evicted and the job hard-failed. Root cause
+# and the rejected alternative (a periodic re-seed on a timer, which
+# would have silently rolled back real ingested progress) are recorded in
+# `context/decisions.md`'s ADR for this incident.
+#
+# THE FIX: this workflow now SELF-HEALS on a cache miss. "Restore data/
+# cache" below is unchanged and stays the fast path on every normal week.
+# If it comes back empty, "Check whether data/ actually restored" detects
+# that (by file presence, not the cache-hit output — see note there) and
+# the "Fall back to the data-seed release asset" step recovers data/ from
+# the SAME durable GitHub Release asset `.github/workflows/seed-data-
+# cache.yml` uses (GitHub Releases don't expire the way Action cache
+# entries do), via the shared `.github/actions/restore-data-seed`
+# composite action. `ingest_jolpica.py` itself is untouched — the
+# fallback only ever hands it the same kind of existing data/ tree it
+# already expects; catching up on however many weeks elapsed since the
+# release snapshot was built is well within its normal incremental-backfill
+# contract for any realistic gap (a few races, not thousands of requests).
+# `seed-data-cache.yml` remains the tool for an EXPLICIT re-seed from a
+# freshly-rebuilt local data/ tree — this fallback is for unattended
+# eviction recovery only, not a replacement for it.
 #
 # CACHE KEY SCHEME (read this before touching either cache step below):
 # GitHub Actions cache entries are IMMUTABLE once created under an exact
@@ -80,12 +102,35 @@ jobs:
           restore-keys: |
             f1-data-
 
-      - name: Confirm data/ was restored
+      # Checked by FILE PRESENCE, not the restore step's own `cache-hit`
+      # output: `cache-hit` is only ever `true` on an EXACT match of the
+      # primary `key`, which here is this run's own (guaranteed-unused)
+      # id — so it reads `false` even on a perfectly healthy week where
+      # `restore-keys` found last week's entry. File presence is the
+      # actual signal that matters: did data/ land or not.
+      - name: Check whether data/ actually restored
+        id: data-check
         run: |
-          if [ ! -f data/races.csv ]; then
-            echo "::error::data/races.csv not found. The data/ cache (key f1-data-v1) has never been seeded — ingest_jolpica.py only backfills races MISSING from an EXISTING data/ tree, it cannot bootstrap full history. Seed the cache once with a manual data/ tree (matching this project's Ergast CSV schema) before re-running this workflow. See scripts/ingest_jolpica.py's module docstring."
-            exit 1
+          if [ -f data/races.csv ]; then
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::data/ Actions cache (key prefix f1-data-) was empty or evicted — falling back to the data-seed release asset instead of failing. ingest_jolpica.py will backfill anything missing since that snapshot was built. If this keeps happening, GitHub's ~7-day cache eviction may be racing this workflow's own weekly schedule — see docs/retrain_workflow_setup.md and context/decisions.md's ADR for this incident."
           fi
+
+      # Self-healing fallback (see the top-of-file note): recovers data/
+      # from the SAME durable release asset seed-data-cache.yml uses.
+      # ingest_jolpica.py itself is unmodified — this only ever hands it
+      # the same kind of existing data/ tree it already expects. The
+      # composite action's own sanity check fails the job loudly (naming
+      # the missing file) if the release asset is ALSO somehow broken —
+      # that combination (cache evicted AND release asset invalid) is a
+      # genuine stop-the-job case, not one this fallback can paper over.
+      - name: Fall back to the data-seed release asset (cache miss)
+        if: steps.data-check.outputs.restored == 'false'
+        uses: ./.github/actions/restore-data-seed
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Snapshot the currently-served bundle's manifest BEFORE anything
       # changes, so the PR body can show a real before/after metrics diff
@@ -124,7 +169,11 @@ jobs:
       # this run fetched should not be re-fetched next week just because
       # promotion was refused. key is this run's own unique id (see the
       # CACHE KEY SCHEME note above), so this save always succeeds — it is
-      # never trying to overwrite an existing, immutable cache entry.
+      # never trying to overwrite an existing, immutable cache entry. Runs
+      # identically whether data/ came from a normal cache hit or the
+      # release-asset fallback above — either way, this saves whatever is
+      # actually on disk now, re-establishing a fresh, healthy cache entry
+      # so next week's run doesn't need the fallback too.
       - name: Save data/ cache
         if: always()
         uses: actions/cache/save@v4

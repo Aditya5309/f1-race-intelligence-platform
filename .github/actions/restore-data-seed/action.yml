@@ -1,0 +1,71 @@
+# Single implementation of "restore data/ from the data-seed release
+# asset" — download, extract, sanity-check. Used by:
+#   - .github/workflows/seed-data-cache.yml — the explicit, on-demand
+#     seed/re-seed path (workflow_dispatch only).
+#   - .github/workflows/retrain.yml — the automatic fallback when the
+#     data/ Actions cache has been evicted (see that workflow's own
+#     "CACHE KEY SCHEME" comment for why this can happen even on a
+#     healthy weekly schedule: GitHub evicts cache entries unused for
+#     ~7 days, which is the same interval as this project's own retrain
+#     cadence, leaving no margin against scheduling jitter).
+#
+# Kept as one composite action rather than duplicated inline bash in both
+# workflows so the download/extract/sanity-check logic — which both call
+# sites depend on for correctness — cannot silently drift apart between
+# the two copies.
+#
+# Behavior is unchanged from what seed-data-cache.yml did inline before
+# this action existed: same release tag/asset name defaults, same 9-CSV
+# existence check, same failure message.
+
+name: Restore data/ from the data-seed release asset
+description: >
+  Downloads the data-seed GitHub Release asset, extracts it into data/,
+  and sanity-checks that every CSV the pipeline needs is present. Fails
+  loudly (named missing file, non-zero exit) if the archive is
+  incomplete or was built wrong.
+
+inputs:
+  release-tag:
+    description: GitHub Release tag holding the data/ snapshot asset.
+    required: false
+    default: data-seed
+  asset-name:
+    description: Name of the release asset (a tar.gz of data/).
+    required: false
+    default: data-seed.tar.gz
+  github-token:
+    description: >
+      Token for `gh release download` (needs repo read access).
+      Composite actions have no implicit access to the secrets context,
+      so the caller must pass this explicitly (e.g. secrets.GITHUB_TOKEN).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download data/ snapshot from the release asset
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh release download "${{ inputs.release-tag }}" \
+          --pattern "${{ inputs.asset-name }}" \
+          --repo "${{ github.repository }}"
+
+    - name: Extract
+      shell: bash
+      run: tar -xzf "${{ inputs.asset-name }}"
+
+    - name: Sanity-check the extracted data/ tree
+      shell: bash
+      run: |
+        for f in races results qualifying drivers constructors circuits \
+                 driver_standings constructor_standings status; do
+          if [ ! -f "data/$f.csv" ]; then
+            echo "::error::data/$f.csv missing from the extracted snapshot — ${{ inputs.asset-name }} is incomplete or was built wrong."
+            exit 1
+          fi
+        done
+        echo "data/ snapshot looks complete:"
+        wc -l data/*.csv

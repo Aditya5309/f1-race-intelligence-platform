@@ -18,6 +18,98 @@ data at all.
 
 ---
 
+## Cache eviction and the automatic recovery path (added after the 2026-07-20 incident)
+
+### What happened
+
+Part 1 below was completed correctly on 2026-07-11, and `retrain.yml` ran
+successfully four weeks in a row, each time restoring the previous run's
+cache entry and re-saving a fresh one. The fifth scheduled run
+(2026-07-20) hard-failed with `data/races.csv not found`, even though
+nothing about the setup had changed. Investigated via the actual GitHub
+state (`gh cache list`, `gh run view --log`), not guesswork: the entire
+`f1-data-*` cache prefix had been evicted between the fourth and fifth
+runs. See `context/decisions.md`'s ADR for this incident for the full
+investigation.
+
+### Why: GitHub Actions cache eviction, racing this workflow's own schedule
+
+GitHub Actions deletes cache entries that haven't been accessed in
+**about 7 days**. `retrain.yml` runs **weekly** — the same interval,
+which leaves no safety margin against ordinary scheduling jitter (GitHub
+cron triggers are documented to slip; a single delayed or skipped run is
+enough to push the gap since the last successful save past 7 days). This
+is a real, confirmed platform behavior, not a bug in this repo's own
+scripts — but the *design* gave it zero margin, which was the actual gap.
+
+### The fix: a self-healing fallback, not a hard failure
+
+`retrain.yml`'s `Restore data/ cache` step is unchanged and remains the
+fast path on every normal week. A new `Check whether data/ actually
+restored` step checks for `data/races.csv` by file presence (the restore
+step's own `cache-hit` output can't be used here — it only reports `true`
+on an exact match of the primary key, which is always this run's own
+just-generated id, so it reads `false` even on a perfectly healthy
+`restore-keys` prefix match). If the file is genuinely missing, a `Fall
+back to the data-seed release asset` step recovers `data/` from the same
+durable GitHub Release asset Part 1 below creates — via the shared
+`.github/actions/restore-data-seed` composite action, the single
+implementation this workflow and `seed-data-cache.yml` both call, so the
+download/extract/sanity-check logic can't drift apart between the two.
+GitHub Releases don't expire the way Action cache entries do, so this
+removes the recurring fragility rather than just papering over one
+incident.
+
+**`scripts/ingest_jolpica.py` is completely unmodified by this fix** — the
+fallback only ever hands it the same shape of already-existing `data/`
+tree it always expected; whatever races completed between the release
+snapshot's build date and now, it backfills exactly as it always does.
+For any realistic gap (days to a few weeks) that's a handful of races,
+nowhere near jolpica-f1's rate limit.
+
+The fallback logs a visible `::warning::` when it fires — it is
+deliberately not silent, so a human notices "the cache was evicted and
+we recovered from the release asset" (worth knowing, since the fallback
+may recover from a real snapshot that is now some weeks old) rather than
+this reads as just an ordinary green run.
+
+### Operational flow, end to end
+
+```
+Restore data/ cache (fast path)
+        │
+        ▼
+Check whether data/ actually restored
+        │
+        ├── restored=true  ──────────────────────────► continue
+        │
+        └── restored=false (cache evicted)
+                │
+                ▼
+        Fall back to the data-seed release asset
+        (.github/actions/restore-data-seed — same
+         asset seed-data-cache.yml uses; fails loudly
+         if THIS is also broken/missing)
+                │
+                ▼
+        continue (ingest_jolpica.py backfills forward
+        from whatever the release snapshot's date was)
+```
+
+### What this does NOT change
+
+- `seed-data-cache.yml` (Part 1 below) is still the tool for an
+  **explicit** re-seed — e.g. after rebuilding `data/` locally with a
+  materially bigger/different snapshot. The automatic fallback is only
+  for *unattended* eviction recovery using the *existing* release asset;
+  it does not replace deliberately refreshing that asset.
+- If the release asset itself is ever missing or corrupted **at the same
+  time** the cache is evicted, the job still fails loudly (the composite
+  action's own sanity check), naming the missing file — that combination
+  genuinely needs a human, and always will.
+
+---
+
 ## Part 1 — Seed the `data/` cache (one-time, before the first run)
 
 ### Cache key this reads/writes (confirm against the workflow file, don't trust this doc if they ever diverge)
@@ -136,8 +228,9 @@ id first if anything else has run in between).
 
 | Step | What success looks like | What failure looks like, and what it means |
 |---|---|---|
-| **Restore data/ cache** | Log line showing a cache hit against a key starting `f1-data-` (the seed entry, on this first run) | "Cache not found for input keys" — the seed (Part 1) wasn't completed, or the cache was evicted before this ran. Go back to Part 1. |
-| **Confirm data/ was restored** | Passes silently (no output) | `::error::data/races.csv not found...` — the restore step above ran but the archive it restored is somehow empty/wrong. Re-check Part 1 Step 4's cache-list output. |
+| **Restore data/ cache** | Log line showing a cache hit against a key starting `f1-data-` (the seed entry, on this first run) | "Cache not found for input keys" — not itself a failure anymore (see the two rows below): the seed (Part 1) wasn't completed, or the cache was evicted since the last run. |
+| **Check whether data/ actually restored** | Passes silently, `restored=true` — data/ came from the cache | `::warning::data/ Actions cache... was empty or evicted — falling back...` plus `restored=false` — not a job failure, triggers the fallback step below. If you see this often, the cache is being evicted faster than expected; see the "Cache eviction and the automatic recovery path" section above. |
+| **Fall back to the data-seed release asset (cache miss)** | Only runs when the check above found `restored=false`; recovers `data/` from the release asset (same source as Part 1) and prints "data/ snapshot looks complete" | `::error::data/$f.csv missing...` and the job stops — the release asset itself is missing/broken, a genuine "go fix Part 1's asset" case, not something this fallback can recover from. |
 | **Ingest + rebuild + freeze** (the longest step, several minutes) | Prints each of `refresh_and_freeze.py`'s 8 sub-steps passing: ingestion (reports races fetched or "Nothing to ingest" if fully caught up), `build_interim`, `build_dataset`, `features.pipeline`, current-era season tracking (scores any newly completed race against the bundle that was already served — see `src/models/season_tracking.py`), runtime features-snapshot refresh (`scripts/refresh_features_snapshot.py` — always, independent of promotion), display-data refresh, and finally `Registered f1-winner vN as @Staging` | Any sub-step's own error surfaces here and stops the job (the orchestrator halts at the first failure, per its own design — nothing after a failed step runs). A jolpica-f1 API error here most likely means you've hit its 200 req/hour rate limit — wait and re-dispatch. |
 | **Upload ingestion report** | An `ingest-report-<run-id>` artifact appears on the run's summary page — download with `gh run download <run-id> -n ingest-report-<run-id>` for `summary.json` (race/row counts, skipped races) plus one CSV per endpoint of exactly the new rows this run fetched (never the full `data/` tree). Runs even if a later step fails (`if: always()`) — it's independent visibility into ingestion, not a gate. | `if-no-files-found: warn` — a missing artifact means ingestion itself never got far enough to write a report (check the step above for the real error); this step itself does not fail the job. |
 | **Save data/ cache** | Runs regardless of the step above (marked `if: always()`) — confirms a new cache entry was saved | Should not fail; if it does, it's a GitHub Actions infrastructure issue, not this project's code. |
