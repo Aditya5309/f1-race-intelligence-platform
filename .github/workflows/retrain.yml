@@ -96,7 +96,7 @@ jobs:
       # most recent previous entry (last week's run, or the one-off seed).
       - name: Restore data/ cache
         id: data-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/
           key: f1-data-${{ github.run_id }}
@@ -177,7 +177,7 @@ jobs:
       # so next week's run doesn't need the fallback too.
       - name: Save data/ cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/
           key: f1-data-${{ github.run_id }}

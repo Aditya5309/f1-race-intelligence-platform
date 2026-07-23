@@ -41,7 +41,7 @@ jobs:
       # sharing retrain.yml's "f1-data-" prefix so ITS very first
       # restore-keys lookup finds this entry.
       - name: Save to the shared data/ cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/
           key: f1-data-seed-${{ github.run_id }}
