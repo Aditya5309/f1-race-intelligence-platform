@@ -98,9 +98,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: data/
-          key: f1-data-TEST-VALIDATION-ONLY-${{ github.run_id }}
+          key: f1-data-${{ github.run_id }}
           restore-keys: |
-            f1-data-TEST-VALIDATION-ONLY-
+            f1-data-
 
       # Checked by FILE PRESENCE, not the restore step's own `cache-hit`
       # output: `cache-hit` is only ever `true` on an EXACT match of the
@@ -179,7 +179,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: data/
-          key: f1-data-TEST-VALIDATION-ONLY-${{ github.run_id }}
+          key: f1-data-${{ github.run_id }}
 
       # This PR is
       # DELIBERATELY separate from the model-promotion PR below and has NO
