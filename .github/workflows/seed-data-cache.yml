@@ -2,22 +2,22 @@
 # workflow_dispatch only — never runs on a schedule. Run this
 # ONCE before the first real run of retrain.yml, and again any time you
 # want to replace the cached data/ tree with a fresh manual snapshot (e.g.
-# after a cache eviction, or a large manual data/ rebuild locally).
+# after a cache eviction, or a large manual data/ rebuild locally) — though
+# note retrain.yml (as of the release-fallback fix) now recovers from a
+# cache eviction automatically; this workflow is for an EXPLICIT re-seed
+# from a newly-rebuilt local data/ tree, not routine eviction recovery.
 #
-# Reads data/ from a GitHub Release asset (tag: DATA_RELEASE_TAG below),
-# never from a committed branch — data/ stays gitignored
-# and never touches ANY branch's git history, main or otherwise. See
-# docs/retrain_workflow_setup.md for the exact commands to create/update
-# that release asset from your local data/ tree before running this.
+# Reads data/ from a GitHub Release asset via the shared
+# .github/actions/restore-data-seed composite action — never from a
+# committed branch — data/ stays gitignored and never touches ANY
+# branch's git history, main or otherwise. See docs/retrain_workflow_setup.md
+# for the exact commands to create/update that release asset from your
+# local data/ tree before running this.
 
 name: Seed data/ cache
 
 on:
   workflow_dispatch: {}
-
-env:
-  DATA_RELEASE_TAG: data-seed
-  DATA_ASSET_NAME: data-seed.tar.gz
 
 jobs:
   seed:
@@ -30,29 +30,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # gh is preinstalled on GitHub-hosted runners; GH_TOKEN authorizes it.
-      - name: Download data/ snapshot from the release asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download "$DATA_RELEASE_TAG" \
-            --pattern "$DATA_ASSET_NAME" \
-            --repo "${{ github.repository }}"
-
-      - name: Extract
-        run: tar -xzf "$DATA_ASSET_NAME"
-
-      - name: Sanity-check the extracted data/ tree
-        run: |
-          for f in races results qualifying drivers constructors circuits \
-                   driver_standings constructor_standings status; do
-            if [ ! -f "data/$f.csv" ]; then
-              echo "::error::data/$f.csv missing from the extracted snapshot — $DATA_ASSET_NAME is incomplete or was built wrong."
-              exit 1
-            fi
-          done
-          echo "data/ snapshot looks complete:"
-          wc -l data/*.csv
+      - name: Restore data/ from the data-seed release asset
+        uses: ./.github/actions/restore-data-seed
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Same CACHE KEY SCHEME as retrain.yml (read the note at the top of
       # that file first): a unique key so this save always succeeds

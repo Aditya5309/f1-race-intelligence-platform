@@ -17,7 +17,8 @@ git clone https://github.com/Aditya5309/f1-race-intelligence-platform.git
 cd f1-race-intelligence-platform
 pip install -r requirements.txt   # editable install + dev tools (pytest, ruff, pip-audit)
 
-pytest tests/               # should pass — 540 tests, none need data/
+pytest tests/               # should pass — 619 tests; a handful skip cleanly
+                             # if data/ is absent (see docs/commands.md)
 python -m ruff check .      # should be clean
 python scripts/smoke.py     # end-to-end synthetic check, no data/ needed
 ```
@@ -38,8 +39,10 @@ environment at all — see [README.md's Docker section](README.md#9-docker).
 .github/workflows/   ci.yml (lint, security scans, tests, coverage gate, smoke),
                      retrain.yml (scheduled ingestion + retraining), seed-data-cache.yml
 .github/dependabot.yml   Weekly dependency-update pull requests (pip, GitHub Actions, Docker)
-app/                 FastAPI service, settings, eight-page Streamlit dashboard
-                     (views + shared components/charts/metadata modules)
+app/                 FastAPI service (including upcoming-race prediction
+                     orchestration in upcoming_prediction_service.py), settings,
+                     eight-page Streamlit dashboard (views + shared
+                     components/charts/metadata modules)
 artifacts/           COMMITTED runtime tree — frozen model bundle, features snapshot,
                      display-metadata CSVs, and the live-season tracking log; this is the
                      only thing a deployed instance needs beyond source code
@@ -48,19 +51,23 @@ config/              Shared hyperparameter configuration used by both manual and
 data/                Raw / interim / processed training datasets (gitignored)
 docker/              Dockerfile.api, Dockerfile.dashboard, and their per-image
                      dependency lists
-docs/                User guide, API reference, command reference, ingestion/retraining
-                     runbook, and screenshots
+docs/                User guide, API reference, pre-race materialization design,
+                     command reference, ingestion/retraining runbook, Render
+                     deployment setup, and screenshots
 notebooks/           Exploratory analysis only — no business logic
 scripts/             Data ingestion, model promotion, artifact export, the local
-                     development launcher, and the end-to-end smoke test
+                     development launcher, the end-to-end smoke test, and the
+                     Render build/data-provisioning scripts
 src/data/            Loading, cleaning, validation, interim parquet builders
 src/integration/     Join-only master dataset builder
 src/pipelines/       Dataset build orchestration
-src/features/        Modular feature groups, the feature pipeline, and feature metadata
+src/features/        Modular feature groups, the feature pipeline, feature metadata,
+                     and upcoming-race calendar/entry-list resolution (upcoming.py)
 src/models/          Splits, regulation eras, registry, training, evaluation, analysis,
-                     calibration, prediction, live-season monitoring, and
-                     frozen runtime-artifact export/load
-tests/               540 pytest tests mirroring every implemented layer
+                     calibration, prediction, live-season monitoring, frozen
+                     runtime-artifact export/load, and the pre-race Materializer
+                     (materialize.py) — see docs/pre_race_materialization.md
+tests/               619 pytest tests mirroring every implemented layer
 docker-compose.yml           Production-shape service definitions
 docker-compose.override.yml  Local development overrides (auto-merged)
 Makefile             make lint / test / coverage / quality / smoke / audit / secrets / all
@@ -92,8 +99,12 @@ stylistic preferences:
   extended) API route, not a direct import of `src/`.
 - **The deployed API and dashboard read only from the committed
   `artifacts/` tree** — a frozen model bundle and a features snapshot —
-  never from a live MLflow server or the gitignored `data/` tree at
-  request time. Don't reintroduce that coupling.
+  never from a live MLflow server at request time. One disclosed
+  exception: `POST /predict` (upcoming-race prediction) additionally reads
+  the gitignored `data/` tree to materialize a pre-race feature row, and
+  degrades to `503` where that data isn't available — see
+  [docs/pre_race_materialization.md](docs/pre_race_materialization.md).
+  Every other route is unaffected by, and must not gain, this coupling.
 - **Registering a model in MLflow does not promote it.** Only
   `scripts/promote_model.py`'s gate is allowed to change
   `artifacts/serving/`, and only after its checks pass.

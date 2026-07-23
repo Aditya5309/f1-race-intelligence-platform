@@ -1,5 +1,6 @@
 """
-Tests for app/upcoming_prediction_service.py (Phase 7, Decision 052).
+Tests for app/upcoming_prediction_service.py — the orchestration layer
+behind POST /predict (see docs/pre_race_materialization.md).
 
 Coverage: lazy initialization of POST /predict's training-side data (loads
 on first call, not before), successful cache reuse (a second call reuses
@@ -8,7 +9,7 @@ initialization FAILURE (a second call after a failed first one raises the
 same cached error without retrying disk I/O), the resolve_upcoming_
 prediction() pre-race cache (a second identical request is a hit and never
 re-invokes materialize_and_score()), one test per named cache-invalidation
-trigger (design doc §5 / Decision 049 Refinement 5), and the plain-Python
+trigger (see "Cache invalidation" in docs/pre_race_materialization.md), and the plain-Python
 exception types this module raises for app/api.py to map to HTTP status
 codes (RaceAlreadyHasResult, ValueError for a bad/out-of-horizon/naive-
 as_of request, RuntimeError for unavailable materialization data) — the
@@ -236,7 +237,7 @@ def test_failure_is_cached_and_not_retried(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# resolve_upcoming_race — identity-only lookup (Phase 8, GET /races/upcoming)
+# resolve_upcoming_race — identity-only lookup (GET /races/upcoming)
 # ---------------------------------------------------------------------------
 
 def test_resolve_upcoming_race_returns_identity(tmp_path):
@@ -318,7 +319,8 @@ def test_race_already_has_result_raises_race_already_has_result(tmp_path):
 def test_beyond_horizon_raises_value_error(tmp_path):
     """3 races on the calendar; only round 2 has no result. Requesting
     round 3 (further out, also result-less) must still be rejected --
-    Decision 050's horizon=1, not "any not-yet-run race"."""
+    the materialization horizon is 1 (only the single next race), not
+    "any not-yet-run race"."""
     settings = _write_raw_files(tmp_path, _races_frame(), _master_frame([1]))
     state = _new_state()
     with pytest.raises(ValueError, match="materialization horizon"):
@@ -417,8 +419,9 @@ def test_identical_request_is_a_cache_hit_and_skips_materialization(tmp_path, mo
 
 
 # ---------------------------------------------------------------------------
-# Cache-invalidation triggers (design doc §5 / Decision 049 Refinement 5) —
-# one test per named row. "Qualifying completed", "grid penalties
+# Cache-invalidation triggers (see "Cache invalidation" in
+# docs/pre_race_materialization.md) — one test per named row. "Qualifying
+# completed", "grid penalties
 # adjudicated", and "ETL refresh (any file)" all share the SAME mechanism
 # (etl_snapshot_version = the max mtime across three watched files) — each
 # gets its own test against a DIFFERENT one of those files, covering the
@@ -480,7 +483,7 @@ def test_trigger_grid_penalties_adjudicated_busts_cache(tmp_path, monkeypatch, f
 def test_trigger_etl_refresh_any_file_busts_cache(tmp_path, monkeypatch, fitted_model):
     """'ETL refresh (any run touching this race's inputs)' -- covered here
     via the third watched file (weather), completing the "any of the
-    three" generality the design doc's Cache Invalidation table claims."""
+    three" generality this cache-invalidation contract claims."""
     settings = _write_raw_files(tmp_path, _races_frame(), _master_frame([1]))
     state = _new_state()
     model_info = SimpleNamespace(version="v1")

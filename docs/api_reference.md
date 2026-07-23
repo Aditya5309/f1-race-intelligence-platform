@@ -10,7 +10,9 @@ the versioned paths shown here. All responses are JSON.
 
 No authentication is required or implemented — this is a public, read-only
 demonstration deployment, not a multi-user service. Every route is `GET`
-except the reserved, always-`501` `POST /predict`.
+except `POST /predict`, which accepts a small identity payload (year/round,
+optional entry-list override) — never feature values, which stay
+server-derived on every route.
 
 ---
 
@@ -49,6 +51,24 @@ Query parameters: `year` (optional int) — filter to one season.
 ```json
 { "races": [ { "race_id": 1098, "year": 2023, "round": 1, "n_drivers": 20 } ] }
 ```
+
+## GET /api/v1/races/upcoming
+
+Identity only — year, round, name, circuit, date — of the single next race
+with no result yet. **Not a prediction**: no `materialization_status`,
+`caveats`, or `provenance`; those only appear once you actually request a
+scored prediction from `POST /predict`. Backs the dashboard's upcoming-race
+picker entry.
+
+```json
+{ "race_id": 1141, "year": 2026, "round": 13, "name": "Belgian Grand Prix",
+  "circuit_id": 13, "date": "2026-07-26" }
+```
+
+Errors: **404** if every calendar race already has a result (nothing
+upcoming to show) · **503** if the training-side data this lookup needs
+isn't available (see [docs/pre_race_materialization.md](pre_race_materialization.md)
+for why this route needs more than the committed `artifacts/` tree).
 
 ## GET /api/v1/predictions/{race_id}
 
@@ -169,22 +189,72 @@ Returns the exact feature vectors fed to the model for a race:
 `null` feature values are informative missingness (e.g. eliminated before
 Q3, no prior history at this circuit) — the model consumes them as signals.
 
-## POST /api/v1/predict — reserved
+## POST /api/v1/predict
 
-Always returns **501 Not Implemented**. The route is reserved as the
-future entry point for *upcoming-race* predictions (races that haven't run
-yet), which require the feature pipeline to materialize pre-race feature
-rows first — not implemented today.
+Score the single next race with no result yet (the same race
+`GET /races/upcoming` identifies) with the served model — reusing the
+exact same feature pipeline and calibration as every historical
+prediction. See [docs/pre_race_materialization.md](pre_race_materialization.md)
+for how the feature row is built and the limitations that come with that.
 
-A design for this contract has been reviewed and accepted (Decision 049)
-but not built: the served model and its calibration are reused unchanged;
-a dedicated component (never the API layer itself) would be responsible
-for constructing a race's feature row from data already refreshed by the
-project's own scheduled ingestion job — never by calling any third-party
-API at request time; and two acceptance checks (a feature-parity check
-against historical data, and a historical-backtest check against this
-API's own existing predictions) would need to pass before this route
-could return anything other than 501.
+Request body:
+
+```json
+{
+  "year": 2026, "round": 13,
+  "entry_list": null,
+  "as_of": null
+}
+```
+
+- `entry_list` — optional list of `{"driver_id": ..., "constructor_id": ...}`
+  pairs. Omit to use the roster inferred from the most recently completed
+  race. Never a feature payload — driver/constructor identity only;
+  everything feature-shaped is still built server-side.
+- `as_of` — optional, reserved for a future historical-cutoff override.
+  If present, must be an ISO-8601 timestamp with an explicit UTC offset
+  (e.g. `"2026-07-23T10:00:00Z"`) — a naive timestamp is rejected with
+  `422` rather than silently assumed to be UTC.
+
+Response:
+
+```json
+{
+  "prediction_id": "…", "year": 2026, "round": 13,
+  "materialization_status": "post_qualifying",
+  "missing_inputs": [],
+  "generated_at": "2026-07-23T10:05:00+00:00",
+  "model": { "...": "as in /health" },
+  "predictions": [ "...same shape as GET /predictions/{race_id}'s predictions array" ],
+  "caveats": [
+    "grid_adjusted/grid_position_norm are sourced from qualifying_position — a post-qualifying grid penalty or pit-lane start is not yet reflected."
+  ],
+  "provenance": {
+    "model_version": "4", "model_alias": "Staging",
+    "feature_schema_version": "…", "etl_snapshot_version": "…",
+    "data_as_of": "…", "materialized_at": "…", "predicted_at": "…",
+    "qualifying_status": "complete", "completeness_status": "post_qualifying"
+  }
+}
+```
+
+Field notes:
+- `materialization_status` / `completeness_status` — `"post_qualifying"`
+  (qualifying fully recorded) or `"pre_qualifying"` (not yet — an
+  additional caveat is included in that case). `missing_inputs` names any
+  gaps.
+- `provenance` — every prediction is reconstructable later from its own
+  recorded metadata alone: which model, which feature schema, which ETL
+  snapshot, and when each step ran.
+- Cached per `(model_version, year, round, feature_schema_version,
+  etl_snapshot_version, entry_list_hash)` — any of those six changing
+  (a new model promoted, a fresh ETL snapshot, a late roster confirmation)
+  invalidates the cached response rather than serving it stale.
+
+Errors: **409** the race already has a real result (not "upcoming"
+anymore) · **422** invalid `entry_list`/`as_of` · **503** the training-side
+data this route needs isn't available (see
+[docs/pre_race_materialization.md](pre_race_materialization.md)).
 
 ## Errors
 

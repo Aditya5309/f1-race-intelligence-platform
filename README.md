@@ -6,7 +6,7 @@
 ![Version](https://img.shields.io/badge/version-1.4.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-540%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-619%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/src%20coverage-95%25-brightgreen)
 
 **Contents:**
@@ -43,10 +43,11 @@
 - Reproducible batch pipeline from raw Ergast-format CSVs to a leakage-controlled feature store covering every season back to 1950.
 - A five-candidate model zoo compared under season-grouped temporal cross-validation; the final model is calibrated and registered through MLflow.
 - Historical race predictions (through 2024) served via a versioned FastAPI service and an eight-page Streamlit dashboard, including an interactive grid-position simulator and a model-vs-baseline comparison view.
-- 540 automated tests (95% measured `src/` coverage, enforced in CI), including one explicit leakage test per identified risk.
-- Docker images for both services, weekly automated data ingestion and retraining with a promotion gate, and a hardened GitHub Actions pipeline (linting, secret scanning, dependency vulnerability scanning, test coverage enforcement).
+- **Upcoming-race prediction**: a pre-race feature-materialization pipeline scores the single next race with no result yet, reusing the same served model and feature pipeline as every historical prediction — no separate model, no third-party call at request time. See [Pre-Race Materialization](#7-data--ml-pipeline).
+- 619 automated tests (95% measured `src/` coverage, enforced in CI), including one explicit leakage test per identified risk and two mandatory acceptance gates (golden-row parity, historical backtest) for the materialization pipeline.
+- Docker images for both services, weekly automated data ingestion and retraining with a promotion gate, a self-healing cache-restoration fallback for the scheduled retraining workflow, and a hardened GitHub Actions pipeline (linting, secret scanning, dependency vulnerability scanning, test coverage enforcement).
 
-> **Trust posture:** this is a public, read-only demonstration deployment. There is no authentication and no user-write path by design — every route is `GET` except a single reserved, always-`501` `POST /predict` stub. See [API Usage](#10-api-usage) for the reasoning.
+> **Trust posture:** this is a public, read-only demonstration deployment. There is no authentication. Every route is `GET` except `POST /predict`, which only ever accepts an identity payload (year/round, optional entry-list override) — never feature values. See [API Usage](#10-api-usage) for the reasoning.
 
 ---
 
@@ -62,9 +63,10 @@
 | **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; each artifact stores its trained schema and re-validates it at inference |
 | **Frozen runtime artifacts** | Registration exports a self-contained model bundle plus a features snapshot that the API loads directly — no live MLflow tracking server or database needed at request time; the runtime artifact tree is committed to git so a fresh clone can serve real predictions immediately |
 | **Versioned inference API** | FastAPI, every route under `/api/v1`, with automatic backward compatibility for the pre-versioning paths; degraded-mode startup instead of crash-looping; a FIFO prediction cache; a forward-holdout guard rejecting seasons the model has never been evaluated against |
+| **Upcoming-race prediction** | `GET /races/upcoming` (identity of the next race with no result yet) and `POST /predict` (scores it) — a Materializer builds a synthetic pre-race feature row through the same, unmodified feature pipeline, gated behind mandatory golden-row-parity and historical-backtest acceptance checks; see [docs/pre_race_materialization.md](docs/pre_race_materialization.md) |
 | **Interactive "what-if" views** | A grid-position/pit-lane prediction simulator and a model-vs-pole-baseline comparison, both reusing the same scoring contract as historical predictions — no separate model needed |
 | **Streamlit dashboard** | Eight pages (see [Dashboard](#3-dashboard)); predictions consumed from the API over HTTP only — the dashboard never imports the model code directly |
-| **Automated data operations** | Weekly ingestion from a maintained upstream source, an atomic rebuild-and-freeze pipeline, and a promotion gate that blocks any retrained candidate whose accuracy regresses versus what is currently served |
+| **Automated data operations** | Weekly ingestion from a maintained upstream source, an atomic rebuild-and-freeze pipeline, a promotion gate that blocks any retrained candidate whose accuracy regresses versus what is currently served, and a self-healing fallback that recovers the pipeline's cached training data from a durable release asset if the GitHub Actions cache is ever evicted |
 | **Containerized deployment** | Separate, minimal Docker images for the API and the dashboard, each carrying only the dependencies it actually needs at runtime; Docker Compose for local orchestration |
 | **Hardened CI/CD** | GitHub Actions: secret scanning, linting, dependency vulnerability scanning, the full test suite with an enforced coverage floor, and an end-to-end smoke test on every push and pull request; automated weekly dependency-update pull requests |
 
@@ -77,7 +79,7 @@ The dashboard is a Formula 1 analytics product first: fan-facing pages answer *w
 | Page | What it shows |
 |---|---|
 | 🏠 **Dashboard** | System status (model stage, API health, supported seasons) and headline evaluation metrics |
-| 🏎 **Race Center** | Grand Prix header, favorite/contender cards, "why did the model choose this driver?" factor badges, a full-field chart, an interactive grid-position simulator, and a model-vs-pole-baseline comparison |
+| 🏎 **Race Center** | Grand Prix header, favorite/contender cards, "why did the model choose this driver?" factor badges, a full-field chart, an interactive grid-position simulator, and a model-vs-pole-baseline comparison; also picks and scores the single upcoming race with no result yet, with a provenance panel and completeness caveats |
 | 👤 **Driver Explorer** | Driver profile, career/season tiles (wins, podiums, poles, points, average qualifying/finish), and a skill radar chart (qualifying pace, race pace, consistency) |
 | ⚖️ **Compare Drivers** | Side-by-side, season-scoped comparison of two drivers with overlaid radar charts |
 | 🏭 **Team** | Constructor-grain season and career view |
@@ -138,6 +140,7 @@ flowchart TB
 - Raw data, the MLflow tracking store, and training-only intermediates all stay out of version control.
 - The deployed API and dashboard read *only* a small, committed `artifacts/` tree — the frozen model bundle plus a features snapshot.
 - Registration bridges the two, freezing a training-side snapshot into that committed tree; a separate, gated promotion step is the only thing that changes what's actually served.
+- **One disclosed exception:** `POST /predict` (upcoming-race prediction) additionally needs training-side data with no `artifacts/`-tree equivalent, and degrades to `503` on a deployment without it — see [docs/pre_race_materialization.md](docs/pre_race_materialization.md).
 
 ---
 
@@ -153,7 +156,7 @@ flowchart TB
 | Dashboard | Streamlit, Plotly, httpx |
 | Configuration | pydantic-settings (`F1_`-prefixed environment variables) |
 | Containers | Docker, Docker Compose |
-| Testing | pytest + pytest-cov (540 tests, 95% `src/` coverage) |
+| Testing | pytest + pytest-cov (619 tests, 95% `src/` coverage) |
 | Linting | Ruff (lint-only; formatter not adopted) |
 | Security | gitleaks (secret scanning), pip-audit (dependency vulnerability scanning) |
 | CI/CD | GitHub Actions (Ubuntu, Python 3.11), Dependabot |
@@ -165,7 +168,7 @@ flowchart TB
 ```text
 src/            Data, integration, feature, and model layers (see Architecture above)
 app/            FastAPI service + Streamlit dashboard (dashboard never imports src/)
-tests/          540 pytest tests mirroring src/ and app/
+tests/          619 pytest tests mirroring src/ and app/
 docs/           User guide, API reference, command reference, retraining runbook
 artifacts/      COMMITTED runtime tree — the only thing a deployed instance needs
 scripts/        Ingestion, promotion, artifact export, local dev launcher, smoke test
@@ -183,6 +186,8 @@ Raw CSVs flow through cleaning/validation, a join-only master dataset, temporal 
 The served model was trained on 31 pre-race features — a curated subset of the 41-column feature pipeline, after an ablation study found one experimental group (wet-weather deltas) didn't generalize from the training window.
 
 Full stage-by-stage breakdown (module, output artifact, and what each stage guarantees) and the commands to rebuild each one: [docs/user_guide.md](docs/user_guide.md#data--ml-pipeline).
+
+**Pre-race materialization** extends this pipeline to score a race that hasn't happened yet: a Materializer builds one synthetic feature row per entrant through the exact same, unmodified feature-engineering code, gated behind mandatory golden-row-parity and historical-backtest acceptance checks before being wired into `POST /predict`. Full design, architecture, and known limitations (the qualifying-position-as-grid proxy, the training-side data gap): [docs/pre_race_materialization.md](docs/pre_race_materialization.md).
 
 ---
 
@@ -237,6 +242,8 @@ docker compose down
 - The dashboard's API URL always points at the sibling `api` Compose service by name, never an operator-supplied value; ports, log level, and cache size are all overridable.
 - No persistent volumes are needed for serving — there's no database, only the baked-in `artifacts/` tree. The development override mounts it (and the source tree) read-only, purely so local edits show up without a rebuild.
 
+**Non-Docker hosting (Render):** the API is also deployed as a native Python web service on [Render](https://render.com), without a Dockerfile. That target needs one extra build-time step to provision the training-side data `POST /predict` depends on (see [docs/pre_race_materialization.md](docs/pre_race_materialization.md)) — full setup in [docs/render_deployment.md](docs/render_deployment.md).
+
 ---
 
 ## 10. API Usage
@@ -248,11 +255,12 @@ All routes are versioned under `/api/v1`:
 | GET | `/api/v1/health` | Liveness plus serving-model identity (reports degraded mode instead of crashing) |
 | GET | `/api/v1/model` | Full metadata of the registered serving model |
 | GET | `/api/v1/races?year=` | Races available for scoring (seasons through 2024) |
+| GET | `/api/v1/races/upcoming` | Identity of the single next race with no result yet (not a prediction) |
 | GET | `/api/v1/predictions/{race_id}` | Win probabilities for the full field of one historical race |
 | GET | `/api/v1/predictions/{race_id}/simulate/{driver_id}` | Prediction simulator — grid/qualifying-position "what if" |
 | GET | `/api/v1/predictions/{race_id}/vs-baseline` | The model's predictions next to the pole-only baseline |
 | GET | `/api/v1/debug/features/{race_id}` | Exact feature vectors fed to the model — disabled by default |
-| POST | `/api/v1/predict` | Reserved for upcoming-race scoring — intentional `501` until the pre-race feature pipeline exists |
+| POST | `/api/v1/predict` | Scores the upcoming race identified by `GET /races/upcoming` via the pre-race materialization pipeline; `503` if the training-side data it needs isn't available on this deployment |
 
 Every route above is also reachable at its equivalent pre-versioning path with no `/api/v1` prefix (for example, plain `/health`) — same handler, same response — kept for backward compatibility but not listed in the interactive API docs, which only ever show the versioned contract.
 
@@ -288,7 +296,7 @@ Full request/response contracts: [docs/api_reference.md](docs/api_reference.md).
 
 - **CORS** is configurable via `F1_CORS_ALLOW_ORIGINS` (comma-separated origins, or `*`). The default is empty — no cross-origin browser access.
 - **Every error response is logged server-side.** Unexpected server errors return a generic `{"detail": "Internal server error."}` at `500` — nothing internal is ever exposed to the client.
-- **Authentication is intentionally not implemented.** This is a public, read-only demo API (every route is `GET` except the always-`501` `POST /predict`) — no accounts, no write path, nothing private to protect (F1 results are public record). Adding auth now would mean credential management with nothing real to guard; this would be revisited if `POST /predict` ever became a genuine write endpoint.
+- **Authentication is intentionally not implemented.** This is a public, read-only demo API — every route is `GET` except `POST /predict`, which only ever accepts an identity payload (year/round, optional entry-list override), never a write of feature values — no accounts, no write path, nothing private to protect (F1 results are public record). Adding auth now would mean credential management with nothing real to guard; this would be revisited if a genuine write endpoint were ever added.
 
 ---
 
@@ -324,7 +332,7 @@ Registering a candidate in MLflow does **not**, by itself, change what is served
 
 ## 12. Testing & Code Quality
 
-- **540 tests** across the codebase — loading, cleaning, interim repairs, integration, features (including one explicit leakage test per identified risk), splits, regulation eras, training, calibration, prediction, serving-bundle export/load, analysis, ingestion, promotion, live-season monitoring, and the API.
+- **619 tests** across the codebase — loading, cleaning, interim repairs, integration, features (including one explicit leakage test per identified risk), splits, regulation eras, training, calibration, prediction, serving-bundle export/load, analysis, ingestion, promotion, live-season monitoring, the pre-race materialization pipeline (including the mandatory golden-row-parity and historical-backtest acceptance gates), and the API.
 - **Coverage:** 95% measured on `src/` (target ≥ 80%, enforced in CI); `app/api.py` at 97%. Streamlit views are intentionally untested at the unit level — they're presentation-only HTTP consumers, exercised instead by the smoke test's headless dashboard run and by manual QA. The combined `src/`+`app/` figure is reported but not gated, since it dilutes as dashboard pages are added and would measure the wrong thing.
 - **Linting:** Ruff, zero findings; rule set and reason-commented exemptions live in `pyproject.toml`.
 - **Smoke test:** `python scripts/smoke.py` — a synthetic end-to-end check (config → MLflow train/register + bundle export → frozen-bundle load → prediction contract → in-process FastAPI health + prediction, both versioned and legacy paths → headless dashboard run). Needs no `data/`, no ports, no external services; well under a minute.
@@ -345,11 +353,11 @@ Every push and pull request runs the full quality gate on GitHub Actions (Ubuntu
 6. **Coverage threshold** — `src/` only, enforced at 80%, reusing the same coverage data with no second test run.
 7. **Smoke test.**
 
-A passing run with the four real-data-only tests skipped (they need the gitignored `data/` tree, which a clean CI runner never has) is the healthy baseline.
+A passing run with the handful of real-data-only tests skipped (they need the gitignored `data/` tree, which a clean CI runner never has — see [docs/commands.md](docs/commands.md#testing) for which ones) is the healthy baseline.
 
 **Dependency update automation:** a scheduled workflow opens weekly pull requests for Python, GitHub Actions, and Docker base-image updates — never auto-merged, reviewed like every other change.
 
-**Scheduled data operations:** a separate weekly workflow ingests newly completed race weekends from a maintained upstream source, rebuilds every downstream artifact, and attempts a retrain — opening a pull request only when the promotion gate passes, and always opening a second, independent pull request to refresh display data regardless of whether a new model was promoted.
+**Scheduled data operations:** a separate weekly workflow ingests newly completed race weekends from a maintained upstream source, rebuilds every downstream artifact, and attempts a retrain — opening a pull request only when the promotion gate passes, and always opening a second, independent pull request to refresh display data regardless of whether a new model was promoted. Its cached training data self-heals from a durable GitHub Release asset if the GitHub Actions cache is ever evicted, rather than hard-failing — see [docs/retrain_workflow_setup.md](docs/retrain_workflow_setup.md).
 
 ![GitHub Actions — all checks green](docs/images/github-actions-success.png)
 
@@ -385,14 +393,16 @@ The dashboard has grown to eight pages; five are illustrated below (Compare Driv
 |---|---|
 | [docs/user_guide.md](docs/user_guide.md) | Running and using the platform, including the dashboard, Docker, and configuration |
 | [docs/api_reference.md](docs/api_reference.md) | Full endpoint request/response contracts |
+| [docs/pre_race_materialization.md](docs/pre_race_materialization.md) | How upcoming-race predictions are built: architecture, known limitations, acceptance gates |
 | [docs/commands.md](docs/commands.md) | The complete command reference — setup, testing, linting, security scanning, Docker, Git, and release workflows |
 | [docs/retrain_workflow_setup.md](docs/retrain_workflow_setup.md) | One-time setup and troubleshooting for the scheduled data-ingestion/retraining workflow |
+| [docs/render_deployment.md](docs/render_deployment.md) | Render (native Python) API deployment setup, and how it provisions the data `POST /predict` needs |
 
 ---
 
 ## 16. Project Status & Roadmap
 
-**Implemented today:** the full pipeline described above — data engineering, feature engineering, model training and calibration, a versioned and hardened serving API, an eight-page dashboard, Docker images, automated weekly data ingestion with a gated retraining/promotion cycle, live-season accuracy monitoring, and a CI pipeline covering linting, secret scanning, dependency vulnerability scanning, and an enforced test-coverage floor.
+**Implemented today:** the full pipeline described above — data engineering, feature engineering, model training and calibration, a versioned and hardened serving API, an eight-page dashboard, upcoming-race prediction via the pre-race materialization pipeline, Docker images, automated weekly data ingestion with a gated retraining/promotion cycle and a self-healing cache-restoration fallback, live-season accuracy monitoring, and a CI pipeline covering linting, secret scanning, dependency vulnerability scanning, and an enforced test-coverage floor.
 
 **Open work:**
 
@@ -400,7 +410,7 @@ The dashboard has grown to eight pages; five are illustrated below (Compare Driv
 - Splitting the packaging manifest into serving/dashboard/training dependency groups, so each deployment target installs only what it needs without hand-maintained duplicate requirement files.
 - Extending CI with a container build-and-push job and choosing a hosting target for the Docker images.
 - A generic production authentication story, if a genuine write-capable endpoint is ever added.
-- Upcoming-race prediction: materializing pre-race features for a race that hasn't happened yet, and implementing the currently-reserved `POST /predict` contract against it. A design for this has been reviewed and accepted (Decision 049) — reusing the served model unchanged, a dedicated feature-construction component kept out of the prediction path, local-data-only inputs (no live third-party calls from the serving path), and mandatory historical-parity checks before launch — but none of it is implemented yet.
+- A pre-qualifying prediction regime (scoring before qualifying results exist at all) — deliberately deferred as a separate, unvalidated stretch phase; today's upcoming-race prediction requires qualifying to have run.
 - Data-quality, drift, and latency monitoring beyond the accuracy tracking that already exists.
 - Revisiting the wet-weather feature group for training once more seasons of live data have accumulated.
 

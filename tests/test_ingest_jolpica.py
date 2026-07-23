@@ -152,7 +152,8 @@ def test_missing_completed_races_empty_when_all_have_results():
 
 
 # ---------------------------------------------------------------------------
-# resolve_upcoming_qualifying_target — Phase 2 (Decisions 049/050)
+# resolve_upcoming_qualifying_target — builds the upcoming race's qualifying
+# summary from partial/in-progress session data
 # ---------------------------------------------------------------------------
 
 def _races_calendar() -> pd.DataFrame:
@@ -348,10 +349,9 @@ def test_build_qualifying_rows_all_sessions_present(drivers_df):
 
 
 def test_build_qualifying_rows_partial_session_states_get_na_token(drivers_df):
-    """The named Phase 2 test scenario: Q1 done for everyone, Q2/Q3 only for
-    those who advanced. Missing sessions become NA_TOKEN, never fabricated
-    or dropped — same discipline as every other informative-missingness
-    column in this project (domain_knowledge.md §8)."""
+    """Q1 done for everyone, Q2/Q3 only for those who advanced. Missing
+    sessions become NA_TOKEN, never fabricated or dropped — same discipline
+    as every other informative-missingness column in this project."""
     constructors_df = pd.DataFrame({"constructorId": [1], "constructorRef": ["mercedes"]})
     drivers = ingest_jolpica.IdReconciler(drivers_df, "driverId", "driverRef")
     constructors = ingest_jolpica.IdReconciler(constructors_df, "constructorId", "constructorRef")
@@ -417,8 +417,8 @@ def test_write_ingest_report_writes_summary_and_new_row_csvs(tmp_path):
 
 
 def test_write_ingest_report_includes_upcoming_qualifying_when_given(tmp_path):
-    """Phase 2 (Decisions 049/050): the upcoming-race qualifying summary
-    rides along in the same report, additive to the existing fields."""
+    """The upcoming-race qualifying summary rides along in the same
+    ingest report, additive to the existing fields."""
     report_dir = tmp_path / "ingest_report"
     upcoming = {
         "year": 2026, "round": 11, "name": "Upcoming GP", "raceId": 9002,

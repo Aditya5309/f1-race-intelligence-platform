@@ -1,14 +1,15 @@
 """
 src/models/predict_upcoming.py
 
-Phase 5 of the pre-race materialization plan (Decisions 049/050; design
-doc §7): "Row assembly + serving integration — feed the Materializer's
-validated rows through the unchanged ColumnGuard -> predict_race() chain
-... deliberately thin; all real work happened in Phases 3-4."
+Row assembly + serving integration for the pre-race materialization
+pipeline (see `docs/pre_race_materialization.md` for the full
+architecture): feed the Materializer's validated rows through the
+unchanged ColumnGuard -> predict_race() chain. Deliberately thin; all the
+real work already happened in `materialize_features()` and `predict_race()`.
 
 This module is exactly that: pure composition of two already-complete,
 already-tested components — `src.models.materialize.materialize_features`
-(Phase 3/4) and `src.models.predict.predict_race` (existing, unmodified,
+and `src.models.predict.predict_race` (existing, unmodified,
 the same function the historical prediction path already uses) — with NO
 feature-engineering, validation, or prediction logic of its own. Neither
 `predict.py` nor `registry.py` is touched: the served model's ColumnGuard

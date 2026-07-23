@@ -1,10 +1,10 @@
 """
 tests/test_materialize_golden_row_parity.py
 
-Phase 4 of the pre-race materialization plan (Decisions 049/050) — the
-MANDATORY golden-row parity acceptance gate
-(`.ai/pre_race_materialization_design.md` §3/§7 Phase 4): "no phase past
-Materializer construction may proceed until this passes."
+The MANDATORY golden-row parity acceptance gate for the pre-race
+materialization pipeline (see "Acceptance gates" in
+`docs/pre_race_materialization.md`): no change to the Materializer may ship
+until this passes.
 
 For a defined historical sample — every race in the served model's own
 val+test windows (`src.models.splits.HISTORICAL`: 2022–2024, 68 races),
@@ -13,30 +13,30 @@ plus a stratified sample of train-window races across years/circuits
 Materializer (`src.models.materialize.materialize_features`) in "pretend
 this hasn't happened yet" mode against REAL project data and diffs the
 result against that race's real row in `data/processed/features.parquet`,
-per the design doc's own tolerance rules (§3):
+under these tolerance rules:
 
   - identifiers (`driverId`, `constructorId`, `circuitId`) and booleans:
     exact match, zero tolerance — verified explicitly (never assumed
     "equal by construction"; see `test_wrong_but_valid_constructor_id_is_
     detected` for a real, empirical proof this catches a wrong-but-valid
     ID that every other check in the pipeline silently lets through).
-    `raceId`/`year`/`round` are the one exception: not in the design
-    doc's own identifiers list, and structurally not independently
+    `raceId`/`year`/`round` are the one exception: not an identifier
+    derived from the feature pipeline, and structurally not independently
     derived (the selection key, and values read straight off `races.csv`
     for that same `raceId` by both pipelines) — see `_JOIN_KEY_COLUMNS`.
   - continuous numeric features: abs diff < 1e-6 (or both null)
   - grid-derived columns (`grid_adjusted`, `grid_position_norm`,
     `pit_lane_start`, `grid_penalty_applied`): an EXPECTED, ENUMERATED
     exception for EVERY driver in a race where ANY entrant shows a real
-    grid/qualifying divergence (a genuine penalty or pit-lane start) — the
-    design doc's own exception is scoped to "the historical race carried a
-    grid penalty" (§3), not "this specific driver did": verified against
-    real data (raceId 860) that one driver's pit-lane start ripples through
-    and shifts several OTHER drivers' real grid by one slot each, each
-    individually below the penalty threshold. The Materializer's grid =
+    grid/qualifying divergence (a genuine penalty or pit-lane start) — this
+    exception is scoped to "the historical race carried a grid penalty",
+    not "this specific driver did": verified against real data (raceId
+    860) that one driver's pit-lane start ripples through and shifts
+    several OTHER drivers' real grid by one slot each, each individually
+    below the penalty threshold. The Materializer's grid =
     qualifying_position proxy structurally cannot reproduce any of this
-    (Decision 050/design doc §1/§3's documented, unresolved gap) — never
-    silently excluded from the count
+    (a documented, unresolved gap — see docs/pre_race_materialization.md)
+    — never silently excluded from the count
   - everything else: exact match required, no exception class applies
 
 Requires real local data: `data/processed/{master_dataset,features}.
@@ -80,21 +80,21 @@ pytestmark = [
     ),
 ]
 
-#: Grid-derived columns: the documented, expected exception class (design
-#: doc §3) when the real historical row shows a genuine grid/qualifying
-#: divergence — never silently excluded, always individually checked.
+#: Grid-derived columns: the documented, expected exception class when the
+#: real historical row shows a genuine grid/qualifying divergence — never
+#: silently excluded, always individually checked.
 _GRID_DERIVED_COLUMNS = ("grid_adjusted", "grid_position_norm", "pit_lane_start", "grid_penalty_applied")
 
-#: Design doc §3, verbatim: "Identifiers/booleans (driverId, constructorId,
-#: circuitId, reached_q2, reached_q3, pit_lane_start) — exact match, zero
-#: tolerance. A mismatch here is a join/logic bug, not numeric noise."
-#: Verified exact-match, never assumed — a wrong-but-valid constructorId
-#: (a real, resolvable ID, just the wrong one for that driver) passes
-#: `validate_output()`'s referential check silently, so THIS is the only
-#: place in the whole pipeline that would ever catch it (confirmed via
+#: Identifiers/booleans (driverId, constructorId, circuitId, reached_q2,
+#: reached_q3, pit_lane_start) get exact match, zero tolerance: a mismatch
+#: here is a join/logic bug, not numeric noise. Verified exact-match, never
+#: assumed — a wrong-but-valid constructorId (a real, resolvable ID, just
+#: the wrong one for that driver) passes `validate_output()`'s referential
+#: check silently, so THIS is the only place in the whole pipeline that
+#: would ever catch it (confirmed via
 #: `test_wrong_but_valid_constructor_id_is_detected` below).
 _VERIFIED_IDENTIFIER_COLUMNS = ("driverId", "constructorId", "circuitId")
-#: NOT in the design doc's identifiers list above — `raceId` is the
+#: NOT treated as a derived identifier above — `raceId` is the
 #: selection key used to pick which rows are being compared in the first
 #: place; `year`/`round` are read directly off `races.csv` for that same
 #: `raceId` inside both the real batch pipeline and the Materializer, never
@@ -197,8 +197,8 @@ def _row_has_grid_divergence(real_row: pd.Series) -> bool:
 
 def _race_has_grid_exception(real_rows: pd.DataFrame) -> bool:
     """True if ANY driver in this race has a real grid/qualifying-position
-    divergence — the design doc's exception is scoped to "the historical
-    race carried a grid penalty" (§3), not "this specific driver did."
+    divergence — the exception is scoped to "the historical race carried a
+    grid penalty," not "this specific driver did."
     Verified against real data (race 860: two pit-lane starts reshuffle
     five OTHER drivers' real grid by exactly one slot each) — a per-driver-
     only check misses this
@@ -226,7 +226,7 @@ def _compare_race(
             if col in _JOIN_KEY_COLUMNS:
                 continue  # selection key / sourced directly from races.csv -- see _JOIN_KEY_COLUMNS
             if col in _VERIFIED_IDENTIFIER_COLUMNS:
-                # Design doc §3: exact match, zero tolerance -- verified,
+                # Exact match, zero tolerance -- verified,
                 # never assumed. A wrong-but-valid ID (e.g. a real
                 # constructorId, just the wrong one for this driver) would
                 # pass every check upstream (validate_output()'s
@@ -323,7 +323,7 @@ def test_golden_row_parity_across_historical_sample(real_data):
 
 
 def test_wrong_but_valid_constructor_id_is_detected(real_data):
-    """/review finding (Important, resolved): a wrong-but-valid
+    """A wrong-but-valid
     constructorId (a real, resolvable ID — just the wrong one for that
     driver) passes `build_master_dataset.validate_output()`'s referential
     check silently, since the ID DOES resolve. This is the only place in

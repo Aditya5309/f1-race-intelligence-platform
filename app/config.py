@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     #: apply here regardless).
     cors_allow_origins: str = ""
 
-    # --- pre-race materialization (Phase 7, Decisions 049/050) --------------
+    # --- pre-race materialization (see docs/pre_race_materialization.md) ----
     #: Training-side data the Materializer (`src.models.materialize`) needs
     #: — NOT the artifacts/ tree every other route reads from. Unlike
     #: `GET /predictions/{race_id}`, `POST /predict` genuinely cannot be
@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     #: tables it's built from have no committed, artifacts/-tree equivalent
     #: today — `features.parquet` only carries the final computed features,
     #: not the raw columns needed to feed back through the pipeline. This is
-    #: a genuine, disclosed gap (see `context/decisions.md` Decision 052),
+    #: a genuine, disclosed gap (see `docs/pre_race_materialization.md`),
     #: not an oversight: these paths default to the local `data/` tree
     #: (present on a local dev checkout or a container with `data/`
     #: bind-mounted, e.g. `docker-compose.override.yml`) and, if missing,
@@ -118,15 +118,15 @@ class Settings(BaseSettings):
     master_dataset_path: Path = _PROJECT_ROOT / "data" / "processed" / "master_dataset.parquet"
     qualifying_interim_path: Path = _PROJECT_ROOT / "data" / "interim" / "qualifying.parquet"
     weather_csv_path: Path = _PROJECT_ROOT / "data" / "interim" / "race_weather.csv"
-    #: Materialization horizon (Decision 050): the Materializer may only
-    #: ever build a row for the single next race with no result yet. Not
-    #: operationally adjustable today — Decision 050 fixed this at 1 — but
-    #: exposed as a Settings field for the same transparency reason
+    #: Materialization horizon: the Materializer may only ever build a row
+    #: for the single next race with no result yet. Not operationally
+    #: adjustable today — fixed at 1 by design — but exposed as a Settings
+    #: field for the same transparency reason
     #: `serve_max_year` is, not because changing it is currently supported
     #: (`next_race()`'s own horizon=1 behavior is unaffected by this value).
     materialization_horizon: int = 1
-    #: Pre-race cache TTL, in seconds (design doc §5, Decision 049
-    #: Refinement 5): "minutes, not hours" — a backstop against a missed
-    #: invalidation trigger, since pre-race entries (unlike historical ones)
-    #: describe a race whose inputs genuinely change over a race weekend.
+    #: Pre-race cache TTL, in seconds: "minutes, not hours" — a backstop
+    #: against a missed invalidation trigger, since pre-race entries (unlike
+    #: historical ones) describe a race whose inputs genuinely change over a
+    #: race weekend.
     pre_race_cache_ttl_seconds: int = 300

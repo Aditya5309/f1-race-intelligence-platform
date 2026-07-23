@@ -4,10 +4,12 @@
 
 This project is a **public, read-only demonstration deployment**, not a
 multi-user production service handling sensitive data. Every API route is
-`GET` except a single reserved, always-`501` `POST /predict` stub — there
-is no user-account system, no write path, and nothing served is private
-(the underlying data is public Formula 1 historical record). Authentication
-is intentionally not implemented for this reason; see
+`GET` except `POST /predict`, which only ever accepts an identity payload
+(year/round, optional entry-list override) — never feature values, and
+never a write to anything the deployment doesn't already control — there
+is no user-account system, and nothing served is private (the underlying
+data is public Formula 1 historical record). Authentication is
+intentionally not implemented for this reason; see
 [README.md's API Usage section](README.md#10-api-usage) for the full
 reasoning.
 

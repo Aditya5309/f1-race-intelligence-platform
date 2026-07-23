@@ -1,8 +1,9 @@
 # --- Training-side data and model artifacts (bootstrap documented in
 # README). NEVER add /artifacts/ here (below) — that is the committed
 # runtime tree a deployed API/dashboard needs; these are the training-only
-# trees that stay local (Decision 029).
+# trees that stay local.
 /data/
+/data_hidden_tmp/
 /models/
 
 # --- Weekly ingestion inspection report (scripts/ingest_jolpica.py's
@@ -32,7 +33,7 @@ coverage.xml
 htmlcov/
 .ruff_cache/
 
-# --- Local dev-launcher logs (scripts/dev.py; Decision 025)
+# --- Local dev-launcher logs (scripts/dev.py)
 /logs/
 
 # --- Jupyter

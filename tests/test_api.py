@@ -157,7 +157,7 @@ def test_races_year_filter(client):
 
 
 # ---------------------------------------------------------------------------
-# GET /races/upcoming (Phase 8) — identity-only lookup, NOT a prediction.
+# GET /races/upcoming — identity-only lookup, NOT a prediction.
 # Uses the isolated `predict_client` fixture (defined further down, near the
 # other POST /predict tests) rather than the module's `serving_stack`, since
 # it needs a races.csv/master_dataset.parquet pair with a genuine result-less
@@ -519,7 +519,7 @@ def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):
 
 
 # ---------------------------------------------------------------------------
-# POST /predict (Phase 7) — request validation, and the exception-to-HTTP
+# POST /predict — request validation, and the exception-to-HTTP
 # mapping app/upcoming_prediction_service.py's plain-Python exceptions go
 # through in app/api.py (RaceAlreadyHasResult -> 409, ValueError -> 422,
 # RuntimeError -> 503). The exception TYPES themselves are covered in
@@ -601,7 +601,7 @@ def test_post_predict_unknown_race_422(predict_client):
 
 
 def test_post_predict_naive_as_of_422(predict_client):
-    """Regression test (Decision 052): an offset-less as_of must produce a
+    """Regression test: an offset-less as_of must produce a
     clear 422, not an unhandled TypeError surfacing as a generic 500. The
     companion case (a valid, timezone-aware as_of must NOT be rejected) is
     covered at the service layer —
@@ -711,7 +711,7 @@ def provenance_client(serving_stack, tmp_path_factory):
 
 
 def test_post_predict_provenance_round_trips_to_real_state(provenance_client):
-    """Decision 049 Refinement 6: every field in the response's
+    """Every field in the response's
     provenance block must be reconstructable from already-known state —
     not just internally consistent with itself. Each field is recomputed
     HERE, directly, from the same public state a real client could reach
@@ -779,7 +779,7 @@ def test_versioned_prediction_matches_legacy_same_cache_entry(client):
 def test_versioned_error_paths_match_legacy(client):
     assert (client.get(f"{API_V1_PREFIX}/predictions/999999999").status_code
             == client.get("/predictions/999999999").status_code == 404)
-    # Phase 7: POST /predict is real request handling now, not a 501 stub —
+    # POST /predict is real request handling now, not a 501 stub —
     # the invariant this test actually cares about (versioned and legacy
     # mounts behave identically) still holds for whatever status a bodiless
     # POST gets (422, from FastAPI's own request validation).

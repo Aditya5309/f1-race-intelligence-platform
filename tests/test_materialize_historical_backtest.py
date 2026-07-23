@@ -1,40 +1,39 @@
 """
 tests/test_materialize_historical_backtest.py
 
-Phase 6 of the pre-race materialization plan (Decisions 049/050) — the
-MANDATORY historical backtesting acceptance gate
-(`.ai/pre_race_materialization_design.md` §3/§7 Phase 6): "Required
-before `POST /predict` is enabled in production, in addition to (not
-instead of) golden-row parity [Phase 4]."
+The MANDATORY historical backtesting acceptance gate for the pre-race
+materialization pipeline (see "Acceptance gates" in
+`docs/pre_race_materialization.md`): required before `POST /predict` is
+enabled in production, in addition to (not instead of) golden-row parity
+(`tests/test_materialize_golden_row_parity.py`).
 
-Extends Phase 4's own golden-row parity mechanism (reused directly, not
+Extends the golden-row parity mechanism (reused directly, not
 duplicated — `_materialize_historical_race`/`_compare_race`/
 `_race_has_grid_exception` are imported from
-`tests.test_materialize_golden_row_parity`) with the two additional
-checks the design doc's §3 "Historical backtesting" section requires:
+`tests.test_materialize_golden_row_parity`) with two additional checks:
 
-  (a) Feature parity — IS Phase 4's own gate; reused verbatim, run again
-      here because Phase 6 evaluates a specific window (the served
-      model's own val+test years, 2022-2024, matching what the manifest's
-      baseline metrics were computed on) rather than Phase 4's broader
-      sample (which also includes a 2010-2021 stratified slice).
+  (a) Feature parity — the same golden-row parity gate; reused verbatim,
+      run again here because this backtest evaluates a specific window
+      (the served model's own val+test years, 2022-2024, matching what the
+      manifest's baseline metrics were computed on) rather than golden-row
+      parity's broader sample (which also includes a 2010-2021 stratified
+      slice).
   (b) Prediction parity — generate predictions from the materialized row
-      (via Phase 5's `predict_upcoming_race`, reused verbatim) AND from
+      (via `predict_upcoming_race`, reused verbatim) AND from
       the real batch-built `features.parquet` row (via `predict_race`,
       the exact function `GET /predictions/{race_id}` already calls — no
       live server needed, this IS that code path), using the REAL
       committed `artifacts/serving/staging` bundle. For races with no
       grid-proxy divergence: win_probability must match within 1e-4 (a
-      genuine failure). For races WITH one (Phase 4's own exception
-      class): per the design doc's own carve-out — "evaluate rank
-      stability... instead of exact probability match... review each such
-      change individually" — a changed top-1 pick is counted and reported,
-      never gate-blocking on its own: confirmed concretely on this
-      project's real data (raceId 1087/1134) that this is the grid-proxy's
-      known limitation actually manifesting in the model's output (a
-      driver who topped qualifying but carried a real grid penalty down to
-      11th/14th gets the proxy's fake pole start instead), not a new,
-      unexplained defect.
+      genuine failure). For races WITH one (the same grid-proxy exception
+      class golden-row parity defines): evaluate rank stability instead of
+      exact probability match, and review each such change individually —
+      a changed top-1 pick is counted and reported, never gate-blocking on
+      its own: confirmed concretely on this project's real data (raceId
+      1087/1134) that this is the grid-proxy's known limitation actually
+      manifesting in the model's output (a driver who topped qualifying
+      but carried a real grid penalty down to 11th/14th gets the proxy's
+      fake pole start instead), not a new, unexplained defect.
   (c) Aggregate metrics — top1_accuracy/spearman_corr, via the EXISTING
       `src.models.evaluate.evaluate_all` (reused verbatim), computed from
       the materialized-path predictions across the val window (2022-2023,
@@ -79,14 +78,13 @@ pytestmark = [
     pytest.mark.skipif(not _STAGING_BUNDLE_DIR.exists(), reason="artifacts/serving/staging not present"),
 ]
 
-#: Prediction-parity epsilon (design doc §3): "since inputs are
-#: identical, outputs should be near-identical modulo floating point."
+#: Prediction-parity epsilon: since inputs are identical, outputs should be
+#: near-identical modulo floating point.
 _PREDICTION_PARITY_EPSILON = 1e-4
 
-#: Aggregate-metric noise band. Not numerically pinned by the design doc
-#: ("within the model's own reported metric noise") -- derived from this
-#: project's own documented val-split variance
-#: (context/domain_knowledge.md §8: "±1 race ≈ ±2.3 p.p. on the val
+#: Aggregate-metric noise band, derived from this
+#: project's own documented val-split variance (see "Acceptance gates" in
+#: docs/pre_race_materialization.md: "±1 race ≈ ±2.3 p.p. on the val
 #: split"). 0.05 absolute ≈ a ~2-race noise budget, a deliberately
 #: generous but still meaningful bar: a real regression (a materialization
 #: bug silently feeding the model different data than history) would be
@@ -133,8 +131,8 @@ def staging_model():
 
 
 def test_historical_backtest(real_data, staging_model):
-    """The gate itself: feature parity (Phase 4's own check, re-run on the
-    val+test window), prediction parity (materialized-path vs. real-path
+    """The gate itself: feature parity (the golden-row parity check, re-run
+    on the val+test window), prediction parity (materialized-path vs. real-path
     predictions from the SAME served bundle), and aggregate metrics
     (materialized-path top1_accuracy/spearman_corr vs. the served
     manifest's own recorded val-split baseline) — all in one pass, so a
@@ -157,7 +155,7 @@ def test_historical_backtest(real_data, staging_model):
             real_data["driver_standings"], real_data["constructor_standings"], real_data["weather"],
         )
 
-        # (a) Feature parity -- Phase 4's own gate, reused verbatim.
+        # (a) Feature parity -- the golden-row parity gate, reused verbatim.
         unexplained, _exceptions = _compare_race(race_id, real_data["features"], materialized)
         feature_mismatches.extend(unexplained)
 
@@ -175,8 +173,8 @@ def test_historical_backtest(real_data, staging_model):
         mat_top1 = mat_preds.index[mat_preds["predicted_rank"] == 1][0]
 
         if grid_exception:
-            # Design doc §3: "evaluate rank stability... instead of exact
-            # probability match... review each such change individually" —
+            # Evaluate rank stability instead of exact probability match,
+            # and review each such change individually —
             # a changed top-1 pick here is EXPECTED, not an automatic
             # failure: it is the grid-proxy's known limitation actually
             # manifesting in the model's own output, not a new, unexplained
@@ -185,7 +183,9 @@ def test_historical_backtest(real_data, staging_model):
             # real data (raceId 1087/1134): a driver who topped qualifying
             # but carried a real grid penalty down to 11th/14th gets the
             # proxy's fake pole start instead, which is exactly the kind of
-            # divergence this whole design accepted as unresolved (§1/§3).
+            # divergence the qualifying-as-grid proxy accepts as an
+            # unresolved, disclosed limitation (see
+            # docs/pre_race_materialization.md).
             if real_top1 != mat_top1:
                 rank_instability_count += 1
                 rank_instability_detail.append((race_id, int(real_top1), int(mat_top1)))
@@ -214,7 +214,7 @@ def test_historical_backtest(real_data, staging_model):
     if feature_mismatches:
         pytest.fail(
             f"{len(feature_mismatches)} unexplained feature mismatch(es) across "
-            f"{len(race_ids)} races (Phase 4's own gate, re-run on the backtest window) — "
+            f"{len(race_ids)} races (the golden-row parity gate, re-run on the backtest window) — "
             f"first 10: {feature_mismatches[:10]}"
         )
     if prediction_mismatches:
@@ -253,11 +253,11 @@ def test_historical_backtest(real_data, staging_model):
 
 
 def test_predict_upcoming_race_matches_manual_real_path_composition(real_data, staging_model):
-    """Sanity check that Phase 5's predict_upcoming_race() (used
+    """Sanity check that predict_upcoming_race() (used
     conceptually above via its own two reused pieces) genuinely reproduces
     what calling materialize_features() + predict_race() manually would --
     proving this backtest isn't silently exercising a different code path
-    than what Phase 5 shipped."""
+    than what predict_upcoming_race() actually does in production."""
     model, _info = staging_model
     race_id = int(
         real_data["races"].loc[

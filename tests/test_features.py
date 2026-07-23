@@ -439,7 +439,8 @@ def test_gap_to_pole_uses_best_available_session():
     assert out.loc[2, "qualifying_gap_to_pole_pct"] == pytest.approx(expected)
     assert bool(out.loc[2, "reached_q2"]) is False
     assert bool(out.loc[1, "reached_q3"]) is True
-    # Informative nulls are preserved, not imputed (design doc Section 5.3).
+    # Informative nulls are preserved, not imputed: a driver eliminated in Q1/Q2
+    # never sets a Q3 time, and that's a different signal than a slow Q3 lap.
     assert pd.isna(out.loc[2, "q3_sec"])
 
 

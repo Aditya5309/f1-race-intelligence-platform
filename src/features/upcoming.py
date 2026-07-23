@@ -2,7 +2,7 @@
 src/features/upcoming.py
 
 Calendar & entry-list resolution for the pre-race materialization pipeline
-(Decisions 049/050; Phase 1 of `.ai/pre_race_materialization_design.md` §7).
+(see `docs/pre_race_materialization.md` for the full architecture).
 
 This module answers two questions ONLY — "which race is next?" and "who is
 entered in it?" — against already-loaded `races.csv`/`results.csv`-shaped
@@ -11,17 +11,17 @@ module never calls it itself). It builds no feature values, fits nothing,
 and makes no network call. It is intentionally NOT imported by
 `src/features/pipeline.py`, `src/models/predict.py`, or `app/api.py` — the
 historical prediction path is completely unchanged by this module's
-existence (Decision 049's own discipline: feature engineering and serving
-stay decoupled). A later phase's `Materializer` (Phase 3) is this module's
-only intended caller.
+existence (feature engineering and serving stay deliberately decoupled).
+The Materializer (`src/models/materialize.py`) is this module's only
+intended caller.
 
 **Deliberately storage-agnostic (no loader helpers):** unlike, e.g.,
 `standings.py`'s paired `load_standings()`, this module takes DataFrames
-in and never reads a CSV path itself. Phase 1 is resolution logic only;
-Phase 3's `Materializer` is where real data sourcing gets wired in (per
-this design's own phase split — see `.ai/pre_race_materialization_design.md`
-§7). Adding an I/O helper now would presume that wiring before it exists.
-Revisit only if a concrete future phase needs one.
+in and never reads a CSV path itself. This module is resolution logic
+only; the Materializer is where real data sourcing gets wired in (see
+`docs/pre_race_materialization.md`). Adding an I/O helper now would
+presume that wiring before it exists. Revisit only if a concrete future
+need arises.
 
 Public API
 ----------
@@ -32,13 +32,13 @@ Public API
 
 Invariants
 ----------
-- Materialization horizon = 1 (Decision 050): `next_race()` always resolves
+- Materialization horizon = 1: `next_race()` always resolves
   the SINGLE earliest race with no `results.csv` row yet, in chronological
   (year, round) order — never a race further out, and never today's wall
   clock (the resolution is derived entirely from the two input frames, so
   it is deterministic and reproducible for the same data snapshot).
 - **This assumes every already-completed historical race has a matching
-  `results.csv` row** (Decision 050). "First race with no result" is only
+  `results.csv` row.** "First race with no result" is only
   equivalent to "first *future* race" because of this — there is no
   separate check restricting the search to the current/future season. If
   that assumption were ever violated (a historical data gap — an
@@ -46,7 +46,7 @@ Invariants
   old race as "next" rather than skip it as a historical anomaly. No such
   gap exists in the current dataset; hardening against one is explicitly
   deferred until a concrete instance appears or the horizon policy changes
-  (Decision 050's Future Work) — not built speculatively here.
+  — not built speculatively here.
 - Calendar integrity is validated by reusing
   `src.features.standings.build_prev_race_map`'s existing checks (no
   duplicate raceId, no two raceIds sharing a (year, round) slot) — the
@@ -56,13 +56,13 @@ Invariants
   recently completed race strictly before it) — never forward, and never
   at `race_id`'s own results (which do not exist yet by definition for a
   genuine upcoming race). This is the same "provably earlier than the
-  race" discipline `context/domain_knowledge.md` §6 requires of every
-  feature in this project.
+  race" discipline every feature in this project must satisfy (see "Design
+  discipline this pipeline follows" in `docs/pre_race_materialization.md`).
 - Roster inference is a best-effort FALLBACK, not a claim of correctness:
   it cannot see a rookie's debut (no prior result exists for them) or a
   mid-season substitution announced after the most recent completed race.
-  The `override` parameter exists precisely for these cases (design doc
-  §3, "Entry-list uncertainty") — callers with a confirmed entry list must
+  The `override` parameter exists precisely for these cases (entry-list
+  uncertainty) — callers with a confirmed entry list must
   pass it; inference should be treated as a placeholder, not authoritative.
 
 Exceptions
@@ -120,7 +120,7 @@ def next_race(races: pd.DataFrame, results: pd.DataFrame) -> UpcomingRace | None
     """
     Resolve the single next race with no `results.csv` row yet.
 
-    Materialization horizon = 1 (Decision 050): this is always the EARLIEST
+    Materialization horizon = 1: this is always the EARLIEST
     such race in (year, round) order, never a race further out. Returns
     `None` if every race in `races` already has a result (no upcoming race
     scheduled in this data snapshot).
@@ -129,7 +129,7 @@ def next_race(races: pd.DataFrame, results: pd.DataFrame) -> UpcomingRace | None
     `results.csv` row (see module docstring's Invariants) — there is no
     independent current/future-season filter, only this assumption. Not
     violated anywhere in the current dataset; not hardened against here by
-    design (Decision 050's Future Work).
+    design — deferred until a concrete need arises.
 
     Requires `races` columns: raceId, year, round, circuitId, name, date.
     Requires `results` columns: raceId.

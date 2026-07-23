@@ -1,16 +1,17 @@
 """
-Tests for src/features/upcoming.py (Phase 1 of the pre-race materialization
-plan, Decisions 049/050).
+Tests for src/features/upcoming.py — calendar and entry-list resolution
+for the pre-race materialization pipeline (see
+docs/pre_race_materialization.md).
 
 Coverage:
   - next_race resolves the single earliest race with no results row yet
-    (materialization horizon = 1, Decision 050)
+    (materialization horizon = 1: always the next race, never further out)
   - next_race returns None once every race has a result
   - next_race/resolve_entry_list propagate the shared calendar-ambiguity
     check (duplicate raceId, duplicate (year, round) slot)
   - resolve_entry_list's default inference matches the most recent
     completed race's roster in the ordinary case
-  - the two named roster edge cases the design doc calls out: a mid-season
+  - two roster edge cases inference alone can't handle: a mid-season
     driver swap (inference is stale) and a rookie debut (inference omits
     the rookie) — both require `override`, which is verified to bypass
     inference entirely
@@ -55,7 +56,7 @@ def test_next_race_resolves_earliest_unrun_race():
 
 
 def test_next_race_never_looks_past_the_earliest_unrun_race():
-    """Horizon = 1 (Decision 050): race 3 has no result either, but race 2
+    """Horizon = 1: race 3 has no result either, but race 2
     is the one returned — never race 3."""
     races = _races([
         (1, 2026, 1, 10, "Race A", "2026-03-01"),

@@ -12,9 +12,11 @@ pip install -e .                  # runtime-only alternative
 ```
 
 Requires `data/` (Ergast-format CSVs, gitignored) only if you intend to
-rebuild the datasets or retrain a model — obtained manually, there is no
-bootstrap/download script. Serving from the committed `artifacts/` tree
-needs nothing from `data/` at all.
+rebuild the datasets, retrain a model, or serve upcoming-race predictions
+(`POST /predict` — see [docs/pre_race_materialization.md](pre_race_materialization.md))
+— obtained manually, there is no bootstrap/download script. Every other
+route serves from the committed `artifacts/` tree alone, with nothing from
+`data/` needed.
 
 ## Testing
 
@@ -24,9 +26,11 @@ pytest tests/ --cov=src --cov=app --cov-report=term-missing --cov-report=html
 make test           # or: make coverage
 ```
 
-540 tests. Four skip cleanly when `data/` is absent (real-data checks in
-`test_features.py`/`test_splits.py`) — expected on a fresh clone or CI,
-not a failure.
+619 tests. A handful skip cleanly when `data/` is absent (real-data checks
+in `test_features.py`/`test_splits.py`, plus the pre-race materialization
+acceptance gates in `test_materialize_golden_row_parity.py`/
+`test_materialize_historical_backtest.py`/`test_predict_upcoming.py`) —
+expected on a fresh clone or CI, not a failure.
 
 `src/` coverage is 95%, enforced in CI at a floor of 80%:
 
@@ -200,6 +204,24 @@ docker compose down
 Every `F1_*` environment variable can be set via a `.env` file at the
 project root (copy [`.env.example`](../.env.example)); Compose picks it up
 automatically.
+
+## Render deployment (native Python, no Docker)
+
+```bash
+# What Render's Build Command runs (installs deps, then best-effort
+# provisions the data/ tree POST /predict needs — see
+# docs/render_deployment.md)
+bash scripts/render_build.sh
+
+# What Render's Start Command runs
+uvicorn app.api:app --host 0.0.0.0 --port $PORT
+
+# The data-provisioning step in isolation (safe to run locally too, e.g.
+# to reproduce a Render build failure)
+bash scripts/provision_upcoming_race_data.sh
+```
+
+Full setup and the reasoning behind it: [docs/render_deployment.md](render_deployment.md).
 
 ## Git and release workflow
 

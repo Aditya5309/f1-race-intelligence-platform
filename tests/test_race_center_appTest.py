@@ -1,5 +1,5 @@
 """
-Behavioral tests for app/views/race_center.py's Phase 8 upcoming-race
+Behavioral tests for app/views/race_center.py's upcoming-race
 integration, via streamlit.testing.v1.AppTest (real headless script
 execution, no live API — every call is monkeypatched at
 app.views.common.api_get/predict_upcoming, the same two chokepoints every
@@ -8,12 +8,12 @@ call site in this dashboard already funnels through).
 app/views/*.py has 0% *unit* coverage by design elsewhere in this project
 (presentation-only HTTP consumers, normally exercised only by
 scripts/smoke.py's offline AppTest + manual verification). This file is a
-deliberate, narrow exception: Phase 8 added real BRANCHING logic to
-race_center.py (is this the upcoming race?) that the "presentation only"
-rationale doesn't fully cover, and the single most important guarantee
-this phase promised — historical rendering stays byte-for-byte unchanged,
-and gracefully falls back to it when the new endpoint is unavailable — is
-only checkable by actually running the page.
+deliberate, narrow exception: the upcoming-race picker entry added real
+BRANCHING logic to race_center.py (is this the upcoming race?) that the
+"presentation only" rationale doesn't fully cover, and the single most
+important guarantee that logic must uphold — historical rendering stays
+byte-for-byte unchanged, and gracefully falls back to it when the new
+endpoint is unavailable — is only checkable by actually running the page.
 
 Covers:
   - the degraded/fallback case (GET /races/upcoming unavailable) renders
@@ -68,7 +68,8 @@ _VS_BASELINE = {
     # how the real pole-only baseline actually behaves: 100%/0%) -- not
     # just realism, a byte-identical model_frame/baseline_frame plotly
     # figure pair trips Streamlit's own auto-generated-element-ID collision
-    # detection (unrelated to Phase 8; a real render always differs here).
+    # detection (unrelated to the upcoming-race feature under test; a real
+    # render always differs here).
     "race_id": _HISTORICAL_RACE_ID, "year": 2026, "round": 1, "model": _MODEL,
     "baseline_name": "pole_baseline", "baseline_description": "grid-only heuristic",
     "model_predictions": [_PRED_A, _PRED_B],
@@ -261,7 +262,7 @@ def test_prev_next_boundaries_including_when_upcoming_race_disappears(monkeypatc
     # Next -> lands on the upcoming race (session_state updates within
     # this same run). The clicked button's OWN `disabled=` param is fixed
     # at instantiation time, BEFORE that update -- pre-existing Streamlit
-    # behavior, not a Phase 8 change -- so a settle-run with no new
+    # behavior, unrelated to the upcoming-race picker -- so a settle-run with no new
     # interaction is needed before the boundary state re-reads correctly.
     next_btn.click().run()
     assert not at.exception

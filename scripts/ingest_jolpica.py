@@ -19,21 +19,20 @@ built here; use --dry-run to see what a run would touch first).
     python scripts/ingest_jolpica.py --dry-run              # fetch + report, no write
     python scripts/ingest_jolpica.py --year 2026 --round 7  # one race only
 
-PHASE 2 EXTENSION (Decisions 049/050, `.ai/pre_race_materialization_design.md`
-§7 Phase 2): in the default (no --year/--round) mode, this script ALSO
-attempts to ingest `qualifying.csv` rows for the single upcoming race with
-no result yet (Decision 050's horizon=1, resolved via
-`src.features.upcoming.next_race` — the same function Phase 1 built,
-reused rather than re-implemented here). This is the "grid-penalty proxy"
-groundwork §1/§3 of the design call for: qualifying position is the only
+UPCOMING-RACE QUALIFYING EXTENSION (see `docs/pre_race_materialization.md`
+for the full design of the pipeline this feeds): in the default (no
+--year/--round) mode, this script ALSO attempts to ingest `qualifying.csv`
+rows for the single upcoming race with no result yet (resolved via
+`src.features.upcoming.next_race`, reused rather than re-implemented
+here). This lands the "grid-penalty proxy" groundwork the pre-race
+materialization pipeline relies on: qualifying position is the only
 pre-race starting-grid signal this project has ANY sanctioned source for
 — jolpica/Ergast's schema exposes `grid` only inside the results
-endpoint, which does not exist before the race is run, and no second,
-independently-sourced grid-penalty feed is named anywhere in this
-project's decisions (Decision 049 Refinement 1 makes jolpica the sole
-authoritative live source). This extension does not invent one; it only
-lands the qualifying-position proxy the design doc already accepts as the
-documented gap. **Never fetches or writes results/standings for this
+endpoint, which does not exist before the race is run, and jolpica is
+this project's sole authoritative live data source, so no second,
+independently-sourced grid-penalty feed exists to draw on either. This
+extension does not invent one; it only lands the qualifying-position
+proxy that gap already requires. **Never fetches or writes results/standings for this
 race** — those endpoints have nothing to return before the race is run,
 and this project's build_master_dataset.py anchors its entire join on
 results.csv, so a qualifying-only row for an as-yet-unrun race is
@@ -44,62 +43,64 @@ qualifying already has rows on file, or once it's been fully ingested as
 a completed race (checked against `ingested` from the SAME run, to avoid
 double-fetching a race that turns out to have just finished).
 
-PHASE 2 OPERATIONAL POLICY (documentation only — no behavior described
-here is new; this section makes explicit what was previously only
-implicit in the idempotency logic above):
+OPERATIONAL POLICY for the upcoming-race qualifying extension
+(documentation only — no behavior described here is new; this section
+makes explicit what was previously only implicit in the idempotency logic
+above):
 
   Expected cadence: this script (via `scripts/refresh_and_freeze.py`,
   which invokes it with no --year/--round, i.e. default mode) runs on
-  `.github/workflows/retrain.yml`'s existing weekly schedule (Decision
-  037) — the upcoming-qualifying step rides that SAME cadence with zero
-  new scheduling. The design doc offered an "added lighter-weight
-  cadence" as an alternative; it was not built — the weekly schedule was
-  judged sufficient, consistent with Decision 049's own Future Work
-  ("assumes the existing weekly cadence is sufficient at this project's
-  current scale"). Separately, this script is a plain CLI entry point,
-  not gated to CI: `python scripts/ingest_jolpica.py` (or the workflow's
-  `workflow_dispatch` trigger) can be run manually at any time — "cadence"
-  describes the AUTOMATED trigger frequency, not a restriction on when
-  the script may run.
+  `.github/workflows/retrain.yml`'s existing weekly schedule — the
+  upcoming-qualifying step rides that SAME cadence with zero new
+  scheduling. A lighter-weight, more frequent cadence dedicated to just
+  this extension was considered and not built — the weekly schedule was
+  judged sufficient at this project's current scale. Separately, this
+  script is a plain CLI entry point, not gated to CI: `python
+  scripts/ingest_jolpica.py` (or the workflow's `workflow_dispatch`
+  trigger) can be run manually at any time — "cadence" describes the
+  AUTOMATED trigger frequency, not a restriction on when the script may
+  run.
 
-  `data_as_of`: NOT implemented by this script — that is Phase 7's
-  provenance-block responsibility (Decision 049 Refinement 6), deliberately
-  out of scope here. What this phase produces that a future `data_as_of`
-  computation can draw on: `ingest_report/summary.json`'s `generated_at`
+  `data_as_of`: NOT implemented by this script — that is the responsibility
+  of `POST /predict`'s own provenance block (see
+  `app/upcoming_prediction_service.py`), deliberately out of scope here.
+  What this script produces that a future `data_as_of` computation can
+  draw on: `ingest_report/summary.json`'s `generated_at`
   (UTC, ISO-8601, the moment THIS RUN executed) and the `upcoming_qualifying`
   block recording whether that race's qualifying was fetched THIS run.
   Neither `qualifying.csv` nor any other data/ CSV carries a per-row
   ingestion timestamp — today, "as of" for the upcoming race's qualifying
   can only be approximated as "as of the most recent successful run,"
-  never pinned to an individual row. Phase 7 will need to decide whether
-  a per-row timestamp is worth adding; not decided here.
+  never pinned to an individual row. Whether a per-row timestamp is worth
+  adding is an open question, not decided here.
 
   Stale data handling: once a qualifying row exists for the upcoming race,
   this script does not periodically re-validate or refresh it. This is
   structurally justified, not merely an omission: Q1/Q2/Q3 times and
   qualifying classification are fixed once a session ends (Ergast/jolpica
   convention) — a post-session grid PENALTY changes the STARTING GRID, a
-  separate, deliberately-unresolved data point (the "interim proxy" gap,
-  §1/§3), and does NOT retroactively change the qualifying classification
+  separate, deliberately-unresolved data point (the qualifying-position-as-
+  grid interim proxy documented in `docs/pre_race_materialization.md`),
+  and does NOT retroactively change the qualifying classification
   this row stores. The one edge case this doesn't cover — a rare
   post-session disqualification/correction to the qualifying result
   itself — is not handled specially, consistent with (not a new gap
   relative to) this project's existing posture: there is no live
   correction path for ANY already-ingested row, historical or otherwise
-  (Decision 007's repair pipeline runs at build_interim time, not against
-  freshly-ingested data/ rows).
+  (the repair pipeline in `src/data/cleaner.py` runs at build_interim
+  time, not against freshly-ingested data/ rows).
 
   Manual refresh policy: on-demand TRIGGERING (running sooner than the
   weekly schedule) is already possible with no code change, as above.
   FORCING A RE-FETCH of an already-ingested upcoming race's qualifying
   is INTENTIONALLY NOT SUPPORTED at this stage — no --force/override flag
   exists; `resolve_upcoming_qualifying_target()`'s idempotency check is
-  unconditional. This is deliberate: (1) not required by Phase 2's own
-  scope, which only asks to land the qualifying-position proxy, not build
-  a correction mechanism; (2) consistent with Decision 049's Future Work,
-  which already defers a targeted/on-demand ETL trigger for the same
-  "no concrete need yet" reason; (3) the data this would protect against
-  staleness in is structurally stable once a session ends (see Stale data
+  unconditional. This is deliberate: (1) not required by this extension's
+  own scope, which only asks to land the qualifying-position proxy, not build
+  a correction mechanism; (2) a targeted/on-demand ETL trigger is deferred
+  for the same "no concrete need yet" reason; (3) the data this would
+  protect against staleness in is structurally stable once a session ends
+  (see Stale data
   handling above), reducing the actual need. If a genuine correction is
   ever needed, the only path today is manual: delete the affected
   `qualifying.csv` row(s) for that raceId, then re-run this script — the
@@ -319,8 +320,9 @@ def resolve_upcoming_qualifying_target(
     *,
     already_ingested_race_ids: set[int] | None = None,
 ) -> UpcomingRace | None:
-    """The single upcoming race (Decision 050 horizon=1, via
-    `src.features.upcoming.next_race`) whose qualifying is worth attempting
+    """The single upcoming race (materialization horizon=1 — only the
+    earliest unplayed race — via `src.features.upcoming.next_race`) whose
+    qualifying is worth attempting
     to fetch this run — or `None` if there is nothing to do.
 
     `None` cases, all equally "nothing new to fetch":
@@ -474,7 +476,7 @@ def write_ingest_report(
     required). A CSV is omitted (not written empty) when its list has zero
     rows; summary.json's counts already say so.
 
-    `upcoming_qualifying` (Phase 2, Decision 049/050): optional
+    `upcoming_qualifying` (the upcoming-race qualifying extension): optional
     `{"year", "round", "name", "raceId", "n_qualifying_rows"}` describing
     the single upcoming race this run attempted qualifying-only ingestion
     for, or `None` when nothing was attempted (explicit --year/--round
@@ -558,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if targets.empty:
         print("Nothing to backfill — every scheduled race already has results.")
-        # Falls through rather than returning early: the Phase 2 upcoming-
+        # Falls through rather than returning early: the upcoming-race
         # qualifying step below still needs to run in the default (no
         # --year/--round) mode even when there's nothing to backfill — the
         # common case, since races happen far less often than this script runs.
@@ -616,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"{len(result_rows)} results, {len(qualifying_rows)} qualifying, "
                   f"{len(ds_rows)} driver standings, {len(cs_rows)} constructor standings")
 
-        # --- Phase 2 (Decisions 049/050): upcoming-race qualifying only.
+        # --- Upcoming-race qualifying extension: qualifying only.
         # Default mode only — an explicit --year/--round backfill request
         # targets one specific race and should not also reach for a
         # different, unrelated "next race". Never touches results/standings

@@ -145,18 +145,24 @@ read-only display metadata that degrades gracefully when unavailable.
 - **🏠 Dashboard** — system status at a glance: model stage (Staging/
   Production), API health, latest model version, supported season range,
   and headline validation/test metrics.
-- **🏎 Race Center** — pick a season and race (2010–2024); see the model's
-  favorite as a hero card with a confidence level, the top-5 contenders as
-  cards (grid/qualifying position, rank trend vs. the previous round), a
-  plain-language "why did the model choose this driver?" breakdown, a
-  hit/miss badge against the actual winner, race facts, and the full field
-  as a constructor-colored bar chart plus table. Also hosts two interactive
-  views: a **grid-position simulator** ("what if this driver started
-  P1 instead?") that freezes every other feature at its real value, and a
-  **qualifying-impact comparison** placing the full model's picks next to a
-  simple pole-only baseline for the same race. Tied probabilities between
-  midfield drivers are normal (the calibrator maps similar strength to the
-  same probability step).
+- **🏎 Race Center** — pick a season and race (2010–2024), or the single
+  upcoming race with no result yet (added as an extra picker entry); see
+  the model's favorite as a hero card with a confidence level, the top-5
+  contenders as cards (grid/qualifying position, rank trend vs. the
+  previous round), a plain-language "why did the model choose this
+  driver?" breakdown, a hit/miss badge against the actual winner (once one
+  exists), race facts, and the full field as a constructor-colored bar
+  chart plus table. Also hosts two interactive views: a **grid-position
+  simulator** ("what if this driver started P1 instead?") that freezes
+  every other feature at its real value, and a **qualifying-impact
+  comparison** placing the full model's picks next to a simple pole-only
+  baseline for the same race. Tied probabilities between midfield drivers
+  are normal (the calibrator maps similar strength to the same probability
+  step). Selecting the upcoming race shows a provenance panel (which model,
+  which data snapshot, when it was generated) and any caveats about the
+  prediction's completeness — see
+  [docs/pre_race_materialization.md](pre_race_materialization.md) for how
+  that prediction is built.
 - **👤 Driver Explorer** — one driver's races, scoped to a season or their
   whole served career: profile card with current championship position,
   wins/podiums/poles/points/average-qualifying/average-finish tiles,
@@ -210,13 +216,19 @@ A full annotated template is in [`.env.example`](../.env.example).
 - **500** — an unexpected server-side error. The response body is always a
   generic `{"detail": "Internal server error."}` — no internal detail is
   ever exposed; the real cause is logged server-side only.
+- **`POST /predict` returns 503** if the training-side data it needs isn't
+  available on this deployment (it needs more than the committed
+  `artifacts/` tree every other route reads from — see
+  [docs/pre_race_materialization.md](pre_race_materialization.md)), and
+  **409** if the race it's asked to score already has a real result.
 
 ## Security notes
 
 - No authentication is implemented. This is a public demonstration of a
-  read-only historical-data API: every route is `GET` (bar the reserved,
-  always-`501` `POST /predict`), there's no user-account concept, and no
-  route performs a write.
+  read-only historical-data API: every route is `GET` except `POST
+  /predict`, which accepts only an identity payload (year/round, optional
+  entry-list override) — never feature values — and there's no
+  user-account concept.
 - CORS is deny-by-default; configure `F1_CORS_ALLOW_ORIGINS` if you're
   calling this API directly from browser JavaScript on another origin.
 - Report a suspected vulnerability per [SECURITY.md](../SECURITY.md).
@@ -229,14 +241,20 @@ A full annotated template is in [`.env.example`](../.env.example).
 3. Probabilities describe the *pre-race* picture; nothing in-race updates them.
 4. Rookies and newly rebranded teams have little/no history — the model
    correctly treats them as long shots.
-5. Only already-run races through 2024 are servable today. A design for
-   scoring races that haven't happened yet has been reviewed and accepted
-   (Decision 049) but is not implemented — `POST /predict` still always
-   returns 501.
+5. Already-run races through 2024 are always servable. The single upcoming
+   race with no result yet can also be scored (`POST /predict` /
+   `GET /races/upcoming`), but only on a deployment with the training-side
+   data that route needs — see
+   [docs/pre_race_materialization.md](pre_race_materialization.md) for the
+   gap and its 503 degraded-mode behavior. Its qualifying-position-as-grid
+   proxy (documented in the same file) is a real, disclosed limitation, not
+   a bug.
 
 ## More documentation
 
 - [docs/api_reference.md](api_reference.md) — full REST API reference.
+- [docs/pre_race_materialization.md](pre_race_materialization.md) — how
+  upcoming-race predictions are built.
 - [docs/commands.md](commands.md) — the complete command reference.
 - [docs/retrain_workflow_setup.md](retrain_workflow_setup.md) — scheduled
   ingestion/retraining workflow setup and troubleshooting.
