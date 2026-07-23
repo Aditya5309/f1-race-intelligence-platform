@@ -10,6 +10,10 @@ forward-holdout guard, debug endpoint gating, reserved POST /predict (501),
 and cache behavior across calls.
 """
 
+import hashlib
+import json
+from datetime import UTC, datetime
+
 import mlflow
 import numpy as np
 import pandas as pd
@@ -150,6 +154,82 @@ def test_races_year_filter(client):
     body = client.get("/races", params={"year": 2023}).json()
     assert body["races"]
     assert all(r["year"] == 2023 for r in body["races"])
+
+
+# ---------------------------------------------------------------------------
+# GET /races/upcoming (Phase 8) — identity-only lookup, NOT a prediction.
+# Uses the isolated `predict_client` fixture (defined further down, near the
+# other POST /predict tests) rather than the module's `serving_stack`, since
+# it needs a races.csv/master_dataset.parquet pair with a genuine result-less
+# race — reused here via a forward reference resolved at collection time.
+# ---------------------------------------------------------------------------
+
+def test_races_upcoming_returns_identity(predict_client):
+    resp = predict_client.get(f"{API_V1_PREFIX}/races/upcoming")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["race_id"] == 2
+    assert body["year"] == 2026
+    assert body["round"] == 2
+    assert set(body) == {"race_id", "year", "round", "name", "circuit_id", "date"}
+
+
+def test_races_upcoming_404_when_every_race_has_a_result(serving_stack, tmp_path):
+    settings, _ = serving_stack
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    pd.DataFrame([
+        {"raceId": 1, "year": 2026, "round": 1, "circuitId": 1, "name": "R1", "date": "2026-01-01"},
+    ]).to_csv(raw_dir / "races.csv", index=False)
+    master_path = tmp_path / "master_dataset.parquet"
+    pd.DataFrame({"raceId": [1]}).to_parquet(master_path)
+    qualifying_path = tmp_path / "qualifying.parquet"
+    pd.DataFrame(columns=["raceId"]).to_parquet(qualifying_path)
+
+    complete_settings = settings.model_copy(update={
+        "raw_data_dir": raw_dir, "master_dataset_path": master_path,
+        "qualifying_interim_path": qualifying_path,
+        "weather_csv_path": raw_dir / "no-such-weather.csv",
+    })
+    # weather_csv_path deliberately points nowhere -- load_race_weather()
+    # would fail on a missing file; races/master (the only tables this
+    # route reads) are all that matters here, but ensure_materialization_
+    # data() loads everything, so give it a real (empty, valid) weather CSV.
+    pd.DataFrame(columns=["raceId", "race_precip_mm", "race_temp_c",
+                          "quali_precip_mm", "conditions_changed"]).to_csv(
+        raw_dir / "no-such-weather.csv", index=False)
+    pd.DataFrame([{"driverId": 1, "driverRef": "d1", "code": "D1", "forename": "F",
+                   "surname": "L", "dob": "1990-01-01", "nationality": "N"}]).to_csv(
+        raw_dir / "drivers.csv", index=False)
+    pd.DataFrame([{"constructorId": 1, "constructorRef": "c1", "name": "C1",
+                   "nationality": "N"}]).to_csv(raw_dir / "constructors.csv", index=False)
+    pd.DataFrame([{"circuitId": 1, "circuitRef": "circ1", "name": "Circuit",
+                   "location": "L", "country": "C", "lat": 0.0, "lng": 0.0, "alt": 0}]).to_csv(
+        raw_dir / "circuits.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "driverId": 1, "constructorId": 1, "points": 0,
+                   "position": 1, "positionText": "1", "wins": 0}]).to_csv(
+        raw_dir / "driver_standings.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "constructorId": 1, "points": 0, "position": 1,
+                   "positionText": "1", "wins": 0}]).to_csv(
+        raw_dir / "constructor_standings.csv", index=False)
+
+    with TestClient(create_app(complete_settings)) as c:
+        resp = c.get(f"{API_V1_PREFIX}/races/upcoming")
+        assert resp.status_code == 404
+
+
+def test_races_upcoming_503_when_materialization_data_unavailable(serving_stack, tmp_path):
+    settings, _ = serving_stack
+    missing_dir = tmp_path / "no-such-raw"
+    broken_settings = settings.model_copy(update={
+        "raw_data_dir": missing_dir,
+        "master_dataset_path": missing_dir / "master_dataset.parquet",
+        "qualifying_interim_path": missing_dir / "qualifying.parquet",
+        "weather_csv_path": missing_dir / "race_weather.csv",
+    })
+    with TestClient(create_app(broken_settings)) as c:
+        resp = c.get(f"{API_V1_PREFIX}/races/upcoming")
+        assert resp.status_code == 503
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +630,125 @@ def test_post_predict_materialization_data_unavailable_503(serving_stack, tmp_pa
     with TestClient(create_app(broken_settings)) as c:
         resp = c.post(f"{API_V1_PREFIX}/predict", json={"year": 2026, "round": 1})
         assert resp.status_code == 503
+
+
+def _historical_row(**overrides) -> dict:
+    """One real MASTER_DATASET_COLUMNS-shaped row (same shape
+    tests/test_predict_upcoming.py's fixture uses) -- a genuinely
+    completed race for a real, successful materialization."""
+    base = {
+        "raceId": 1, "driverId": 1, "constructorId": 10, "circuitId": 100,
+        "year": 2026, "round": 1,
+        "race_name": "Race", "race_date": "2026-01-01",
+        "circuit_ref": "circA", "circuit_name": "Circuit A", "circuit_location": "Loc",
+        "circuit_country": "Country", "circuit_lat": 1.0, "circuit_lng": 1.0, "circuit_alt": 1,
+        "driver_ref": "driver1", "driver_code": "D1", "driver_forename": "First",
+        "driver_surname": "Last", "driver_dob": "1990-01-01", "driver_nationality": "Nat",
+        "constructor_ref": "team10", "constructor_name": "Team 10", "constructor_nationality": "Nat",
+        "grid": 1, "qualifying_position": 1, "q1": "1:20.000", "q2": "1:19.000", "q3": "1:18.000",
+        "position": 1, "positionText": "1", "positionOrder": 1, "points": 25.0, "laps": 50,
+        "milliseconds": 1000000, "rank": 1, "fastestLap": 30, "fastestLapTime": "1:20.000",
+        "fastestLapSpeed": 200.0, "statusId": 1, "result_status": "Finished", "finished": True,
+        "winner": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.fixture(scope="module")
+def provenance_client(serving_stack, tmp_path_factory):
+    """A fully valid, isolated Phase-7 scenario — one completed race
+    (raceId=1) feeding a real materialization + scoring of the upcoming
+    race (raceId=2) — for the provenance round-trip test below. Distinct
+    from `predict_client` (deliberately just enough data to exercise error
+    paths, never a real successful materialization)."""
+    settings, _ = serving_stack
+    root = tmp_path_factory.mktemp("provenance-service")
+    raw_dir = root / "raw"
+    raw_dir.mkdir()
+    pd.DataFrame([
+        {"raceId": 1, "year": 2026, "round": 1, "circuitId": 100, "name": "Race 1", "date": "2026-01-01"},
+        {"raceId": 2, "year": 2026, "round": 2, "circuitId": 100, "name": "Race 2", "date": "2026-01-08"},
+    ]).to_csv(raw_dir / "races.csv", index=False)
+    pd.DataFrame([{"driverId": 1, "driverRef": "driver1", "code": "D1", "forename": "First",
+                   "surname": "Last", "dob": "1990-01-01", "nationality": "Nat"}]).to_csv(
+        raw_dir / "drivers.csv", index=False)
+    pd.DataFrame([{"constructorId": 10, "constructorRef": "team10", "name": "Team 10",
+                   "nationality": "Nat"}]).to_csv(raw_dir / "constructors.csv", index=False)
+    pd.DataFrame([{"circuitId": 100, "circuitRef": "circA", "name": "Circuit A",
+                   "location": "Loc", "country": "Country", "lat": 1.0, "lng": 1.0, "alt": 1}]).to_csv(
+        raw_dir / "circuits.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "driverId": 1, "constructorId": 10, "points": 25,
+                   "position": 1, "positionText": "1", "wins": 1}]).to_csv(
+        raw_dir / "driver_standings.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "constructorId": 10, "points": 25, "position": 1,
+                   "positionText": "1", "wins": 1}]).to_csv(
+        raw_dir / "constructor_standings.csv", index=False)
+    pd.DataFrame(columns=["raceId", "race_precip_mm", "race_temp_c",
+                          "quali_precip_mm", "conditions_changed"]).to_csv(
+        raw_dir / "race_weather.csv", index=False)
+
+    processed_dir = root / "processed"
+    processed_dir.mkdir()
+    master_path = processed_dir / "master_dataset.parquet"
+    pd.DataFrame([_historical_row()]).to_parquet(master_path)
+
+    interim_dir = root / "interim"
+    interim_dir.mkdir()
+    qualifying_path = interim_dir / "qualifying.parquet"
+    pd.DataFrame([
+        {"raceId": 2, "driverId": 1, "constructorId": 10, "number": 1, "position": 1,
+         "q1": "1:19.5", "q2": "1:18.5", "q3": "1:17.5"},
+    ]).to_parquet(qualifying_path)
+
+    provenance_settings = settings.model_copy(update={
+        "raw_data_dir": raw_dir, "master_dataset_path": master_path,
+        "qualifying_interim_path": qualifying_path,
+        "weather_csv_path": raw_dir / "race_weather.csv",
+    })
+    with TestClient(create_app(provenance_settings)) as c:
+        yield c
+
+
+def test_post_predict_provenance_round_trips_to_real_state(provenance_client):
+    """Decision 049 Refinement 6: every field in the response's
+    provenance block must be reconstructable from already-known state —
+    not just internally consistent with itself. Each field is recomputed
+    HERE, directly, from the same public state a real client could reach
+    (the served model's own training schema, the real files' mtimes),
+    rather than by calling app.upcoming_prediction_service's own private
+    helpers — calling the same function that produced the value would only
+    prove it's consistent with itself, not that it's reconstructable."""
+    resp = provenance_client.post(f"{API_V1_PREFIX}/predict", json={"year": 2026, "round": 2})
+    assert resp.status_code == 200
+    body = resp.json()
+    provenance = body["provenance"]
+
+    app_state = provenance_client.app.state
+    model_info = app_state.model_info
+    assert provenance["model_version"] == model_info.version
+    assert provenance["model_alias"] == model_info.alias
+
+    expected_schema_hash = hashlib.sha256(
+        json.dumps(training_schema(app_state.model), sort_keys=True).encode()
+    ).hexdigest()[:16]
+    assert provenance["feature_schema_version"] == expected_schema_hash
+
+    settings = app_state.settings
+    watched_paths = (
+        settings.master_dataset_path, settings.qualifying_interim_path, settings.weather_csv_path,
+    )
+    expected_mtime = max(p.stat().st_mtime for p in watched_paths if p.exists())
+    expected_etl_snapshot = datetime.fromtimestamp(expected_mtime, tz=UTC).isoformat()
+    assert provenance["etl_snapshot_version"] == expected_etl_snapshot
+    assert provenance["data_as_of"] == expected_etl_snapshot     # no as_of override given
+
+    materialized_at = datetime.fromisoformat(provenance["materialized_at"])
+    predicted_at = datetime.fromisoformat(provenance["predicted_at"])
+    assert materialized_at <= predicted_at
+
+    assert provenance["qualifying_status"] == "complete"        # driver 1 has a real quali row
+    assert provenance["completeness_status"] == body["materialization_status"] == "post_qualifying"
 
 
 # ---------------------------------------------------------------------------

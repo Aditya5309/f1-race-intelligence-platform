@@ -87,6 +87,30 @@ def api_get_or_stop(path: str, params: dict | None = None) -> dict:
     return _or_stop(lambda: api_get(path, params=params))
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def predict_upcoming(year: int, round_: int) -> dict:
+    """POST {api_url}{API_V1_PREFIX}/predict -> parsed JSON (Phase 8, the
+    dashboard's first-ever POST call — every other route here is GET).
+    Raises httpx.HTTPError on failure (409/422/503 from the real
+    exception-to-status mapping in app/api.py, or unreachable).
+
+    Short TTL relative to api_get's 300s: an upcoming race's inputs can
+    genuinely change within a browsing session (qualifying landing, a
+    grid penalty adjudicated) — this is a client-side cache independent
+    of, and much shorter than, the server's own pre_race_cache (Decision
+    052), not a substitute for it."""
+    response = _http_client().post(
+        f"{API_V1_PREFIX}/predict", json={"year": year, "round": round_})
+    response.raise_for_status()
+    return response.json()
+
+
+def predict_upcoming_or_stop(year: int, round_: int) -> dict:
+    """predict_upcoming with a user-facing error banner instead of a
+    traceback — mirrors api_get_or_stop()."""
+    return _or_stop(lambda: predict_upcoming(year, round_))
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def list_races(year: int | None = None) -> list[dict]:
     """/races, optionally filtered to one season. Raises httpx.HTTPError."""
@@ -105,6 +129,32 @@ def list_races_or_empty(year: int | None = None) -> list[dict]:
         return list_races(year)
     except httpx.HTTPError:
         return []
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def upcoming_race() -> dict | None:
+    """GET /races/upcoming (Phase 8) -> {race_id, year, round, name,
+    circuit_id, date}, or None if there is no upcoming race, the API is
+    unreachable, or POST /predict's training-side data isn't available on
+    this deployment (503 — the same degraded state POST /predict itself
+    can be in). Short TTL relative to the other caches here (5 min
+    elsewhere): "which race is next" can change on the project's own
+    weekly ETL cadence, not per-session.
+
+    Deliberately soft-fail, never st.stop() — this is an ENHANCEMENT
+    (an extra, clearly-labeled picker entry), not a hard requirement.
+    Race Center must render exactly as it does today, historical-only,
+    when this returns None."""
+    try:
+        return api_get("/races/upcoming")
+    except httpx.HTTPError:
+        return None
+
+
+def upcoming_race_or_none() -> dict | None:
+    """Non-raising alias for upcoming_race() — named for call-site clarity
+    (mirrors list_races_or_empty()'s naming, the same soft-fail intent)."""
+    return upcoming_race()
 
 
 def served_seasons(races: list[dict]) -> tuple[int, int] | None:

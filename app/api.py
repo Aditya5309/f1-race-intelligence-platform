@@ -31,6 +31,11 @@ Endpoints, all under /api/v1:
     GET  /api/v1/health                              liveness + serving model metadata
     GET  /api/v1/model                               full ModelInfo
     GET  /api/v1/races?year=                         races available to score (<= serve_max_year)
+    GET  /api/v1/races/upcoming                      Phase 8: identity only (year/round/
+                                              name/circuit/date) of the single next race
+                                              with no result yet — NOT a prediction, no
+                                              materialization_status/caveats/provenance;
+                                              those come from POST /predict.
     GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
     GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
                                               Prediction Simulator: re-score
@@ -148,6 +153,7 @@ from app.config import API_V1_PREFIX, Settings
 from app.upcoming_prediction_service import (
     RaceAlreadyHasResult,
     resolve_upcoming_prediction,
+    resolve_upcoming_race,
 )
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.features.qualifying import QUALIFYING_FEATURES
@@ -211,6 +217,18 @@ class RaceSummary(BaseModel):
 
 class RaceListResponse(BaseModel):
     races: list[RaceSummary]
+
+
+class UpcomingRaceSchema(BaseModel):
+    """Identity only (Phase 8, GET /races/upcoming) — no prediction, no
+    materialization_status/caveats/provenance. Those come from POST
+    /predict once the caller actually asks for a scored prediction."""
+    race_id: int
+    year: int
+    round: int
+    name: str
+    circuit_id: int
+    date: str
 
 
 class DriverPrediction(BaseModel):
@@ -590,6 +608,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         round=int(r.round), n_drivers=int(r.size))
             for r in summary.itertuples()
         ])
+
+    @router.get("/races/upcoming", response_model=UpcomingRaceSchema)
+    def upcoming_race():
+        """Phase 8: identity of the single next race with no result yet
+        (Decision 050 horizon=1), for the dashboard's picker — NOT a
+        prediction. Thin transport only, same as POST /predict: delegates
+        to app.upcoming_prediction_service.resolve_upcoming_race(), maps
+        RuntimeError -> 503 (materialization data unavailable, mirrors
+        POST /predict's own degraded-state handling) and "no upcoming
+        race" -> 404 (nothing found, not a bad request)."""
+        try:
+            race = resolve_upcoming_race(app.state, settings)
+        except RuntimeError as exc:
+            raise HTTPException(
+                503, detail=f"Upcoming race lookup not available: {exc}") from exc
+        if race is None:
+            raise HTTPException(
+                404, detail="No upcoming race is scheduled — "
+                            "every calendar race already has a result.")
+        return UpcomingRaceSchema(
+            race_id=race.race_id, year=race.year, round=race.round,
+            name=race.name, circuit_id=race.circuit_id, date=race.date,
+        )
 
     @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):

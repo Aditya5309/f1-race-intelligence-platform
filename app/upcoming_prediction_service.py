@@ -271,6 +271,34 @@ def materialize_and_score(
 
 
 # ---------------------------------------------------------------------------
+# Upcoming-race IDENTITY lookup (Phase 8 — GET /races/upcoming)
+# ---------------------------------------------------------------------------
+
+def resolve_upcoming_race(state, settings: Settings) -> UpcomingRace | None:
+    """Identity of the single next race with no result yet (Decision 050
+    horizon=1), or None if every calendar race already has a result.
+
+    Deliberately identity-only — no materialization_status/caveats/
+    provenance here, and no call to materialize_and_score(). Those stay
+    owned exclusively by POST /predict (the same "single source of truth,
+    no duplicated status logic" principle Decision 052 established for
+    materialize_and_score() vs. predict_upcoming_race()). This function
+    exists so a client (the dashboard) can cheaply discover WHICH race to
+    ask POST /predict about, without that being a full, cache-populating
+    materialize+score call just to populate a picker.
+
+    Reuses ensure_materialization_data() and next_race() verbatim — no new
+    data-loading or calendar-resolution logic. Raises RuntimeError if
+    materialization data isn't available (app/api.py maps this to 503).
+    """
+    data = ensure_materialization_data(state, settings)
+    races_df: pd.DataFrame = data["races"]
+    master: pd.DataFrame = data["master"]
+    results_for_horizon = master[["raceId"]].drop_duplicates()
+    return next_race(races_df, results_for_horizon)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
