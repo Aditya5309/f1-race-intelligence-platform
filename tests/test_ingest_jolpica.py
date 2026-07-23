@@ -152,6 +152,62 @@ def test_missing_completed_races_empty_when_all_have_results():
 
 
 # ---------------------------------------------------------------------------
+# resolve_upcoming_qualifying_target — Phase 2 (Decisions 049/050)
+# ---------------------------------------------------------------------------
+
+def _races_calendar() -> pd.DataFrame:
+    return pd.DataFrame({
+        "raceId": [1, 2, 3], "year": [2026, 2026, 2026], "round": [7, 8, 9],
+        "circuitId": [10, 11, 12], "name": ["A", "B", "C"],
+        "date": ["2026-01-01", "2026-01-08", "2026-01-15"],
+    })
+
+
+def test_resolve_upcoming_qualifying_target_finds_next_race_with_no_qualifying():
+    races = _races_calendar()
+    results = pd.DataFrame({"raceId": [1]})       # race 1 completed
+    qualifying = pd.DataFrame({"raceId": []})      # nothing ingested yet
+
+    target = ingest_jolpica.resolve_upcoming_qualifying_target(races, results, qualifying)
+
+    assert target.race_id == 2
+    assert target.year == 2026
+    assert target.round == 8
+
+
+def test_resolve_upcoming_qualifying_target_none_when_qualifying_already_on_file():
+    """Idempotent: a prior run already landed this race's qualifying."""
+    races = _races_calendar()
+    results = pd.DataFrame({"raceId": [1]})
+    qualifying = pd.DataFrame({"raceId": [2]})     # race 2's qualifying already ingested
+
+    assert ingest_jolpica.resolve_upcoming_qualifying_target(races, results, qualifying) is None
+
+
+def test_resolve_upcoming_qualifying_target_none_when_ingested_this_run():
+    """The 'upcoming' race turned out to have just finished and was already
+    fully ingested (results + qualifying) earlier in the SAME run — must not
+    be double-fetched here."""
+    races = _races_calendar()
+    results = pd.DataFrame({"raceId": [1]})
+    qualifying = pd.DataFrame({"raceId": []})
+
+    target = ingest_jolpica.resolve_upcoming_qualifying_target(
+        races, results, qualifying, already_ingested_race_ids={2},
+    )
+
+    assert target is None
+
+
+def test_resolve_upcoming_qualifying_target_none_when_no_upcoming_race():
+    races = _races_calendar()
+    results = pd.DataFrame({"raceId": [1, 2, 3]})  # every race already completed
+    qualifying = pd.DataFrame({"raceId": []})
+
+    assert ingest_jolpica.resolve_upcoming_qualifying_target(races, results, qualifying) is None
+
+
+# ---------------------------------------------------------------------------
 # build_results_rows — real jolpica JSON shape (verified live)
 # ---------------------------------------------------------------------------
 
@@ -232,6 +288,92 @@ def test_build_results_rows_positionorder_matches_array_order(drivers_df):
 
 
 # ---------------------------------------------------------------------------
+# build_qualifying_rows — real jolpica JSON shape, including partial-session
+# states (a driver eliminated in Q1 has no Q2/Q3; eliminated in Q2 has no
+# Q3) — the normal, expected shape of EVERY qualifying session (15 of 20
+# drivers never see Q3), not a special "session in progress" case. First
+# coverage for this function (previously exercised only implicitly, never
+# asserted on directly).
+# ---------------------------------------------------------------------------
+
+_RAW_QUALIFYING_ALL_SESSIONS = {
+    "number": "1", "position": "1",
+    "Driver": {"driverId": "max_verstappen", "givenName": "Max", "familyName": "Verstappen",
+               "code": "VER", "permanentNumber": "1", "dateOfBirth": "1997-09-30",
+               "nationality": "Dutch", "url": "http://x/Max_Verstappen"},
+    "Constructor": {"constructorId": "red_bull", "name": "Red Bull",
+                    "nationality": "Austrian", "url": "http://x/Red_Bull"},
+    "Q1": "1:29.000", "Q2": "1:28.500", "Q3": "1:28.000",
+}
+
+_RAW_QUALIFYING_ELIMINATED_Q2 = {
+    "number": "14", "position": "12",
+    "Driver": {"driverId": "alonso", "givenName": "Fernando", "familyName": "Alonso",
+               "code": "ALO", "permanentNumber": "14", "dateOfBirth": "1981-07-29",
+               "nationality": "Spanish", "url": "http://x/Fernando_Alonso"},
+    "Constructor": {"constructorId": "aston_martin", "name": "Aston Martin",
+                    "nationality": "British", "url": "http://x/Aston_Martin"},
+    "Q1": "1:29.800", "Q2": "1:29.400",
+    # no Q3 key — eliminated in Q2, exactly like the real jolpica payload.
+}
+
+_RAW_QUALIFYING_ELIMINATED_Q1 = {
+    "number": "27", "position": "18",
+    "Driver": {"driverId": "hulkenberg", "givenName": "Nico", "familyName": "Hulkenberg",
+               "code": "HUL", "permanentNumber": "27", "dateOfBirth": "1987-08-19",
+               "nationality": "German", "url": "http://x/Nico_Hulkenberg"},
+    "Constructor": {"constructorId": "haas", "name": "Haas F1 Team",
+                    "nationality": "American", "url": "http://x/Haas"},
+    "Q1": "1:30.500",
+    # no Q2/Q3 keys — eliminated in Q1.
+}
+
+
+def test_build_qualifying_rows_all_sessions_present(drivers_df):
+    constructors_df = pd.DataFrame({"constructorId": [1], "constructorRef": ["mercedes"]})
+    drivers = ingest_jolpica.IdReconciler(drivers_df, "driverId", "driverRef")
+    constructors = ingest_jolpica.IdReconciler(constructors_df, "constructorId", "constructorRef")
+
+    rows = ingest_jolpica.build_qualifying_rows(
+        [_RAW_QUALIFYING_ALL_SESSIONS], race_id=9001, next_qualify_id=700,
+        drivers=drivers, constructors=constructors,
+    )
+    row = rows[0]
+    assert row["qualifyId"] == 700
+    assert row["raceId"] == 9001
+    assert row["position"] == "1"
+    assert row["q1"] == "1:29.000"
+    assert row["q2"] == "1:28.500"
+    assert row["q3"] == "1:28.000"
+
+
+def test_build_qualifying_rows_partial_session_states_get_na_token(drivers_df):
+    """The named Phase 2 test scenario: Q1 done for everyone, Q2/Q3 only for
+    those who advanced. Missing sessions become NA_TOKEN, never fabricated
+    or dropped — same discipline as every other informative-missingness
+    column in this project (domain_knowledge.md §8)."""
+    constructors_df = pd.DataFrame({"constructorId": [1], "constructorRef": ["mercedes"]})
+    drivers = ingest_jolpica.IdReconciler(drivers_df, "driverId", "driverRef")
+    constructors = ingest_jolpica.IdReconciler(constructors_df, "constructorId", "constructorRef")
+
+    rows = ingest_jolpica.build_qualifying_rows(
+        [_RAW_QUALIFYING_ALL_SESSIONS, _RAW_QUALIFYING_ELIMINATED_Q2, _RAW_QUALIFYING_ELIMINATED_Q1],
+        race_id=9001, next_qualify_id=700, drivers=drivers, constructors=constructors,
+    )
+
+    eliminated_q2_row = rows[1]
+    assert eliminated_q2_row["q1"] == "1:29.800"
+    assert eliminated_q2_row["q2"] == "1:29.400"
+    assert eliminated_q2_row["q3"] == ingest_jolpica.NA_TOKEN
+
+    eliminated_q1_row = rows[2]
+    assert eliminated_q1_row["q1"] == "1:30.500"
+    assert eliminated_q1_row["q2"] == ingest_jolpica.NA_TOKEN
+    assert eliminated_q1_row["q3"] == ingest_jolpica.NA_TOKEN
+    assert drivers.new_rows[-1]["driverRef"] == "hulkenberg"
+
+
+# ---------------------------------------------------------------------------
 # write_ingest_report — Part 2 weekly-verification artifact
 # ---------------------------------------------------------------------------
 
@@ -258,6 +400,7 @@ def test_write_ingest_report_writes_summary_and_new_row_csvs(tmp_path):
     assert summary["dry_run"] is False
     assert summary["ingested_races"] == ingested
     assert summary["skipped_races"] == skipped
+    assert summary["upcoming_qualifying"] is None  # not passed -> default
     assert summary["totals"] == {
         "races_ingested": 1, "races_skipped": 1, "results_rows": 2,
         "qualifying_rows": 0, "driver_standings_rows": 0,
@@ -271,6 +414,26 @@ def test_write_ingest_report_writes_summary_and_new_row_csvs(tmp_path):
     # nothing new on these endpoints this run — no empty file clutter
     assert not (report_dir / "new_qualifying.csv").exists()
     assert not (report_dir / "new_constructors.csv").exists()
+
+
+def test_write_ingest_report_includes_upcoming_qualifying_when_given(tmp_path):
+    """Phase 2 (Decisions 049/050): the upcoming-race qualifying summary
+    rides along in the same report, additive to the existing fields."""
+    report_dir = tmp_path / "ingest_report"
+    upcoming = {
+        "year": 2026, "round": 11, "name": "Upcoming GP", "raceId": 9002,
+        "n_qualifying_rows": 20,
+    }
+
+    ingest_jolpica.write_ingest_report(
+        report_dir, dry_run=False, ingested=[], skipped=[],
+        new_drivers=[], new_constructors=[], new_results_rows=[],
+        new_qualifying_rows=[], new_driver_standings_rows=[],
+        new_constructor_standings_rows=[], upcoming_qualifying=upcoming,
+    )
+
+    summary = json.loads((report_dir / "summary.json").read_text())
+    assert summary["upcoming_qualifying"] == upcoming
 
 
 def test_write_ingest_report_nothing_new_still_writes_summary(tmp_path):

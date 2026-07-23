@@ -176,6 +176,16 @@ future entry point for *upcoming-race* predictions (races that haven't run
 yet), which require the feature pipeline to materialize pre-race feature
 rows first — not implemented today.
 
+A design for this contract has been reviewed and accepted (Decision 049)
+but not built: the served model and its calibration are reused unchanged;
+a dedicated component (never the API layer itself) would be responsible
+for constructing a race's feature row from data already refreshed by the
+project's own scheduled ingestion job — never by calling any third-party
+API at request time; and two acceptance checks (a feature-parity check
+against historical data, and a historical-backtest check against this
+API's own existing predictions) would need to pass before this route
+could return anything other than 501.
+
 ## Errors
 
 Every error response is a JSON body of the shape `{"detail": "..."}`, with

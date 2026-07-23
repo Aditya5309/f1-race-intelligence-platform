@@ -439,13 +439,117 @@ def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):
 
 
 # ---------------------------------------------------------------------------
-# Reserved POST /predict
+# POST /predict (Phase 7) — request validation, and the exception-to-HTTP
+# mapping app/upcoming_prediction_service.py's plain-Python exceptions go
+# through in app/api.py (RaceAlreadyHasResult -> 409, ValueError -> 422,
+# RuntimeError -> 503). The exception TYPES themselves are covered in
+# tests/test_upcoming_prediction_service.py; these tests prove the real
+# route maps them to the right status codes end-to-end. Uses its own
+# isolated raw-data fixture (`predict_client`) rather than the module's
+# `serving_stack` (which only builds a synthetic features.parquet, not the
+# raw dimension tables POST /predict materializes from) — deliberately NOT
+# the real project's data/ tree, for test isolation.
 # ---------------------------------------------------------------------------
 
-def test_post_predict_reserved_501(client):
+@pytest.fixture(scope="module")
+def predict_client(serving_stack, tmp_path_factory):
+    settings, _ = serving_stack
+    root = tmp_path_factory.mktemp("predict-service")
+    raw_dir = root / "raw"
+    raw_dir.mkdir()
+    pd.DataFrame([
+        {"raceId": 1, "year": 2026, "round": 1, "circuitId": 1, "name": "R1", "date": "2026-01-01"},
+        {"raceId": 2, "year": 2026, "round": 2, "circuitId": 1, "name": "R2", "date": "2026-01-08"},
+    ]).to_csv(raw_dir / "races.csv", index=False)
+    pd.DataFrame([{"driverId": 1, "driverRef": "d1", "code": "D1", "forename": "F",
+                   "surname": "L", "dob": "1990-01-01", "nationality": "N"}]).to_csv(
+        raw_dir / "drivers.csv", index=False)
+    pd.DataFrame([{"constructorId": 1, "constructorRef": "c1", "name": "C1",
+                   "nationality": "N"}]).to_csv(raw_dir / "constructors.csv", index=False)
+    pd.DataFrame([{"circuitId": 1, "circuitRef": "circ1", "name": "Circuit",
+                   "location": "L", "country": "C", "lat": 0.0, "lng": 0.0, "alt": 0}]).to_csv(
+        raw_dir / "circuits.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "driverId": 1, "constructorId": 1, "points": 0,
+                   "position": 1, "positionText": "1", "wins": 0}]).to_csv(
+        raw_dir / "driver_standings.csv", index=False)
+    pd.DataFrame([{"raceId": 1, "constructorId": 1, "points": 0, "position": 1,
+                   "positionText": "1", "wins": 0}]).to_csv(
+        raw_dir / "constructor_standings.csv", index=False)
+    pd.DataFrame(columns=["raceId", "race_precip_mm", "race_temp_c",
+                          "quali_precip_mm", "conditions_changed"]).to_csv(
+        raw_dir / "race_weather.csv", index=False)
+
+    processed_dir = root / "processed"
+    processed_dir.mkdir()
+    master_path = processed_dir / "master_dataset.parquet"
+    pd.DataFrame({"raceId": [1]}).to_parquet(master_path)
+
+    interim_dir = root / "interim"
+    interim_dir.mkdir()
+    qualifying_path = interim_dir / "qualifying.parquet"
+    pd.DataFrame(columns=["raceId", "driverId", "constructorId", "number",
+                          "position", "q1", "q2", "q3"]).to_parquet(qualifying_path)
+
+    predict_settings = settings.model_copy(update={
+        "raw_data_dir": raw_dir, "master_dataset_path": master_path,
+        "qualifying_interim_path": qualifying_path,
+        "weather_csv_path": raw_dir / "race_weather.csv",
+    })
+    with TestClient(create_app(predict_settings)) as c:
+        yield c
+
+
+def test_post_predict_requires_body(client):
+    """FastAPI's own request validation rejects a bodiless POST with 422
+    before the route — and therefore before any lazy materialization-data
+    load — ever runs, proving this is real request handling now, not the
+    previous unconditional 501."""
     resp = client.post("/predict")
-    assert resp.status_code == 501
-    assert "upcoming-race" in resp.json()["detail"]
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["msg"] == "Field required"
+
+
+def test_post_predict_race_already_has_result_409(predict_client):
+    resp = predict_client.post(f"{API_V1_PREFIX}/predict", json={"year": 2026, "round": 1})
+    assert resp.status_code == 409
+
+
+def test_post_predict_unknown_race_422(predict_client):
+    resp = predict_client.post(f"{API_V1_PREFIX}/predict", json={"year": 2026, "round": 99})
+    assert resp.status_code == 422
+    assert "not on the races calendar" in resp.json()["detail"]
+
+
+def test_post_predict_naive_as_of_422(predict_client):
+    """Regression test (Decision 052): an offset-less as_of must produce a
+    clear 422, not an unhandled TypeError surfacing as a generic 500. The
+    companion case (a valid, timezone-aware as_of must NOT be rejected) is
+    covered at the service layer —
+    tests/test_upcoming_prediction_service.py::test_timezone_aware_as_of_is_accepted
+    — where a mocked materializer isolates the as_of check from needing a
+    fully realistic historical_master."""
+    resp = predict_client.post(
+        f"{API_V1_PREFIX}/predict",
+        json={"year": 2026, "round": 2, "as_of": "2026-01-01T00:00:00"},
+    )
+    assert resp.status_code == 422
+    assert "UTC offset" in resp.json()["detail"]
+
+
+def test_post_predict_materialization_data_unavailable_503(serving_stack, tmp_path):
+    """A Settings whose Phase-7 paths point nowhere degrades ONLY this
+    route to 503 (via the lazy loader), rather than crashing the process."""
+    settings, _ = serving_stack
+    missing_dir = tmp_path / "no-such-raw"
+    broken_settings = settings.model_copy(update={
+        "raw_data_dir": missing_dir,
+        "master_dataset_path": missing_dir / "master_dataset.parquet",
+        "qualifying_interim_path": missing_dir / "qualifying.parquet",
+        "weather_csv_path": missing_dir / "race_weather.csv",
+    })
+    with TestClient(create_app(broken_settings)) as c:
+        resp = c.post(f"{API_V1_PREFIX}/predict", json={"year": 2026, "round": 1})
+        assert resp.status_code == 503
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +580,12 @@ def test_versioned_prediction_matches_legacy_same_cache_entry(client):
 def test_versioned_error_paths_match_legacy(client):
     assert (client.get(f"{API_V1_PREFIX}/predictions/999999999").status_code
             == client.get("/predictions/999999999").status_code == 404)
+    # Phase 7: POST /predict is real request handling now, not a 501 stub —
+    # the invariant this test actually cares about (versioned and legacy
+    # mounts behave identically) still holds for whatever status a bodiless
+    # POST gets (422, from FastAPI's own request validation).
     assert (client.post(f"{API_V1_PREFIX}/predict").status_code
-            == client.post("/predict").status_code == 501)
+            == client.post("/predict").status_code == 422)
 
 
 def test_openapi_schema_lists_only_versioned_paths(client):

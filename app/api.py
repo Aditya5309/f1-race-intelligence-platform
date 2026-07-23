@@ -5,13 +5,18 @@ FastAPI serving layer.
 
     uvicorn app.api:app --reload
 
-The app is deliberately logic-free: HTTP concerns in, exactly two calls to
-the tested prediction layer out — `predict.load_model()` once at startup,
-`predict.predict_race()` per request. Feature rows are looked up SERVER-SIDE
-from the frozen runtime features snapshot (settings.features_path, default
-artifacts/features.parquet) by raceId — clients never send feature payloads,
-since features are derived artifacts of the leakage-audited pipeline, not
-something a caller should be able to inject.
+The app is deliberately logic-free: HTTP concerns in, calls to the tested
+prediction layer out — `predict.load_model()` once at startup,
+`predict.predict_race()` per request. For every historical route, feature
+rows are looked up SERVER-SIDE from the frozen runtime features snapshot
+(settings.features_path, default artifacts/features.parquet) by raceId —
+clients never send feature payloads, since features are derived artifacts
+of the leakage-audited pipeline, not something a caller should be able to
+inject. `POST /predict` (Phase 7) is the one exception to "clients never
+send anything feature-shaped": callers may optionally send an entry-list
+override (driver/constructor pairs, not feature values) — everything
+feature-shaped is still built server-side, by `materialize_features()`,
+never accepted from the request body.
 
 `predict.load_model()` reads a frozen serving bundle (settings.
 serving_bundle_path, default artifacts/serving/staging) — no live MLflow
@@ -41,8 +46,32 @@ Endpoints, all under /api/v1:
                                               only heuristic) for the same race.
     GET  /api/v1/debug/features/{race_id}  dev-only (F1_DEBUG_ENDPOINTS=true) —
                                     the exact feature vectors fed to the model
-    POST /api/v1/predict            RESERVED for a future upcoming-race
-                                    scoring contract; always returns 501
+    POST /api/v1/predict            Upcoming-race prediction (Phase 7,
+                                    Decisions 049/050): materializes the
+                                    single next race with no result yet
+                                    (Decision 050's horizon=1) and scores it
+                                    with the same served bundle. See the
+                                    "Upcoming-race prediction" section below.
+
+Upcoming-race prediction (`POST /predict`, Phase 7): unlike every route
+above, this one needs training-side data (`settings.master_dataset_path`,
+`raw_data_dir`, etc.) that has no committed `artifacts/`-tree equivalent
+today — see `app/config.py`'s own comment and `context/decisions.md`
+Decision 052 for why. That data is LAZILY loaded on the first `POST
+/predict` request (not at startup — a stability-review finding: no other
+route reads it, so paying its full read/memory cost unconditionally at
+every process start would be wasted work on a process that never receives
+this request) and cached thereafter by
+`app.upcoming_prediction_service.ensure_materialization_data()`. This
+route itself is a genuinely thin transport layer: it parses the request,
+delegates ALL orchestration (calendar/entry-list resolution,
+materialization, scoring, the pre-race cache) to
+`app.upcoming_prediction_service.resolve_upcoming_prediction()`, maps that
+module's plain-Python exceptions to HTTP status codes, and assembles the
+response. That service module reuses `src.features.upcoming.next_race()`/
+`resolve_entry_list()`, `src.models.materialize.materialize_features()`,
+and `src.models.predict.predict_race()` unmodified — this module imports
+none of them directly anymore.
 
 API versioning: every route above is defined ONCE on a plain `APIRouter`
 (no route logic duplicated) and mounted TWICE — once under
@@ -79,14 +108,17 @@ server log via `logger.exception(...)`.
 
 **Authentication is deliberately NOT implemented.** This is a public
 demonstration deployment of a read-only, historical-data prediction
-service — not a multi-user production system: every route is GET (bar the
-reserved, always-501 POST /predict), there is no concept of a user account,
-no write operation exists anywhere in this API, and nothing served is
+service — not a multi-user production system: every historically-served
+route is GET; `POST /predict` (Phase 7) is the one exception, but it
+doesn't write or persist anything server-side — like every GET route, it
+computes and returns a prediction, just via a POST because it accepts a
+request body. There is no concept of a user account, no genuine write/
+mutation operation exists anywhere in this API, and nothing served is
 private (F1 results are public record). Adding auth here would protect
 nothing real while adding a credential-management surface this project has
 no actual use for. Revisit only if this API ever gains a genuine
-per-user/write capability — an upcoming-race POST /predict is the most
-likely future trigger.
+per-user/write capability — `POST /predict`, now implemented, does not
+count as one.
 """
 
 from __future__ import annotations
@@ -113,8 +145,13 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import API_V1_PREFIX, Settings
+from app.upcoming_prediction_service import (
+    RaceAlreadyHasResult,
+    resolve_upcoming_prediction,
+)
 from src.features.pipeline import FEATURE_COLUMNS, TARGET_COLUMN
 from src.features.qualifying import QUALIFYING_FEATURES
+from src.features.upcoming import EntryListEntry
 from src.models.predict import load_model, predict_race
 from src.models.registry import MODEL_ZOO, get_model, training_schema
 
@@ -244,6 +281,60 @@ class SimulateGridResponse(BaseModel):
     model: ModelInfoSchema
 
 
+class EntryListEntrySchema(BaseModel):
+    """One (driverId, constructorId) pairing — the request-body shape for
+    an explicit entry-list override. Mirrors
+    `src.features.upcoming.EntryListEntry` field-for-field; kept as a
+    separate Pydantic model rather than reusing that dataclass directly so
+    request-body validation stays entirely a FastAPI/pydantic concern."""
+    driver_id: int
+    constructor_id: int
+
+
+class PredictRequest(BaseModel):
+    year: int
+    round: int
+    #: Omit to resolve the current-season roster (see
+    #: `resolve_entry_list()`'s backward-looking inference — Phase 1).
+    entry_list: list[EntryListEntrySchema] | None = None
+    #: ISO-8601, MUST be timezone-aware (e.g. "2026-07-23T10:00:00Z" or
+    #: "...+00:00") — a naive timestamp's offset is genuinely unknown to
+    #: this API and is rejected with 422 rather than silently assumed to
+    #: be UTC (Decision 052). Optional — reserved for a future historical-
+    #: cutoff override; validated (never later than the latest local ETL
+    #: snapshot) but does not yet change which data is used (see the
+    #: route's own docstring for why — no per-row ETL-ingestion timestamp
+    #: exists to filter by, a known, disclosed limitation).
+    as_of: str | None = None
+
+
+class ProvenanceSchema(BaseModel):
+    """Decision 049 Refinement 6: every prediction must be reconstructable
+    later from its own recorded metadata alone."""
+    model_version: str
+    model_alias: str
+    feature_schema_version: str
+    etl_snapshot_version: str
+    data_as_of: str
+    materialized_at: str
+    predicted_at: str
+    qualifying_status: str          # "not_started" | "in_progress" | "complete"
+    completeness_status: str        # mirrors materialization_status
+
+
+class UpcomingPredictionResponse(BaseModel):
+    prediction_id: str
+    year: int
+    round: int
+    materialization_status: str     # "post_qualifying" | "pre_qualifying"
+    missing_inputs: list[str]
+    generated_at: str
+    model: ModelInfoSchema
+    predictions: list[DriverPrediction]
+    caveats: list[str]
+    provenance: ProvenanceSchema
+
+
 # ---------------------------------------------------------------------------
 # Startup state
 # ---------------------------------------------------------------------------
@@ -284,6 +375,14 @@ async def _lifespan(app: FastAPI):
     app.state.driver_names, app.state.constructor_names = {}, {}
     app.state.baseline_model = None
     app.state.baseline_load_error = None
+    # POST /predict's own training-side data is intentionally NOT loaded
+    # here — it's lazy (see app.upcoming_prediction_service.
+    # ensure_materialization_data(), called from the route on first
+    # request). Only cheap, no-I/O state is set up at startup.
+    app.state.materialization_data = None
+    app.state.materialization_load_attempted = False
+    app.state.materialization_load_error = None
+    app.state.pre_race_cache = OrderedDict()     # cache key -> (result, cached_at)
 
     try:
         model, info = load_model(settings.serving_bundle_path)
@@ -687,17 +786,89 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         )
 
-    @router.post("/predict", status_code=501)
-    def predict_reserved():
-        """RESERVED: a future upcoming-race prediction contract
-        will accept a future race_id or explicit feature rows here. Routing
-        it now means that feature can land without an API redesign."""
-        raise HTTPException(
-            501,
-            detail="Reserved for a future upcoming-race prediction contract "
-                   "(pre-race feature materialization for races that have not run yet). "
-                   "Use GET /predictions/{race_id} for historical races.",
+    @router.post("/predict", response_model=UpcomingPredictionResponse)
+    def predict_upcoming(body: PredictRequest):
+        """Score the single next race with no result yet (Decision 050's
+        horizon=1) with the served bundle.
+
+        Thin transport only: parses the request, delegates every bit of
+        orchestration (calendar/entry-list resolution, materialization,
+        scoring, the pre-race cache) to
+        `app.upcoming_prediction_service.resolve_upcoming_prediction()`,
+        maps its plain-Python exceptions to HTTP status codes, and
+        assembles the response. See that module for why the composition
+        lives there instead of `src.models.predict_upcoming.
+        predict_upcoming_race()`.
+        """
+        if app.state.model is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Model not available: {app.state.load_error or 'not loaded'}",
+            )
+
+        override = (
+            [EntryListEntry(driver_id=e.driver_id, constructor_id=e.constructor_id)
+             for e in body.entry_list]
+            if body.entry_list is not None else None
         )
+
+        try:
+            result, cache_hit = resolve_upcoming_prediction(
+                app.state, settings, app.state.model, app.state.model_info,
+                year=body.year, round_=body.round,
+                entry_list_override=override, as_of=body.as_of,
+            )
+        except RaceAlreadyHasResult as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                503, detail=f"Upcoming-race prediction not available: {exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+
+        info = app.state.model_info
+        prediction_id = str(uuid.uuid4())
+        caveats = [
+            "grid_adjusted/grid_position_norm are sourced from qualifying_position — a "
+            "post-qualifying grid penalty or pit-lane start is not yet reflected "
+            "(Decision 049/050's documented interim proxy).",
+        ]
+        if result.materialization_status == "pre_qualifying":
+            caveats.append(
+                "Qualifying has not been fully recorded for this race yet; this prediction "
+                "relies on informative-missingness handling that has not been separately "
+                "validated for a pre-qualifying regime (design doc Phase 9, deferred)."
+            )
+
+        response = UpcomingPredictionResponse(
+            prediction_id=prediction_id,
+            year=body.year,
+            round=body.round,
+            materialization_status=result.materialization_status,
+            missing_inputs=result.missing_inputs,
+            generated_at=result.predicted_at.isoformat(timespec="seconds"),
+            model=_model_schema(),
+            predictions=_driver_predictions(result.predictions),
+            caveats=caveats,
+            provenance=ProvenanceSchema(
+                model_version=info.version,
+                model_alias=info.alias,
+                feature_schema_version=result.feature_schema_version,
+                etl_snapshot_version=result.etl_snapshot_version.isoformat(),
+                data_as_of=(body.as_of or result.etl_snapshot_version.isoformat()),
+                materialized_at=result.materialized_at.isoformat(timespec="seconds"),
+                predicted_at=result.predicted_at.isoformat(timespec="seconds"),
+                qualifying_status=result.qualifying_status,
+                completeness_status=result.materialization_status,
+            ),
+        )
+
+        logger.info(
+            "upcoming_prediction prediction_id=%s year=%d round=%d model_version=%s "
+            "cache_hit=%s status_code=200",
+            prediction_id, body.year, body.round, info.version, cache_hit,
+        )
+        return response
 
     # --- mount the router twice ----------------------------------------------
     # Canonical, documented: /api/v1/... . Legacy back-compat: every

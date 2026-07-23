@@ -400,7 +400,7 @@ The dashboard has grown to eight pages; five are illustrated below (Compare Driv
 - Splitting the packaging manifest into serving/dashboard/training dependency groups, so each deployment target installs only what it needs without hand-maintained duplicate requirement files.
 - Extending CI with a container build-and-push job and choosing a hosting target for the Docker images.
 - A generic production authentication story, if a genuine write-capable endpoint is ever added.
-- Upcoming-race prediction: materializing pre-race features for a race that hasn't happened yet, and implementing the currently-reserved `POST /predict` contract against it.
+- Upcoming-race prediction: materializing pre-race features for a race that hasn't happened yet, and implementing the currently-reserved `POST /predict` contract against it. A design for this has been reviewed and accepted (Decision 049) — reusing the served model unchanged, a dedicated feature-construction component kept out of the prediction path, local-data-only inputs (no live third-party calls from the serving path), and mandatory historical-parity checks before launch — but none of it is implemented yet.
 - Data-quality, drift, and latency monitoring beyond the accuracy tracking that already exists.
 - Revisiting the wet-weather feature group for training once more seasons of live data have accumulated.
 

@@ -229,6 +229,10 @@ A full annotated template is in [`.env.example`](../.env.example).
 3. Probabilities describe the *pre-race* picture; nothing in-race updates them.
 4. Rookies and newly rebranded teams have little/no history — the model
    correctly treats them as long shots.
+5. Only already-run races through 2024 are servable today. A design for
+   scoring races that haven't happened yet has been reviewed and accepted
+   (Decision 049) but is not implemented — `POST /predict` still always
+   returns 501.
 
 ## More documentation
 
