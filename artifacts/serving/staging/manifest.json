@@ -1,25 +1,25 @@
 {
   "name": "f1-winner",
-  "version": "4",
+  "version": "1",
   "alias": "Staging",
-  "run_id": "9fd5c220dc2548bda6286ae27f5d31ed",
-  "trained_at": "2026-07-11T21:13:12+00:00",
+  "run_id": "ebcbea9507464b77827f2808282e0922",
+  "trained_at": "2026-07-23T11:49:19+00:00",
   "calibration": "isotonic-oof",
   "model_class": "CalibratedModel",
   "metrics": {
     "top1_accuracy": 0.6818181818181818,
-    "top3_recall": 0.8636363636363636,
+    "top3_recall": 0.9090909090909091,
     "winner_mrr": 0.7931818181818181,
-    "avg_winner_probability": 0.41278669439111587,
+    "avg_winner_probability": 0.41917434449462304,
     "median_winner_rank": 1.0,
-    "log_loss": 0.08764539134271869,
-    "brier_score": 0.025507528295749385,
-    "ece": 0.012020795514202612,
+    "log_loss": 0.08810640737394508,
+    "brier_score": 0.025704075468221736,
+    "ece": 0.011104417673489896,
     "n_races": 44.0,
     "n_rows": 880.0,
-    "spearman_corr": 0.5974544751203554
+    "spearman_corr": 0.5917445029554573
   },
-  "baseline_bootstrapped": true,
+  "baseline_bootstrapped": false,
   "bundle_format_version": 1,
-  "exported_at": "2026-07-11T21:13:16+00:00"
+  "exported_at": "2026-07-23T11:49:35+00:00"
 }
