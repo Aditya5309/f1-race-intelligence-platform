@@ -188,7 +188,7 @@ def confidence_bar(probability: float, label: str = "Confidence") -> None:
     """0-1 probability rendered as a progress bar + percentage caption —
     the storytelling-friendly stand-in for exposing raw/calibrated model
     internals on user-facing pages."""
-    st.progress(min(max(probability, 0.0), 1.0), text=f"{label}: {probability:.0%}")
+    st.progress(min(max(probability, 0.0), 1.0), text=f"{label}: {probability:.1%}")
 
 
 def driver_label(prediction: dict) -> str:

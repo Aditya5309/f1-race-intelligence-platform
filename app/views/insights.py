@@ -105,15 +105,18 @@ def render() -> None:
         st.caption(f"Run id: `{model['run_id']}`")
 
     st.subheader("📐 Validation results")
+    st.caption(
+        "Figures below are recorded at promotion time, not recomputed live "
+        "for whatever version is currently serving."
+    )
     stat_row([
         {"label": "Top-1 · validation 2022–23", "value": "68.2%",
          "help": "Pole-sitter baseline on the same races: 54.5%"},
-        {"label": "Top-3 recall · validation", "value": "88.6%"},
+        {"label": "Top-3 recall · validation", "value": "90.9%"},
         {"label": "Top-1 · final test 2024", "value": "45.8%",
          "help": "Equal to the pole baseline — the edge is dominance-season "
                  "concentrated"},
-        {"label": "ECE after calibration", "value": "0.012",
-         "delta": "-0.141 vs raw", "delta_color": "inverse",
+        {"label": "ECE after calibration", "value": "0.011",
          "help": "Expected calibration error on validation, isotonic "
                  "calibration fit on out-of-fold training predictions"},
     ])
@@ -136,10 +139,15 @@ simplicity. Full evidence: `{_REPORT}`.
                    "(`mlflow ui`)._")
 
     st.subheader("🏷 Feature classes")
-    st.caption("All 31 model features, classified by era-robustness. A "
-               "healthy model concentrates its signal in Stable features — "
-               "this one draws ~59% of its importance from them, led by grid "
-               "position and qualifying results.")
+    st.caption(
+        "The original 31 model features, classified by era-robustness. A "
+        "healthy model concentrates its signal in Stable features — this "
+        "one draws ~59% of its importance from them, led by grid position "
+        "and qualifying results. The currently-serving model may use "
+        "additional features not yet classified here — see 'Recorded "
+        "training schema' in the Developer Console (?dev=true) for its "
+        "exact feature list."
+    )
     col_s, col_e, col_x = st.columns(3)
     with col_s:
         st.markdown(f"**Stable ({len(_STABLE_FEATURES)})**")
@@ -174,7 +182,7 @@ simplicity. Full evidence: `{_REPORT}`.
 Raw class-weighted probabilities are deliberately inflated during training;
 an **isotonic calibrator** (fit only on out-of-fold training predictions)
 restores honest probabilities: expected calibration error drops from
-**0.153 to 0.012** on validation with ranking quality unchanged.
+**0.153 to 0.011** on validation with ranking quality unchanged.
             """
         )
         _figure("calibration_logreg.png", "Reliability diagram")

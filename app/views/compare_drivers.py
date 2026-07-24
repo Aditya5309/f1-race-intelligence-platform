@@ -111,7 +111,7 @@ def render() -> None:
         _stat_column(driver_b, label_by_id[driver_b], frame, year)
 
     st.divider()
-    st.subheader("🏁 Predicted win chance for a race this season")
+    st.subheader("🏁 Predicted win share for a race this season")
     round_by_race = dict(zip(frame["race_id"], frame["round"], strict=False))
     race_ids = sorted(round_by_race, key=lambda rid: round_by_race[rid])
     race_id = st.selectbox(

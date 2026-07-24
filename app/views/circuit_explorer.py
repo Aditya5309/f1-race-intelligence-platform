@@ -91,4 +91,8 @@ def render() -> None:
     winners = stats.get("winners_by_year")
     if winners is not None and len(winners):
         with st.expander(f"Winners by year ({len(winners)} races)"):
-            st.dataframe(winners, hide_index=True, width="stretch")
+            st.dataframe(
+                winners, hide_index=True, width="stretch",
+                column_config={"year": "Year", "driver": "Driver",
+                                "constructor": "Constructor"},
+            )

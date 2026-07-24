@@ -217,4 +217,12 @@ def render() -> None:
         else ("—" if pd.isna(row.actual_winner_driver_id) else "")
         for row in d.itertuples()
     ]
-    st.dataframe(log, hide_index=True, width="stretch")
+    st.dataframe(
+        log, hide_index=True, width="stretch",
+        column_config={
+            "year": "Year", "round": "Round", "predicted_rank": "Predicted rank",
+            "win_probability": st.column_config.NumberColumn(
+                "Win share", format="percent", step=0.001),
+            "result": "Result",
+        },
+    )

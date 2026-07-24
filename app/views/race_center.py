@@ -395,7 +395,7 @@ def render() -> None:
     if winner_id is not None:
         st.subheader("🔁 Historical Replay")
         st.caption(f"**Predicted:** {driver_label(top)} — "
-                   f"{top['win_probability']:.0%} win share (model favorite)")
+                   f"{top['win_probability']:.1%} win share (model favorite)")
         if not top_result:
             st.caption("**Actual:** result unavailable (display metadata not loaded).")
         elif top_result["dnf"]:
@@ -412,7 +412,7 @@ def render() -> None:
                 st.caption("**Result:** the model's favorite won as predicted.")
             else:
                 st.caption(
-                    f"**Error analysis:** {top['win_probability']:.0%} win share "
+                    f"**Error analysis:** {top['win_probability']:.1%} win share "
                     f"→ P{top_result['finish_position']} — the gap between predicted "
                     "confidence and actual result (see Top contenders above for "
                     "who did win)."
@@ -423,8 +423,13 @@ def render() -> None:
     frame["label"] = [driver_label(p) for p in preds]
     frame["is_winner"] = frame["driver_id"] == winner_id
     frame["grid"] = frame["driver_id"].map(grid_by)
+    # Zero-padded so the interactive table's column-header click-to-sort
+    # (which sorts these display strings lexicographically, not numerically)
+    # still produces correct grid order: "02" < "10" as strings, unlike
+    # unpadded "2" > "10". PL/missing sort after every real grid slot since
+    # digit characters are lexicographically below both.
     frame["grid_display"] = frame["grid"].map(
-        lambda g: "PL" if g == 0 else (str(int(g)) if pd.notna(g) else "—"))
+        lambda g: "PL" if g == 0 else (f"{int(g):02d}" if pd.notna(g) else "—"))
     # Pit-lane starts (grid 0) and missing grids aren't a meaningful "gained
     # N places" delta — only compute it for a real numbered grid slot.
     frame["grid_delta"] = frame.apply(
@@ -449,7 +454,8 @@ def render() -> None:
             "Grid → Rank", help="Grid position minus predicted rank; "
             "positive means the model expects them to gain places."),
         "confidence_tier": "Confidence",
-        "win_probability": st.column_config.NumberColumn("Win share", format="percent"),
+        "win_probability": st.column_config.NumberColumn(
+            "Win share", format="percent", step=0.001),
     }
 
     if len(rest):

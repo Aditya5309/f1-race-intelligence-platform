@@ -66,7 +66,7 @@ def _season_insights(top_picks: pd.DataFrame, surprises: pd.DataFrame,
         name = dominance.index[0]
         row = dominance.iloc[0]
         insights.append(
-            f"🏆 **Most dominant:** {name} averaged {row['mean']:.0%} win "
+            f"🏆 **Most dominant:** {name} averaged {row['mean']:.1%} win "
             f"share across {int(row['size'])} races as the model's favorite."
         )
 
@@ -90,9 +90,9 @@ def _season_insights(top_picks: pd.DataFrame, surprises: pd.DataFrame,
         least_conf = top_picks.loc[top_picks["win_probability"].idxmin()]
         insights.append(
             f"🔒 **Most confident pick:** {most_conf['label']} at "
-            f"{most_conf['win_probability']:.0%} (round {int(most_conf['round'])}). "
+            f"{most_conf['win_probability']:.1%} (round {int(most_conf['round'])}). "
             f"**Least confident:** {least_conf['label']} at "
-            f"{least_conf['win_probability']:.0%} (round {int(least_conf['round'])})."
+            f"{least_conf['win_probability']:.1%} (round {int(least_conf['round'])})."
         )
     return insights
 
@@ -250,6 +250,7 @@ def render() -> None:
         empty_state("Constructor names unavailable (display-name lookup not loaded).")
     else:
         standings_bar(by_constructor, "constructor_name", "win_probability",
-                      color_col="constructor_name", height=320)
+                      color_col="constructor_name", height=320,
+                      percent=True, axis_title="Win share")
         st.caption("Average predicted win share per race this season — higher "
                    "means the model favors that team more often.")

@@ -66,11 +66,15 @@ def render() -> None:
 
     st.divider()
     st.subheader("📈 Model performance")
-    st.caption("Never trained on — held-out validation and test seasons.")
+    st.caption(
+        "Never trained on — held-out validation and test seasons. Figures "
+        "below are recorded at promotion time, not recomputed live — see "
+        "Model Insights for what the currently-serving model actually does."
+    )
     stat_row([
         {"label": "Top-1 accuracy · 2022–23", "value": "68.2%",
          "help": "Pole-sitter baseline on the same races: 54.5%"},
-        {"label": "Top-3 recall · 2022–23", "value": "88.6%"},
+        {"label": "Top-3 recall · 2022–23", "value": "90.9%"},
         {"label": "Top-1 accuracy · 2024 test", "value": "45.8%",
          "help": "Equal to the pole baseline in 2024 — biggest edge shows up "
                  "in dominance seasons, see Season Analytics"},
@@ -84,17 +88,21 @@ def render() -> None:
     # (dashboard.py already imports this module).
     nav_pages: dict = st.session_state.get("_dashboard_pages", {})
     cols = st.columns(4)
+    # icon carried separately from title: st.page_link() already renders the
+    # target st.Page's own configured icon, so repeating it in the label
+    # doubled every icon on screen — the icon is only needed in the plain-
+    # caption fallback below, which has no other way to show it.
     links = [
-        ("race_center", "🏎 Race Center", "Pick a race, see the favorite and the field"),
-        ("driver_explorer", "👤 Driver Explorer", "A driver's season, race by race"),
-        ("season_analytics", "📊 Season Analytics", "Trends and who's on the rise"),
-        ("insights", "🤖 Model Insights", "How the model actually works"),
+        ("race_center", "🏎", "Race Center", "Pick a race, see the favorite and the field"),
+        ("driver_explorer", "👤", "Driver Explorer", "A driver's season, race by race"),
+        ("season_analytics", "📊", "Season Analytics", "Trends and who's on the rise"),
+        ("insights", "🤖", "Model Insights", "How the model actually works"),
     ]
-    for col, (key, label, caption) in zip(cols, links, strict=True):
+    for col, (key, icon, title, caption) in zip(cols, links, strict=True):
         with col, st.container(border=True):
             page = nav_pages.get(key)
             if page is not None:
-                st.page_link(page, label=label)
+                st.page_link(page, label=title)
             else:
-                st.caption(label)
+                st.caption(f"{icon} {title}")
             st.caption(caption)

@@ -56,9 +56,15 @@ def win_share_bar(frame: pd.DataFrame, winner_id: int | None = None,
                        "Win share %{x:.1%} · Model rank #%{customdata[1]}"
                        "<extra></extra>"),
     ))
+    # Headroom beyond the longest bar so its "outside" text label (up to
+    # "100.0%") never gets clipped by the plot's right edge — matters most
+    # in narrower containers (e.g. side-by-side columns) where a bar can
+    # reach the axis max and leave the label nowhere to render.
+    x_max = float(plot["win_probability"].max()) if len(plot) else 1.0
     fig.update_layout(
         xaxis_title="Win share (normalized within race)",
         xaxis_tickformat=".0%", height=height, showlegend=False,
+        xaxis_range=[0, max(x_max * 1.15, 0.05)],
         margin=dict(l=10, r=48, t=10, b=10),
     )
     st.plotly_chart(fig, width="stretch")
@@ -87,20 +93,34 @@ def trend_line(frame: pd.DataFrame, x: str, y: str, *, title: str | None = None,
 
 
 def standings_bar(frame: pd.DataFrame, name_col: str, value_col: str,
-                  color_col: str | None = None, height: int = 360) -> None:
+                  color_col: str | None = None, height: int = 360,
+                  percent: bool = False, axis_title: str | None = None) -> None:
     """Horizontal standings bars, leader on top; color_col (a constructor
-    display-name column) drives brand colors when given."""
+    display-name column) drives brand colors when given. percent=True
+    formats bar labels/axis as a percentage (e.g. a win-share average)
+    instead of the raw underlying number."""
     plot = frame.iloc[::-1]                       # leader renders topmost
     colors = ([constructor_color(c) for c in plot[color_col]]
               if color_col and color_col in plot.columns else OTHER_COLOR)
+    text_format = ".1%" if percent else None
     fig = go.Figure(go.Bar(
         x=plot[value_col], y=plot[name_col].astype(str), orientation="h",
         marker_color=colors,
         text=plot[value_col], textposition="outside",
-        hovertemplate="<b>%{y}</b>: %{x}<extra></extra>",
+        texttemplate=f"%{{text:{text_format}}}" if text_format else None,
+        hovertemplate=("<b>%{y}</b>: %{x:.1%}<extra></extra>" if percent
+                       else "<b>%{y}</b>: %{x}<extra></extra>"),
     ))
+    # Same headroom fix as win_share_bar: without it, the leader's "outside"
+    # text label can get clipped by the plot's right edge, especially in
+    # narrower side-by-side layouts (e.g. Season Analytics' driver/
+    # constructor columns).
+    x_max = float(plot[value_col].max()) if len(plot) else 1.0
     fig.update_layout(
-        height=height, showlegend=False, xaxis_title=value_col.capitalize(),
+        height=height, showlegend=False,
+        xaxis_title=axis_title or value_col.replace("_", " ").capitalize(),
+        xaxis_tickformat=".0%" if percent else None,
+        xaxis_range=[0, max(x_max * 1.15, 0.05)],
         margin=dict(l=10, r=48, t=10, b=10),
     )
     st.plotly_chart(fig, width="stretch")
