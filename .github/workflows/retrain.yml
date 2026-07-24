@@ -160,7 +160,7 @@ jobs:
       # any of those could fail.
       - name: Upload ingestion report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ingest-report-${{ github.run_id }}
           path: ingest_report/
