@@ -291,6 +291,8 @@ Abridged response (full contract in the API reference):
 ```
 
 Full request/response contracts: [docs/api_reference.md](docs/api_reference.md).
+Which seasons are servable, why, and how that's distinct from the model's
+evaluation holdout and upcoming-race prediction: [docs/serving_policy.md](docs/serving_policy.md).
 
 ### Security & error handling
 

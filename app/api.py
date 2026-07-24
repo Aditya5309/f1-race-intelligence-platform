@@ -30,7 +30,9 @@ registry aliases; that machinery lives entirely on the training side
 Endpoints, all under /api/v1:
     GET  /api/v1/health                              liveness + serving model metadata
     GET  /api/v1/model                               full ModelInfo
-    GET  /api/v1/races?year=                         races available to score (<= serve_max_year)
+    GET  /api/v1/races?year=                         races available to score (year is
+                                              verified, per Settings.is_season_verified —
+                                              see docs/serving_policy.md)
     GET  /api/v1/races/upcoming                      identity only (year/round/
                                               name/circuit/date) of the single next race
                                               with no result yet — NOT a prediction, no
@@ -543,12 +545,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if rows.empty:
             raise HTTPException(404, detail=f"raceId {race_id} not found.")
         year = int(rows["year"].iloc[0])
-        if year > settings.serve_max_year:
+        if not settings.is_season_verified(year):
             raise HTTPException(
                 409,
-                detail=f"raceId {race_id} ({year}) is in the forward holdout "
-                       f"(> {settings.serve_max_year}) — reserved as a "
-                       "genuinely unseen evaluation window.",
+                detail=f"raceId {race_id} ({year}) has not been verified for "
+                       f"historical serving (Decision 050) — seasons through "
+                       f"{settings.verified_seasons_through} are currently "
+                       "verified.",
             )
         return rows
 
@@ -599,7 +602,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def races(year: int | None = None):
         _require_ready()
         features: pd.DataFrame = app.state.features
-        served = features[features["year"] <= settings.serve_max_year]
+        served = features[features["year"] <= settings.verified_seasons_through]
         if year is not None:
             served = served[served["year"] == year]
         summary = (

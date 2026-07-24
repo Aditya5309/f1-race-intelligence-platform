@@ -267,7 +267,7 @@ def test_prediction_unknown_race_404(client):
 def test_prediction_forward_holdout_409(client):
     resp = client.get(f"/predictions/{HOLDOUT_RACE}")
     assert resp.status_code == 409
-    assert "forward holdout" in resp.json()["detail"]
+    assert "not been verified" in resp.json()["detail"]
 
 
 def test_prediction_cache_returns_identical_body(client):

@@ -69,10 +69,32 @@ class Settings(BaseSettings):
     data_dir: Path = _ARTIFACTS_ROOT / "display"
 
     # --- serving policy ----------------------------------------------------
-    #: Forward-holdout guard: races after this year return 409. The
-    #: 2025-2026 seasons are held out as an unseen evaluation window — raise
-    #: this deliberately, with a real evaluation plan, never by accident.
-    serve_max_year: int = 2024
+    #: Last season whose historical data provenance is VERIFIED for live
+    #: serving (Decision 050): 2010-2024 rows are confirmed schema-consistent
+    #: AND their upstream source is trusted. 2025-2026 rows already present in
+    #: `features.parquet` are schema-consistent but of UNVERIFIED upstream
+    #: origin (a post-2024 continuation feed of unknown identity — see
+    #: `docs/serving_policy.md`) and stay excluded from historical serving
+    #: (`GET /races`, `GET /predictions/{race_id}` and its `/simulate`,
+    #: `/vs-baseline` siblings) until a future decision entry records how
+    #: that provenance was verified. This is a trust boundary, not a calendar
+    #: cutoff — it only ever advances via such a decision, never by the
+    #: passage of wall-clock time, so it cannot silently go stale the way a
+    #: bare "current year" default would.
+    #:
+    #: Deliberately distinct from two other year-shaped concerns this project
+    #: has, so as not to reintroduce the conflation Decision 050 untangled:
+    #:   - the EVALUATION HOLDOUT (`src/models/splits.py::
+    #:     FORWARD_HOLDOUT_MIN_YEAR`) — preserves a genuinely unseen test
+    #:     window for model comparison; a scientific-reproducibility contract
+    #:     that has never advanced and is not expected to.
+    #:   - UPCOMING-RACE PREDICTION (`POST /predict`, `GET /races/upcoming`,
+    #:     `app.upcoming_prediction_service`) — always resolves and scores
+    #:     the single next race with no result yet, regardless of this
+    #:     setting; provenance-verification doesn't apply to a race that
+    #:     hasn't happened.
+    #: See `docs/serving_policy.md` for the full picture.
+    verified_seasons_through: int = 2024
     #: Enables GET /debug/* (development only — keep false in production).
     debug_endpoints: bool = False
     #: Bounded per-race prediction cache, keyed (model_version, race_id).
@@ -122,7 +144,7 @@ class Settings(BaseSettings):
     #: for the single next race with no result yet. Not operationally
     #: adjustable today — fixed at 1 by design — but exposed as a Settings
     #: field for the same transparency reason
-    #: `serve_max_year` is, not because changing it is currently supported
+    #: `verified_seasons_through` is, not because changing it is currently supported
     #: (`next_race()`'s own horizon=1 behavior is unaffected by this value).
     materialization_horizon: int = 1
     #: Pre-race cache TTL, in seconds: "minutes, not hours" — a backstop
@@ -130,3 +152,10 @@ class Settings(BaseSettings):
     #: historical ones) describe a race whose inputs genuinely change over a
     #: race weekend.
     pre_race_cache_ttl_seconds: int = 300
+
+    def is_season_verified(self, year: int) -> bool:
+        """Whether `year` falls within Decision 050's verified-provenance
+        window for historical serving — the single source of truth every
+        historical-serving call site (`GET /races`, `_race_rows()`) checks
+        against, so the policy reads the same way everywhere it's enforced."""
+        return year <= self.verified_seasons_through

@@ -88,7 +88,7 @@ def step_configuration(ctx: dict) -> None:
     from app.config import Settings
 
     defaults = Settings()                       # env/.env may override values
-    assert isinstance(defaults.serve_max_year, int)
+    assert isinstance(defaults.verified_seasons_through, int)
     assert isinstance(defaults.features_path, Path)
     assert isinstance(defaults.serving_bundle_path, Path)
 
