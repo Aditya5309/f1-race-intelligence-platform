@@ -4,9 +4,9 @@ Tests for app/api.py.
 TestClient against create_app() with an isolated stack: tmp sqlite registry
 holding a calibrated model + a tiny synthetic features parquet, wired in via
 Settings. Covers: health (ok + degraded), model metadata, race listing +
-year filter + holdout exclusion, prediction happy path (normalization,
-ordering, winner comparison, prediction_id), 404 unknown race, 409
-forward-holdout guard, debug endpoint gating, reserved POST /predict (501),
+year filter, prediction happy path (normalization,
+ordering, winner comparison, prediction_id), 404 unknown race,
+debug endpoint gating, reserved POST /predict (501),
 and cache behavior across calls.
 """
 
@@ -60,7 +60,8 @@ def serving_stack(tmp_path_factory):
     root = tmp_path_factory.mktemp("serving")
     uri = f"sqlite:///{root / 'mlflow.db'}"
     bundle_root = root / "bundle"
-    # 2010–2024 in-window plus 2025 forward-holdout rows for the guard tests.
+    # 2010-2025 rows; 2025 included so tests can assert it serves like any
+    # other completed season now that the verified-seasons gate is removed.
     frame = _synthetic_features(range(2010, 2026))
     features_path = root / "features.parquet"
     frame.to_parquet(features_path)
@@ -98,7 +99,7 @@ def debug_client(serving_stack):
 
 
 IN_WINDOW_RACE = 202301       # 2023 round 1
-HOLDOUT_RACE = 202501         # 2025 round 1 (forward holdout)
+RECENT_SEASON_RACE = 202501  # 2025 round 1 — just another servable race, not a holdout
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +139,12 @@ def test_model_endpoint(client):
 # Race listing
 # ---------------------------------------------------------------------------
 
-def test_races_listed_and_holdout_excluded(client, serving_stack):
+def test_races_listed_includes_every_season(client, serving_stack):
     _, frame = serving_stack
     body = client.get("/races").json()
     years = {r["year"] for r in body["races"]}
-    assert max(years) == 2024                      # 2025 rows exist but are hidden
-    in_window = frame[frame["year"] <= 2024]
-    assert len(body["races"]) == in_window["raceId"].nunique()
+    assert max(years) == 2025                      # no season-based filtering
+    assert len(body["races"]) == frame["raceId"].nunique()
     first = body["races"][0]
     assert set(first) == {"race_id", "year", "round", "n_drivers"}
     assert first["n_drivers"] == 5
@@ -154,6 +154,19 @@ def test_races_year_filter(client):
     body = client.get("/races", params={"year": 2023}).json()
     assert body["races"]
     assert all(r["year"] == 2023 for r in body["races"])
+
+
+def test_races_membership_exactly_matches_features_parquet(client, serving_stack):
+    """The architectural replacement for the removed verified-seasons gate
+    (Decision 057): a race is servable if and only if it has rows in the
+    features snapshot — nothing else gates it, and nothing exempts it."""
+    _, frame = serving_stack
+    listed_ids = {r["race_id"] for r in client.get("/races").json()["races"]}
+    assert listed_ids == set(frame["raceId"].unique())
+
+    absent_race_id = int(frame["raceId"].max()) + 1000
+    assert absent_race_id not in listed_ids
+    assert client.get(f"/predictions/{absent_race_id}").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -264,10 +277,10 @@ def test_prediction_unknown_race_404(client):
     assert "999999" in resp.json()["detail"]
 
 
-def test_prediction_forward_holdout_409(client):
-    resp = client.get(f"/predictions/{HOLDOUT_RACE}")
-    assert resp.status_code == 409
-    assert "not been verified" in resp.json()["detail"]
+def test_prediction_recent_season_served(client):
+    resp = client.get(f"/predictions/{RECENT_SEASON_RACE}")
+    assert resp.status_code == 200
+    assert resp.json()["race_id"] == RECENT_SEASON_RACE
 
 
 def test_prediction_cache_returns_identical_body(client):
@@ -297,8 +310,9 @@ def test_debug_features_when_enabled(debug_client):
     assert all(v is None or isinstance(v, float) for v in row["features"].values())
 
 
-def test_debug_features_respects_holdout(debug_client):
-    assert debug_client.get(f"/debug/features/{HOLDOUT_RACE}").status_code == 409
+def test_debug_features_recent_season_served(debug_client):
+    body = debug_client.get(f"/debug/features/{RECENT_SEASON_RACE}").json()
+    assert body["race_id"] == RECENT_SEASON_RACE
 
 
 # ---------------------------------------------------------------------------
@@ -388,10 +402,10 @@ def test_simulate_grid_missing_input_422(client):
     assert resp.status_code == 422
 
 
-def test_simulate_grid_forward_holdout_409(client):
-    resp = client.get(f"/predictions/{HOLDOUT_RACE}/simulate/1",
+def test_simulate_grid_recent_season_served(client):
+    resp = client.get(f"/predictions/{RECENT_SEASON_RACE}/simulate/1",
                       params={"grid_position": 1})
-    assert resp.status_code == 409
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -495,9 +509,9 @@ def test_vs_baseline_unknown_race_404(client):
     assert client.get("/predictions/999999/vs-baseline").status_code == 404
 
 
-def test_vs_baseline_forward_holdout_409(client):
-    resp = client.get(f"/predictions/{HOLDOUT_RACE}/vs-baseline")
-    assert resp.status_code == 409
+def test_vs_baseline_recent_season_served(client):
+    resp = client.get(f"/predictions/{RECENT_SEASON_RACE}/vs-baseline")
+    assert resp.status_code == 200
 
 
 def test_pole_baseline_startup_fit_explicitly_uses_full_feature_columns(client):

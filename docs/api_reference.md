@@ -43,11 +43,10 @@ The `model` object above, alone. **503** when degraded.
 
 ## GET /api/v1/races
 
-Races available for scoring — seasons verified for historical serving
-(`F1_VERIFIED_SEASONS_THROUGH`; the 2025–2026 seasons, of unverified
-provenance per Decision 050, are never listed). See
-[`serving_policy.md`](serving_policy.md) for what "verified" means here and
-how it differs from the model's evaluation holdout.
+Races available for scoring — every race present in the served features
+snapshot, i.e. every race with a completed result (Decision 057). See
+[`serving_policy.md`](serving_policy.md) for the structural guarantee behind
+this and how it differs from the model's evaluation holdout.
 
 Query parameters: `year` (optional int) — filter to one season.
 
@@ -110,9 +109,7 @@ Field notes:
   unknown.
 - `prediction_id` — matches the API's structured log line for this request.
 
-Errors: **404** unknown raceId · **409** unverified-season race (config
-`F1_VERIFIED_SEASONS_THROUGH`, see [`serving_policy.md`](serving_policy.md))
-· **503** degraded.
+Errors: **404** unknown raceId · **503** degraded.
 
 Responses are cached per `(model_version, race_id)` — repeated calls return
 the identical body.
@@ -149,7 +146,7 @@ real `win_probability` — this is a regression-tested guarantee, not a
 coincidence.
 
 Errors: **404** unknown race or driver · **422** missing/out-of-range
-`grid_position` · **409** unverified-season race.
+`grid_position`.
 
 ## GET /api/v1/predictions/{race_id}/vs-baseline
 
@@ -172,9 +169,8 @@ beyond grid position alone.
 }
 ```
 
-Errors: **404** unknown raceId · **409** unverified-season race · **503**
-if the baseline itself failed to initialize (degrades independently of the
-main model).
+Errors: **404** unknown raceId · **503** if the baseline itself failed to
+initialize (degrades independently of the main model).
 
 ## GET /api/v1/debug/features/{race_id} — development only
 

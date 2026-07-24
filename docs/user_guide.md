@@ -145,8 +145,8 @@ read-only display metadata that degrades gracefully when unavailable.
 - **🏠 Dashboard** — system status at a glance: model stage (Staging/
   Production), API health, latest model version, supported season range,
   and headline validation/test metrics.
-- **🏎 Race Center** — pick a season and race (2010 through the currently-verified
-  season, 2024 as of this writing), or the single
+- **🏎 Race Center** — pick a season and race (every season from 2010 through
+  the most recently completed one), or the single
   upcoming race with no result yet (added as an extra picker entry); see
   the model's favorite as a hero card with a confidence level, the top-5
   contenders as cards (grid/qualifying position, rank trend vs. the
@@ -201,7 +201,6 @@ file). The defaults work out of the box. Common overrides:
 | `F1_SERVING_BUNDLE_PATH` | `artifacts/serving/staging` | which frozen serving bundle the API loads — no live MLflow registry needed, and no dependency on the gitignored `data/` tree |
 | `F1_FEATURES_PATH` | `artifacts/features.parquet` | the committed runtime feature snapshot the API scores races from (NOT the training-side `data/processed/features.parquet`) |
 | `F1_API_URL` | `http://localhost:8000` | where the dashboard finds the API |
-| `F1_VERIFIED_SEASONS_THROUGH` | `2024` | newest season the API will serve (was `F1_SERVE_MAX_YEAR` — renamed 2026-07-24, Decision 055). As of Decision 056 (2026-07-24) the provenance concern this setting was protecting against is resolved; a proposal to remove it entirely is approved in direction but not yet implemented — see `docs/serving_policy.md` |
 | `F1_DEBUG_ENDPOINTS` | `false` | enables `/api/v1/debug/*` inspection routes (development only) |
 | `F1_LOG_LEVEL` | `INFO` | API log verbosity |
 | `F1_CORS_ALLOW_ORIGINS` | `` (empty) | comma-separated allowed CORS origins, or `*` for any — empty means no cross-origin browser access |
@@ -210,12 +209,10 @@ A full annotated template is in [`.env.example`](../.env.example).
 
 ## Why some races return errors
 
-- **404** — the raceId isn't in the built feature matrix.
-- **409** — the race's season hasn't been marked verified for historical
-  serving yet (`F1_VERIFIED_SEASONS_THROUGH`, currently `2024`). This is
-  distinct from the model's own evaluation holdout (a separate,
-  permanently-fixed mechanism) — see `docs/serving_policy.md` for the full
-  distinction, and note this gate is under active revision (Decision 056).
+- **404** — the raceId isn't in the built feature matrix (this includes any
+  race with no completed result yet — see `docs/serving_policy.md` for the
+  structural guarantee behind this, and how it's distinct from the model's
+  own evaluation holdout).
 - **500** — an unexpected server-side error. The response body is always a
   generic `{"detail": "Internal server error."}` — no internal detail is
   ever exposed; the real cause is logged server-side only.
@@ -244,8 +241,8 @@ A full annotated template is in [`.env.example`](../.env.example).
 3. Probabilities describe the *pre-race* picture; nothing in-race updates them.
 4. Rookies and newly rebranded teams have little/no history — the model
    correctly treats them as long shots.
-5. Already-run races through the currently-verified season (2024 as of this
-   writing — see `docs/serving_policy.md`) are always servable. The single upcoming
+5. Any already-run race with a completed result is always servable (see
+   `docs/serving_policy.md`). The single upcoming
    race with no result yet can also be scored (`POST /predict` /
    `GET /races/upcoming`), but only on a deployment with the training-side
    data that route needs — see

@@ -8,37 +8,51 @@ mistake isn't repeated.
 
 | Question | Mechanism | Can it change, and how | Config / code |
 |---|---|---|---|
-| Which historical seasons can the live dashboard/API show? | Verified-seasons serving policy | Only via a new decision recording how newer seasons were provenance-verified | `app/config.py::Settings.verified_seasons_through`, `Settings.is_season_verified()` |
+| Which historical races can the live dashboard/API show? | Structural completeness guarantee | Automatic — a race becomes servable the moment it has rows in the features snapshot, never a config change | `artifacts/features.parquet` row presence, enforced nowhere else needed |
 | Which seasons does the model get evaluated on, kept genuinely unseen? | Evaluation holdout | Effectively never — a fixed scientific boundary, not an operational knob | `src/models/splits.py::FORWARD_HOLDOUT_MIN_YEAR` |
 | What race gets a live pre-race prediction? | Upcoming-race prediction | Always "the next race with no result," recomputed on every request | `src/features/upcoming.py::next_race()`, `POST /predict`, `GET /races/upcoming` |
 
-## 1. Historical serving: verified-seasons policy
+## 1. Historical serving: structural completeness guarantee (Decision 057)
 
 `GET /races`, `GET /predictions/{race_id}`, `.../simulate/{driver_id}`, and
-`.../vs-baseline` only serve races from seasons that
-`Settings.is_season_verified(year)` accepts — currently `year <=
-verified_seasons_through` (default `2024`, override via
-`F1_VERIFIED_SEASONS_THROUGH`).
+`.../vs-baseline` serve every race present in the frozen features snapshot
+(`artifacts/features.parquet`) — there is no year-based config gate. A race
+appears there if and only if it has a completed result: `build_master_dataset()`
+left-joins every other table onto `results.csv`, so a race with zero result
+rows produces zero rows anywhere downstream, by construction, not by a
+filter. "Don't serve a race with no result yet" therefore needs no runtime
+check — it's already true by the time the snapshot is built.
 
-**Why 2025–2026 are excluded today (Decision 050, 2026-07-22):** the
-2025–2026 rows present in `data/`/`features.parquet` are schema-consistent
-with the rest of the historical dump, but their upstream origin is a
-post-2024 community continuation feed of unverified identity — distinct
-from `scripts/ingest_jolpica.py`, the pinned, verified jolpica-f1 source used
-for every new race weekend going forward (Decision 035). Decision 050 could
-only confirm what these rows *aren't* (not jolpica output — they carry 26
-distinct DNF status values against jolpica's single generic one) — not
-resolve who *did* produce them. That question was ruled unresolvable from
-this repo alone. Until a future decision records how it was resolved,
-`verified_seasons_through` stays at `2024` and 2025–2026 stay unserved
-historically, regardless of how much wall-clock time passes.
+**Why this replaced a config-driven cutoff (`verified_seasons_through`,
+removed 2026-07-24):** that field's entire purpose was gating on Decision
+050's then-unresolved provenance question for 2025–2026 data. Decision 056
+(2026-07-24) resolved that question — the 2025–2026 rows are the same
+Ergast/jolpica-f1 lineage as every earlier season, externally verified
+against two independent datasets. With the provenance concern gone, a
+year-keyed gate had no remaining justification, and it was also always the
+wrong shape: this project's real data gaps are race-level (a handful of
+specific raceIds), never season-level, so a year cutoff could only ever
+express "everything through season N," not the actual shape of any gap this
+data has had. A config value would also have to be remembered and bumped by
+a human — the structural guarantee requires no maintenance and cannot go
+stale by definition. See `reports/serving_policy_revision_proposal.md` and
+`reports/serving_gate_removal_validation.md` for the full analysis, and
+Decision 057 in `context/decisions.md` for the implementation record.
 
-**Why this is a policy value, not a calendar cutoff:** raising it requires a
-new decision entry documenting *how* the newer seasons' provenance was
-verified — never a routine bump to track "the current year." That's the
-whole reason it's named and described in terms of verification rather than
-recency: a name like "serve through last year" invites exactly the kind of
-silent staleness this value must never have.
+**Known residual gap (not new, not a regression):** the completeness
+guarantee is proven structurally for "no results," "cancelled," "future
+scheduled," and "failed feature generation." It is not structurally proven
+for a race with *partial* results (some but not all drivers) — nothing
+rejects that shape today, only a non-blocking warning. This has never
+occurred in this dataset and is unlikely given `ingest_jolpica.py` receives
+results atomically per race, but it's a real, narrow, currently-theoretical
+gap worth knowing about. The removed gate never protected against this
+either (it only ever checked `year`), so this isn't a new risk.
+
+**Ingestion-quality issue, deliberately separate:** 4 races (raceId
+1175–1178) show generic "Retired" instead of a specific DNF cause — a
+display-only data-quality question, not a reason to withhold serving. See
+`reports/ingestion_status_granularity_issue.md`.
 
 ## 2. Evaluation holdout
 
@@ -73,10 +87,10 @@ serving.
 
 ```
 app/api.py
-  GET /races                -> Settings.verified_seasons_through filter
+  GET /races                -> reads app.state.features (artifacts/features.parquet) directly
   _race_rows() (shared by
     /predictions, /simulate,
-    /vs-baseline)            -> Settings.is_season_verified() -> 409
+    /vs-baseline)            -> 404 only if raceId absent from the snapshot
 
 src/models/splits.py
   SplitStrategy.__post_init__ -> rejects test windows >= FORWARD_HOLDOUT_MIN_YEAR

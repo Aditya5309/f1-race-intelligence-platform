@@ -62,7 +62,7 @@
 | **Probability calibration** | Out-of-fold isotonic calibration fit strictly on training-fold predictions (validation ECE 0.153 → 0.012) |
 | **MLflow tracking & registry** | Every experiment logged with data fingerprints; registered model `f1-winner` with alias-based staging; each artifact stores its trained schema and re-validates it at inference |
 | **Frozen runtime artifacts** | Registration exports a self-contained model bundle plus a features snapshot that the API loads directly — no live MLflow tracking server or database needed at request time; the runtime artifact tree is committed to git so a fresh clone can serve real predictions immediately |
-| **Versioned inference API** | FastAPI, every route under `/api/v1`, with automatic backward compatibility for the pre-versioning paths; degraded-mode startup instead of crash-looping; a FIFO prediction cache; a forward-holdout guard rejecting seasons the model has never been evaluated against |
+| **Versioned inference API** | FastAPI, every route under `/api/v1`, with automatic backward compatibility for the pre-versioning paths; degraded-mode startup instead of crash-looping; a FIFO prediction cache |
 | **Upcoming-race prediction** | `GET /races/upcoming` (identity of the next race with no result yet) and `POST /predict` (scores it) — a Materializer builds a synthetic pre-race feature row through the same, unmodified feature pipeline, gated behind mandatory golden-row-parity and historical-backtest acceptance checks; see [docs/pre_race_materialization.md](docs/pre_race_materialization.md) |
 | **Interactive "what-if" views** | A grid-position/pit-lane prediction simulator and a model-vs-pole-baseline comparison, both reusing the same scoring contract as historical predictions — no separate model needed |
 | **Streamlit dashboard** | Eight pages (see [Dashboard](#3-dashboard)); predictions consumed from the API over HTTP only — the dashboard never imports the model code directly |
@@ -254,7 +254,7 @@ All routes are versioned under `/api/v1`:
 |---|---|---|
 | GET | `/api/v1/health` | Liveness plus serving-model identity (reports degraded mode instead of crashing) |
 | GET | `/api/v1/model` | Full metadata of the registered serving model |
-| GET | `/api/v1/races?year=` | Races available for scoring (seasons through 2024) |
+| GET | `/api/v1/races?year=` | Races available for scoring (every race with a completed result) |
 | GET | `/api/v1/races/upcoming` | Identity of the single next race with no result yet (not a prediction) |
 | GET | `/api/v1/predictions/{race_id}` | Win probabilities for the full field of one historical race |
 | GET | `/api/v1/predictions/{race_id}/simulate/{driver_id}` | Prediction simulator — grid/qualifying-position "what if" |
@@ -264,7 +264,7 @@ All routes are versioned under `/api/v1`:
 
 Every route above is also reachable at its equivalent pre-versioning path with no `/api/v1` prefix (for example, plain `/health`) — same handler, same response — kept for backward compatibility but not listed in the interactive API docs, which only ever show the versioned contract.
 
-Requests for seasons after 2024 return `409` (forward-holdout guard). Prediction responses are cached, keyed by `(model_version, race_id)`.
+Prediction responses are cached, keyed by `(model_version, race_id)`.
 
 ```bash
 curl http://localhost:8000/api/v1/predictions/1120
