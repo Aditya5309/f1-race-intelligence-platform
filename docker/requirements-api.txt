@@ -21,7 +21,7 @@
 # mechanism that would need to allow it), add the matching pin here too —
 # this file and that gate describe the same "what can this deployment
 # target actually load" contract from two different angles.
-pandas~=2.3.3
+pandas>=2.3.3,<3.1.0
 numpy~=2.4.6
 scikit-learn~=1.8.0
 scipy~=1.17.1
