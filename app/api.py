@@ -38,6 +38,17 @@ Endpoints, all under /api/v1:
                                               with no result yet — NOT a prediction, no
                                               materialization_status/caveats/provenance;
                                               those come from POST /predict.
+    GET  /api/v1/standings/{year}                    championship standings (drivers +
+                                              constructors) for one season — display
+                                              metadata only, read from settings.data_dir
+                                              (the committed artifacts/display/ snapshot),
+                                              independent of model/features readiness; the
+                                              Streamlit-side equivalent is
+                                              app/views/metadata.py's
+                                              season_driver_standings/
+                                              season_constructor_standings. Degrades to
+                                              empty drivers/constructors lists rather than
+                                              404/503 when data is absent for that year.
     GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
     GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
                                               Prediction Simulator: re-score
@@ -235,6 +246,32 @@ class UpcomingRaceSchema(BaseModel):
     date: str
 
 
+class DriverStandingSchema(BaseModel):
+    position: int
+    driver_id: int
+    driver_name: str | None = None
+    points: float
+    wins: int
+
+
+class ConstructorStandingSchema(BaseModel):
+    position: int
+    constructor_id: int
+    constructor_name: str | None = None
+    points: float
+    wins: int
+
+
+class StandingsResponse(BaseModel):
+    """Final standings as of the season's last race WITH recorded
+    standings — for an in-progress season this is the latest completed
+    round, not necessarily the full scheduled calendar (same convention as
+    app/views/metadata.py::_final_round_standings)."""
+    year: int
+    drivers: list[DriverStandingSchema]
+    constructors: list[ConstructorStandingSchema]
+
+
 class DriverPrediction(BaseModel):
     driver_id: int
     driver_name: str | None = None
@@ -396,7 +433,12 @@ async def _lifespan(app: FastAPI):
     app.state.features = None
     app.state.load_error = None
     app.state.prediction_cache = OrderedDict()   # (model_version, race_id) -> resp
-    app.state.driver_names, app.state.constructor_names = {}, {}
+    # Loaded unconditionally, outside the model try/except below: display
+    # names (and the /standings route) are a data_dir-only concern,
+    # structurally independent of whether the model/features loaded — a
+    # degraded model must not also blank out names/standings that are
+    # otherwise perfectly available.
+    app.state.driver_names, app.state.constructor_names = _load_name_lookups(settings)
     app.state.baseline_model = None
     app.state.baseline_load_error = None
     # POST /predict's own training-side data is intentionally NOT loaded
@@ -413,9 +455,6 @@ async def _lifespan(app: FastAPI):
         features = pd.read_parquet(settings.features_path)
         app.state.model, app.state.model_info = model, info
         app.state.features = features
-        app.state.driver_names, app.state.constructor_names = (
-            _load_name_lookups(settings)
-        )
         logger.info(
             "serving model=%s v%s alias=%s calibration=%s | %d feature rows",
             info.name, info.version, info.alias, info.calibration, len(features),
@@ -571,6 +610,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return int(winners.iloc[0]) if len(winners) == 1 else None
         return None
 
+    def _final_round_standings(standings_csv: str, year: int) -> pd.DataFrame:
+        """Standings rows keyed to the season's LAST race that has
+        standings recorded — mirrors
+        app/views/metadata.py::_final_round_standings exactly (same Ergast
+        convention: for an in-progress season this is the latest completed
+        round, not the full scheduled calendar). Reads directly from
+        settings.data_dir; degrades to an empty frame, never raises, when
+        the CSVs are absent or the year has no matching rows."""
+        try:
+            standings = pd.read_csv(settings.data_dir / standings_csv, na_values=["\\N"])
+            races = pd.read_csv(settings.data_dir / "races.csv", na_values=["\\N"])
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("standings lookup unavailable (%s): %s", standings_csv, exc)
+            return pd.DataFrame()
+        season = races.loc[races["year"] == year, ["raceId", "round"]]
+        merged = standings.merge(season, on="raceId", how="inner")
+        if merged.empty:
+            return pd.DataFrame()
+        return merged[merged["round"] == merged["round"].max()].copy()
+
     # --- routes ------------------------------------------------------------
 
     @router.get("/health", response_model=HealthResponse)
@@ -630,6 +689,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             race_id=race.race_id, year=race.year, round=race.round,
             name=race.name, circuit_id=race.circuit_id, date=race.date,
         )
+
+    @router.get("/standings/{year}", response_model=StandingsResponse)
+    def standings(year: int):
+        """Championship standings (drivers + constructors) for one season —
+        display metadata only, independent of _require_ready(): a degraded
+        model must not also take down this route, since it reads solely
+        from settings.data_dir, never the model or features snapshot.
+        Degrades to empty drivers/constructors lists (not 404/503) when the
+        CSVs are absent or the year has no recorded standings yet — the
+        same graceful-absence behavior every other data_dir-sourced lookup
+        in this API already follows (contrast with /predictions/{race_id},
+        which 404s on an unknown raceId because there the caller supplied a
+        bad reference, not because data happens to be missing)."""
+        driver_rows = _final_round_standings("driver_standings.csv", year)
+        drivers = [
+            DriverStandingSchema(
+                position=int(r.position),
+                driver_id=int(r.driverId),
+                driver_name=app.state.driver_names.get(int(r.driverId)),
+                points=float(r.points),
+                wins=int(r.wins),
+            )
+            for r in driver_rows.sort_values("position").itertuples()
+        ] if not driver_rows.empty else []
+
+        constructor_rows = _final_round_standings("constructor_standings.csv", year)
+        constructors = [
+            ConstructorStandingSchema(
+                position=int(r.position),
+                constructor_id=int(r.constructorId),
+                constructor_name=app.state.constructor_names.get(int(r.constructorId)),
+                points=float(r.points),
+                wins=int(r.wins),
+            )
+            for r in constructor_rows.sort_values("position").itertuples()
+        ] if not constructor_rows.empty else []
+
+        return StandingsResponse(year=year, drivers=drivers, constructors=constructors)
 
     @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):

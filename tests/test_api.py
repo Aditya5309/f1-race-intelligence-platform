@@ -187,6 +187,100 @@ def test_races_upcoming_returns_identity(predict_client):
     assert set(body) == {"race_id", "year", "round", "name", "circuit_id", "date"}
 
 
+# ---------------------------------------------------------------------------
+# GET /standings/{year} — display metadata only, deliberately independent of
+# model/features readiness (Decision 062, Frontend Overhaul Phase 3).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def standings_stack(tmp_path_factory):
+    """A tmp data_dir with synthetic Ergast-shaped CSVs + a DEGRADED model
+    (nonexistent bundle/features paths) — proves /standings works from
+    data_dir alone, unaffected by the model failing to load."""
+    root = tmp_path_factory.mktemp("standings")
+    data_dir = root / "display"
+    data_dir.mkdir()
+
+    pd.DataFrame({
+        "raceId": [1, 2, 3, 4],
+        "year": [2023, 2023, 2024, 2024],
+        "round": [1, 2, 1, 2],
+    }).to_csv(data_dir / "races.csv", index=False)
+    pd.DataFrame({
+        "driverId": [1, 2, 1, 2],
+        "forename": ["Max", "Lewis", "Max", "Lewis"],
+        "surname": ["Verstappen", "Hamilton", "Verstappen", "Hamilton"],
+    }).drop_duplicates("driverId").to_csv(data_dir / "drivers.csv", index=False)
+    pd.DataFrame({
+        "constructorId": [1, 2],
+        "name": ["Red Bull", "Mercedes"],
+    }).to_csv(data_dir / "constructors.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 2, 3],
+        "driverId": [1, 2, 1],
+        "points": [25.0, 18.0, 43.0],
+        "position": [1, 2, 1],
+        "wins": [1, 0, 2],
+    }).to_csv(data_dir / "driver_standings.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 2, 3],
+        "constructorId": [1, 2, 1],
+        "points": [25.0, 18.0, 43.0],
+        "position": [1, 2, 1],
+        "wins": [1, 0, 2],
+    }).to_csv(data_dir / "constructor_standings.csv", index=False)
+
+    settings = Settings(
+        serving_bundle_path=root / "no-such-bundle",
+        features_path=root / "missing.parquet",
+        data_dir=data_dir,
+    )
+    return settings
+
+
+@pytest.fixture(scope="module")
+def standings_client(standings_stack):
+    with TestClient(create_app(standings_stack)) as c:
+        yield c
+
+
+def test_standings_final_round_of_in_progress_season(standings_client):
+    """2024 only has round-1 standings on file (round 2 hasn't posted
+    standings yet) — the response must use round 1, not silently include a
+    later round or fail."""
+    body = standings_client.get("/standings/2024").json()
+    assert body["year"] == 2024
+    assert body["drivers"] == [
+        {"position": 1, "driver_id": 1, "driver_name": "Max Verstappen",
+         "points": 43.0, "wins": 2},
+    ]
+    assert body["constructors"] == [
+        {"position": 1, "constructor_id": 1, "constructor_name": "Red Bull",
+         "points": 43.0, "wins": 2},
+    ]
+
+
+def test_standings_earlier_season_uses_its_own_final_round(standings_client):
+    body = standings_client.get("/standings/2023").json()
+    driver_ids = [d["driver_id"] for d in body["drivers"]]
+    assert driver_ids == [2]  # round 2's standings, not round 1's
+    assert body["drivers"][0]["points"] == 18.0
+
+
+def test_standings_unknown_year_degrades_to_empty_not_error(standings_client):
+    resp = standings_client.get("/standings/1950")
+    assert resp.status_code == 200
+    assert resp.json() == {"year": 1950, "drivers": [], "constructors": []}
+
+
+def test_standings_independent_of_degraded_model(standings_client):
+    """standings_stack's model/features paths don't exist — confirms the
+    route still works (proving the fix that moved name-lookup loading
+    outside the model try/except in app/api.py's lifespan)."""
+    assert standings_client.get("/health").json()["status"] == "degraded"
+    assert standings_client.get("/standings/2024").status_code == 200
+
+
 def test_races_upcoming_404_when_every_race_has_a_result(serving_stack, tmp_path):
     settings, _ = serving_stack
     raw_dir = tmp_path / "raw"

@@ -2,15 +2,16 @@ import Link from "next/link";
 
 /**
  * Static chrome — deliberately NOT animated (see lib/design-tokens.ts's
- * motion token comments). Links to the other six Streamlit-dashboard page
- * equivalents are still inert placeholders (Phase 2 built Race Center only).
+ * motion token comments). Links to the remaining five Streamlit-dashboard
+ * page equivalents are still inert placeholders (Phase 3 built Season
+ * Analytics; Driver Explorer/Compare Drivers/Team/Circuit Explorer/Model
+ * Insights are still pending, per the roadmap's own sequencing).
  */
 const PLACEHOLDER_PAGES = [
   "Driver Explorer",
   "Compare Drivers",
   "Team",
   "Circuit Explorer",
-  "Season Analytics",
   "Model Insights",
 ];
 
@@ -24,6 +25,9 @@ export function NavShell() {
         <nav className="hidden gap-6 md:flex">
           <Link href="/race-center" className="label-caps text-xs text-[var(--color-text)]">
             Race Center
+          </Link>
+          <Link href="/season-analytics" className="label-caps text-xs text-[var(--color-text)]">
+            Season Analytics
           </Link>
           {PLACEHOLDER_PAGES.map((page) => (
             <span

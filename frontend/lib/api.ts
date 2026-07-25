@@ -206,3 +206,35 @@ export interface BaselineComparisonResponse {
 
 export const getVsBaseline = (raceId: number) =>
   apiGet<BaselineComparisonResponse>(`/predictions/${raceId}/vs-baseline`);
+
+export interface DriverStanding {
+  position: number;
+  driver_id: number;
+  driver_name: string | null;
+  points: number;
+  wins: number;
+}
+
+export interface ConstructorStanding {
+  position: number;
+  constructor_id: number;
+  constructor_name: string | null;
+  points: number;
+  wins: number;
+}
+
+export interface StandingsResponse {
+  year: number;
+  drivers: DriverStanding[];
+  constructors: ConstructorStanding[];
+}
+
+/**
+ * GET /standings/{year} — championship standings, display metadata only
+ * (Decision 062, Frontend Overhaul Phase 3). Degrades to empty
+ * drivers/constructors arrays (still a 200, never 404/503) when a season
+ * has no recorded standings yet — render that as an empty-state, not an
+ * error.
+ */
+export const getStandings = (year: number) =>
+  apiGet<StandingsResponse>(`/standings/${year}`);
