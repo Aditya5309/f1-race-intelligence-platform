@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+ * Warm editorial base + black contrast cards + restrained color accents —
+ * deliberately fixed, NOT theme-adaptive. The near-black value below is
+ * used for elevated feature-card surfaces only, never the page background
+ * (see .ai/frontend_overhaul_phase1_prompt.md and lib/design-tokens.ts).
+ */
+:root {
+  --color-page-bg: #efeae0;
+  --color-feature-card-bg: #0a0a0a;
+  --color-text: #111111;
+  --color-text-on-dark: #f5f1e8;
+  --color-muted-text: #8a8272;
+  --color-accent-red: #e23a2e;
+  --color-accent-blue: #3b6fe0;
+  --color-live-green: #3fcb6b;
+  --color-hairline: #d9d2c2;
+  --color-hairline-on-dark: #2a2a2a;
+}
+
+@theme inline {
+  --color-page-bg: var(--color-page-bg);
+  --color-feature-card-bg: var(--color-feature-card-bg);
+  --color-text: var(--color-text);
+  --color-text-on-dark: var(--color-text-on-dark);
+  --color-muted-text: var(--color-muted-text);
+  --color-accent-red: var(--color-accent-red);
+  --color-accent-blue: var(--color-accent-blue);
+  --color-live-green: var(--color-live-green);
+  --color-hairline: var(--color-hairline);
+  --color-hairline-on-dark: var(--color-hairline-on-dark);
+
+  --font-display: var(--font-display);
+  --font-label: var(--font-label);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  font-family: var(--font-label), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Condensed uppercase small-caps for nav/labels. */
+.label-caps {
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-variant: small-caps;
+}
+
+/* Tabular numerals for probabilities, counts, dates. */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
