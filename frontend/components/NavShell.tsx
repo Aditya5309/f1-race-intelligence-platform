@@ -2,11 +2,10 @@ import Link from "next/link";
 
 /**
  * Static chrome — deliberately NOT animated (see lib/design-tokens.ts's
- * motion token comments). Circuit Explorer is the last remaining
- * Streamlit-dashboard page equivalent still an inert placeholder.
+ * motion token comments). Every Streamlit-dashboard page equivalent is now
+ * converted (Phase 6, Circuit Explorer, was the last one) — no placeholder
+ * pages remain.
  */
-const PLACEHOLDER_PAGES = ["Circuit Explorer"];
-
 export function NavShell() {
   return (
     <header className="border-b border-[var(--color-hairline)]">
@@ -14,7 +13,7 @@ export function NavShell() {
         <Link href="/" className="label-caps text-sm text-[var(--color-text)]">
           Pit&nbsp;Wall&nbsp;/&nbsp;F1 Predictions
         </Link>
-        <nav className="hidden gap-6 md:flex">
+        <nav className="hidden flex-wrap gap-6 md:flex">
           <Link href="/race-center" className="label-caps text-xs text-[var(--color-text)]">
             Race Center
           </Link>
@@ -33,15 +32,9 @@ export function NavShell() {
           <Link href="/team" className="label-caps text-xs text-[var(--color-text)]">
             Team
           </Link>
-          {PLACEHOLDER_PAGES.map((page) => (
-            <span
-              key={page}
-              className="label-caps cursor-default text-xs text-[var(--color-muted-text)]"
-              title="Coming in a later phase"
-            >
-              {page}
-            </span>
-          ))}
+          <Link href="/circuit-explorer" className="label-caps text-xs text-[var(--color-text)]">
+            Circuit Explorer
+          </Link>
         </nav>
       </div>
     </header>

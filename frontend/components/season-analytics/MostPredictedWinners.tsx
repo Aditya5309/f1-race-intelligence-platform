@@ -1,6 +1,6 @@
+import { RankedBar } from "@/components/RankedBar";
 import { constructorColor } from "@/lib/constructor-colors";
 import type { PickCount } from "@/lib/season-aggregation";
-import { RankedBar } from "./RankedBar";
 
 export function MostPredictedWinners({ picks }: { picks: PickCount[] }) {
   if (!picks.length) {

@@ -1,6 +1,6 @@
+import { RankedBar } from "@/components/RankedBar";
 import { constructorColor } from "@/lib/constructor-colors";
 import type { ConstructorStanding, DriverStanding } from "@/lib/api";
-import { RankedBar } from "./RankedBar";
 
 /**
  * GET /standings/{year} (Decision 062) — the one new backend route this

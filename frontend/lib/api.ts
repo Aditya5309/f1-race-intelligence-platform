@@ -373,3 +373,62 @@ export const getConstructorDrivers = (constructorId: number, year: number) =>
   apiGet<{ constructor_id: number; year: number; drivers: string[] }>(
     `/constructors/${constructorId}/drivers?year=${year}`,
   ).then((r) => r.drivers);
+
+// ---------------------------------------------------------------------------
+// Circuit-stats routes (Decision 065, Frontend Overhaul Phase 6) — Circuit
+// Explorer's data need, standalone from the entity-stats family above but
+// following the same conventions (independent of model/features readiness,
+// degrades to zero/null/empty rather than 404).
+// ---------------------------------------------------------------------------
+
+export interface CircuitCatalogEntry {
+  circuit_id: number;
+  name: string;
+  country: string | null;
+  location: string | null;
+  races_held: number;
+}
+
+export const getCircuits = () =>
+  apiGet<{ circuits: CircuitCatalogEntry[] }>("/circuits").then((r) => r.circuits);
+
+export interface CircuitLayout {
+  circuit_id: number;
+  coordinates: [number, number][] | null;
+  attribution: string | null;
+}
+
+export const getCircuitLayout = (circuitId: number) =>
+  apiGet<CircuitLayout>(`/circuits/${circuitId}/layout`);
+
+export interface FastestLapInfo {
+  time: string;
+  year: number;
+  driver: string;
+}
+
+export interface CircuitWinnerRow {
+  year: number;
+  driver: string;
+  constructor: string | null;
+}
+
+export interface MostWinsRow {
+  driver: string;
+  wins: number;
+}
+
+export interface CircuitStats {
+  circuit_id: number;
+  races_held: number;
+  first_year: number | null;
+  last_year: number | null;
+  dnf_rate: number | null;
+  avg_position_change: number | null;
+  fastest_lap: FastestLapInfo | null;
+  most_wins: MostWinsRow[];
+  winners_by_year: CircuitWinnerRow[];
+}
+
+export const getCircuitStats = (circuitId: number) =>
+  apiGet<CircuitStats>(`/circuits/${circuitId}/stats`);

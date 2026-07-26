@@ -86,6 +86,17 @@ Endpoints, all under /api/v1:
                                               model/features readiness, and degrade to
                                               zero/null/empty (never 404/503) when an entity
                                               has no data in the requested scope.
+    GET  /api/v1/circuits                            every circuit in the catalog.
+    GET  /api/v1/circuits/{id}/layout                track-outline GeoJSON (coordinates/
+                                              attribution both null when this circuit has no
+                                              OpenStreetMap backfill).
+    GET  /api/v1/circuits/{id}/stats                 all-time stats: races held, years active,
+                                              DNF rate, avg grid->finish change, fastest
+                                              recorded lap, win-count leaders. All 3 circuit
+                                              routes (Decision 065, Frontend Overhaul Phase 6,
+                                              app/circuit_stats.py) are independent of model/
+                                              features readiness and degrade to zero/null/empty
+                                              (never 404) when a circuit has no data.
     GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
     GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
                                               Prediction Simulator: re-score
@@ -201,7 +212,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import entity_stats
+from app import circuit_stats, entity_stats
 from app.config import API_V1_PREFIX, Settings
 from app.upcoming_prediction_service import (
     RaceAlreadyHasResult,
@@ -446,6 +457,67 @@ class ConstructorDriversResponse(BaseModel):
     constructor_id: int
     year: int
     drivers: list[str]
+
+
+# --- Circuit-stats routes (Frontend Overhaul Phase 6, Decision 065) --------
+# Circuit Explorer's data need doesn't overlap the driver/constructor entity-
+# stats family above, but reuses the same conventions: independent of
+# _require_ready(), degrades gracefully (empty/null, never 404/503) when a
+# circuit has no data — see app/circuit_stats.py for the full rationale.
+
+class CircuitCatalogEntry(BaseModel):
+    circuit_id: int
+    name: str
+    country: str | None = None
+    location: str | None = None
+    races_held: int = 0
+
+
+class CircuitCatalogResponse(BaseModel):
+    circuits: list[CircuitCatalogEntry]
+
+
+class CircuitLayoutResponse(BaseModel):
+    """coordinates/attribution are both null when this circuit has no
+    OpenStreetMap track-outline backfill (most circuits) — not every
+    circuit has one, see app/circuit_stats.py::circuit_layout."""
+    circuit_id: int
+    coordinates: list[list[float]] | None = None
+    attribution: str | None = None
+
+
+class FastestLapInfo(BaseModel):
+    time: str
+    year: int
+    driver: str
+
+
+class CircuitWinnerRow(BaseModel):
+    year: int
+    driver: str
+    constructor: str | None = None
+
+
+class MostWinsRow(BaseModel):
+    driver: str
+    wins: int
+
+
+class CircuitStatsResponse(BaseModel):
+    """Real, computed proxies — not invented "difficulty" scores. Every
+    field needs the same caveats app/views/circuit_explorer.py's own UI
+    states alongside it (car-performance evolution, strategy/reliability
+    confounds); this API doesn't attempt to encode those caveats itself,
+    the same way /model-comparison doesn't editorialize its own numbers."""
+    circuit_id: int
+    races_held: int = 0
+    first_year: int | None = None
+    last_year: int | None = None
+    dnf_rate: float | None = None
+    avg_position_change: float | None = None
+    fastest_lap: FastestLapInfo | None = None
+    most_wins: list[MostWinsRow] = []
+    winners_by_year: list[CircuitWinnerRow] = []
 
 
 class DriverPrediction(BaseModel):
@@ -1080,6 +1152,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         per-season concept)."""
         names = entity_stats.constructor_current_drivers(settings.data_dir, constructor_id, year)
         return ConstructorDriversResponse(constructor_id=constructor_id, year=year, drivers=names)
+
+    @router.get("/circuits", response_model=CircuitCatalogResponse)
+    def circuits():
+        """Every circuit in the display-metadata catalog, name-sorted —
+        the Circuit Explorer picker source."""
+        frame = circuit_stats.circuit_catalog(settings.data_dir)
+        return CircuitCatalogResponse(circuits=[
+            CircuitCatalogEntry(
+                circuit_id=int(r.circuitId), name=str(r.name),
+                country=(str(r.country) if pd.notna(r.country) else None),
+                location=(str(r.location) if pd.notna(r.location) else None),
+                races_held=int(r.races_held),
+            )
+            for r in frame.itertuples()
+        ] if not frame.empty else [])
+
+    @router.get("/circuits/{circuit_id}/layout", response_model=CircuitLayoutResponse)
+    def circuit_layout(circuit_id: int):
+        """Track-outline GeoJSON for one circuit — coordinates/attribution
+        are both null (200, never 404) when this circuit has no
+        OpenStreetMap backfill, matching every other data_dir-sourced
+        lookup's graceful-absence behavior."""
+        feature = circuit_stats.circuit_layout(settings.data_dir, circuit_id)
+        if feature is None:
+            return CircuitLayoutResponse(circuit_id=circuit_id)
+        return CircuitLayoutResponse(
+            circuit_id=circuit_id,
+            coordinates=feature["geometry"]["coordinates"],
+            attribution=feature["properties"]["attribution"],
+        )
+
+    @router.get("/circuits/{circuit_id}/stats", response_model=CircuitStatsResponse)
+    def circuit_stats_route(circuit_id: int):
+        """All-time stats for one circuit — races held, years active, DNF
+        rate, average grid->finish position change, fastest recorded race
+        lap, and win-count leaders. Degrades to zero/null/empty (200,
+        never 404) when this circuit has no race history in the served
+        data."""
+        stats = circuit_stats.circuit_stats(settings.data_dir, circuit_id)
+        most_wins = stats.get("most_wins")
+        winners_by_year = stats.get("winners_by_year")
+        fastest_lap = stats.get("fastest_lap")
+        return CircuitStatsResponse(
+            circuit_id=circuit_id,
+            races_held=stats.get("races_held", 0),
+            first_year=stats.get("first_year"),
+            last_year=stats.get("last_year"),
+            dnf_rate=stats.get("dnf_rate"),
+            avg_position_change=stats.get("avg_position_change"),
+            fastest_lap=(FastestLapInfo(**fastest_lap) if fastest_lap else None),
+            most_wins=(
+                [MostWinsRow(driver=str(r.driver), wins=int(r.wins))
+                 for r in most_wins.itertuples()]
+                if most_wins is not None else []
+            ),
+            winners_by_year=(
+                [CircuitWinnerRow(
+                    year=int(r.year), driver=str(r.driver),
+                    constructor=(str(r.constructor)
+                                 if hasattr(r, "constructor") and pd.notna(r.constructor)
+                                 else None),
+                )
+                 for r in winners_by_year.itertuples()]
+                if winners_by_year is not None else []
+            ),
+        )
 
     @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):

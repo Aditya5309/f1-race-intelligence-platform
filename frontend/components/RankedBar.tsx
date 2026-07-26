@@ -6,7 +6,8 @@ import { motion as motionTokens } from "@/lib/design-tokens";
 /**
  * Horizontal bar generalized from race-center/ProbabilityBar.tsx to any
  * ranked value (points, pick counts) rather than a fixed 0-1 probability —
- * width = value / maxValue in the list, not an absolute fraction.
+ * width = value / maxValue in the list, not an absolute fraction. Shared
+ * across Season Analytics and Circuit Explorer.
  */
 export function RankedBar({
   label,

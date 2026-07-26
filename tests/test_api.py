@@ -493,6 +493,97 @@ def test_entity_stats_routes_independent_of_degraded_model(entity_client):
     assert entity_client.get("/constructors").status_code == 200
 
 
+# ---------------------------------------------------------------------------
+# GET /circuits, /circuits/{id}/layout, /circuits/{id}/stats — Circuit
+# Explorer's backing routes (Decision 065, Frontend Overhaul Phase 6).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def circuit_stack(tmp_path_factory):
+    root = tmp_path_factory.mktemp("circuit")
+    data_dir = root / "display"
+    data_dir.mkdir()
+    (data_dir / "circuit_layouts").mkdir()
+
+    pd.DataFrame({
+        "raceId": [1, 2], "year": [2023, 2024], "round": [1, 1], "circuitId": [10, 10],
+    }).to_csv(data_dir / "races.csv", index=False)
+    pd.DataFrame({
+        "circuitId": [10, 20], "name": ["Silverstone", "Monza"],
+        "country": ["UK", "Italy"], "location": ["Silverstone", "Monza"],
+    }).to_csv(data_dir / "circuits.csv", index=False)
+    pd.DataFrame({
+        "driverId": [1], "forename": ["Max"], "surname": ["Verstappen"],
+    }).to_csv(data_dir / "drivers.csv", index=False)
+    pd.DataFrame({"constructorId": [1], "name": ["Red Bull"]}).to_csv(
+        data_dir / "constructors.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 2], "driverId": [1, 1], "constructorId": [1, 1],
+        "grid": [1, 1], "position": ["1", "1"],
+        "fastestLapTime": ["1:30.500", "1:29.123"],
+    }).to_csv(data_dir / "results.csv", index=False)
+
+    feature = {"type": "Feature", "properties": {"attribution": "© OpenStreetMap contributors"},
+               "geometry": {"type": "LineString", "coordinates": [[1.0, 2.0], [1.1, 2.1]]}}
+    (data_dir / "circuit_layouts" / "10.json").write_text(json.dumps(feature))
+
+    settings = Settings(
+        serving_bundle_path=root / "no-such-bundle",
+        features_path=root / "missing.parquet",
+        data_dir=data_dir,
+    )
+    return settings
+
+
+@pytest.fixture(scope="module")
+def circuit_client(circuit_stack):
+    with TestClient(create_app(circuit_stack)) as c:
+        yield c
+
+
+def test_circuits_catalog_sorted_by_name(circuit_client):
+    body = circuit_client.get("/circuits").json()
+    assert [c["name"] for c in body["circuits"]] == ["Monza", "Silverstone"]
+    assert next(c for c in body["circuits"] if c["name"] == "Silverstone")["races_held"] == 2
+
+
+def test_circuit_layout_present(circuit_client):
+    body = circuit_client.get("/circuits/10/layout").json()
+    assert body["coordinates"] == [[1.0, 2.0], [1.1, 2.1]]
+    assert body["attribution"] == "© OpenStreetMap contributors"
+
+
+def test_circuit_layout_absent_returns_nulls_not_404(circuit_client):
+    resp = circuit_client.get("/circuits/20/layout")
+    assert resp.status_code == 200
+    assert resp.json() == {"circuit_id": 20, "coordinates": None, "attribution": None}
+
+
+def test_circuit_stats(circuit_client):
+    body = circuit_client.get("/circuits/10/stats").json()
+    assert body["races_held"] == 2
+    assert body["first_year"] == 2023
+    assert body["last_year"] == 2024
+    assert body["dnf_rate"] == 0.0
+    assert body["fastest_lap"] == {"time": "1:29.123", "year": 2024, "driver": "Max Verstappen"}
+    assert body["most_wins"] == [{"driver": "Max Verstappen", "wins": 2}]
+
+
+def test_circuit_stats_unknown_circuit_degrades_to_zeros(circuit_client):
+    body = circuit_client.get("/circuits/999/stats").json()
+    assert body == {
+        "circuit_id": 999, "races_held": 0, "first_year": None, "last_year": None,
+        "dnf_rate": None, "avg_position_change": None, "fastest_lap": None,
+        "most_wins": [], "winners_by_year": [],
+    }
+
+
+def test_circuit_routes_independent_of_degraded_model(circuit_client):
+    assert circuit_client.get("/health").json()["status"] == "degraded"
+    assert circuit_client.get("/circuits").status_code == 200
+    assert circuit_client.get("/circuits/10/stats").status_code == 200
+
+
 def test_races_upcoming_404_when_every_race_has_a_result(serving_stack, tmp_path):
     settings, _ = serving_stack
     raw_dir = tmp_path / "raw"
