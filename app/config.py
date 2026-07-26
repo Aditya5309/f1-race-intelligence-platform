@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     #: default under artifacts/. Point at the full data/ tree locally via
     #: .env (F1_DATA_DIR=data) if wanted; nothing requires it.
     data_dir: Path = _ARTIFACTS_ROOT / "display"
+    #: Directory holding committed, chart-ready model-analysis snapshots
+    #: (model comparison table, feature importance, SHAP summary) —
+    #: exported from the gitignored reports/phase4_analysis/ tree by
+    #: scripts/export_analysis_data.py, the same "freeze a small subset into
+    #: artifacts/ so a fresh clone doesn't need the gitignored source" shape
+    #: as data_dir/artifacts/display above. Recorded at promotion time, not
+    #: recomputed live for whatever version is currently serving — see
+    #: app/views/insights.py's own docstring for why that's deliberate.
+    analysis_data_dir: Path = _ARTIFACTS_ROOT / "analysis"
 
     # --- serving policy ----------------------------------------------------
     #: Enables GET /debug/* (development only — keep false in production).

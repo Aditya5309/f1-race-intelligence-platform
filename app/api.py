@@ -49,6 +49,24 @@ Endpoints, all under /api/v1:
                                               season_constructor_standings. Degrades to
                                               empty drivers/constructors lists rather than
                                               404/503 when data is absent for that year.
+    GET  /api/v1/model-comparison                    model-selection comparison table
+                                              (artifacts/analysis/model_comparison.csv) —
+                                              recorded at analysis time, independent of
+                                              model/features readiness.
+    GET  /api/v1/feature-importance                  logreg feature importance +
+                                              importance-by-class (artifacts/analysis/
+                                              feature_importance_logreg.csv).
+    GET  /api/v1/shap-summary                        mean |SHAP| ranking (artifacts/
+                                              analysis/shap_summary_logreg.csv). All three
+                                              of the above degrade to an empty response
+                                              (never 404/503) when their CSV is absent —
+                                              see scripts/export_analysis_data.py
+                                              (Decision 063) for why only these three
+                                              reports/phase4_analysis/ artifacts have a
+                                              route: the rest (SHAP beeswarm/waterfall,
+                                              calibration, confusion matrix, ROC,
+                                              precision-recall) have no underlying tabular
+                                              data anywhere in this repo's own pipeline.
     GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
     GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
                                               Prediction Simulator: re-score
@@ -270,6 +288,53 @@ class StandingsResponse(BaseModel):
     year: int
     drivers: list[DriverStandingSchema]
     constructors: list[ConstructorStandingSchema]
+
+
+class ModelComparisonResponse(BaseModel):
+    """Passthrough of artifacts/analysis/model_comparison.csv — a generic
+    tabular shape (not one field per column) since the source CSV's own
+    columns vary by candidate (e.g. hyperparameters is only populated for
+    tuned candidates) and are recorded at analysis time, not defined by
+    this API. Mirrors app/views/insights.py's own
+    st.dataframe(pd.read_csv(...)) — "render whatever's in the CSV,"
+    verbatim."""
+    columns: list[str]
+    rows: list[dict[str, float | str | bool | None]]
+
+
+class FeatureImportanceRow(BaseModel):
+    feature: str
+    importance: float
+    feature_class: str
+
+
+class ImportanceByClassRow(BaseModel):
+    feature_class: str
+    total_importance: float
+
+
+class FeatureImportanceResponse(BaseModel):
+    """features: full list, sorted descending by importance (the frontend
+    slices to top-20, matching the Streamlit page's own chart). by_class:
+    importance summed per feature_class — the same source data as
+    features, reproducing app/views/insights.py's separate
+    "importance_by_class" figure without a second CSV."""
+    features: list[FeatureImportanceRow]
+    by_class: list[ImportanceByClassRow]
+
+
+class ShapSummaryRow(BaseModel):
+    feature: str
+    mean_abs_shap: float
+    feature_class: str
+
+
+class ShapSummaryResponse(BaseModel):
+    """Mean |SHAP| ranking (shap_bar_logreg.png's underlying data) — the
+    ONLY SHAP figure with tabular data available; the beeswarm/waterfall
+    plots need a per-instance SHAP value matrix that isn't exported (see
+    scripts/export_analysis_data.py's docstring, Decision 063)."""
+    features: list[ShapSummaryRow]
 
 
 class DriverPrediction(BaseModel):
@@ -727,6 +792,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ] if not constructor_rows.empty else []
 
         return StandingsResponse(year=year, drivers=drivers, constructors=constructors)
+
+    def _read_analysis_csv(name: str) -> pd.DataFrame:
+        """settings.analysis_data_dir CSV -> DataFrame; EMPTY frame (never
+        raises) when absent — the same graceful-absence convention as
+        _final_round_standings above, for the same reason: Model Insights
+        data is a recorded-at-promotion-time snapshot, independent of
+        whether the live model/features loaded."""
+        try:
+            return pd.read_csv(settings.analysis_data_dir / name)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("analysis data unavailable (%s): %s", name, exc)
+            return pd.DataFrame()
+
+    @router.get("/model-comparison", response_model=ModelComparisonResponse)
+    def model_comparison():
+        """Model-selection comparison table (artifacts/analysis/
+        model_comparison.csv) — independent of _require_ready(), same
+        reasoning as /standings: this is recorded analysis data, not a
+        function of the currently-loaded model. Degrades to an empty table
+        (200, never 404/503) when the CSV is absent."""
+        frame = _read_analysis_csv("model_comparison.csv")
+        if frame.empty:
+            return ModelComparisonResponse(columns=[], rows=[])
+        return ModelComparisonResponse(
+            columns=list(frame.columns),
+            rows=frame.where(frame.notna(), None).to_dict(orient="records"),
+        )
+
+    @router.get("/feature-importance", response_model=FeatureImportanceResponse)
+    def feature_importance():
+        """Native (|coefficient|) feature importance for the logreg model
+        family (artifacts/analysis/feature_importance_logreg.csv), plus the
+        same data summed by feature_class — reproduces both
+        feature_importance_logreg.png and importance_by_class_logreg.png
+        from one source file, no second CSV needed. Independent of
+        _require_ready(), same reasoning as /standings and
+        /model-comparison."""
+        frame = _read_analysis_csv("feature_importance_logreg.csv")
+        if frame.empty:
+            return FeatureImportanceResponse(features=[], by_class=[])
+        sorted_frame = frame.sort_values("importance", ascending=False)
+        by_class = (
+            frame.groupby("feature_class")["importance"].sum()
+            .sort_values(ascending=False)
+        )
+        return FeatureImportanceResponse(
+            features=[
+                FeatureImportanceRow(
+                    feature=str(r.feature), importance=float(r.importance),
+                    feature_class=str(r.feature_class),
+                )
+                for r in sorted_frame.itertuples()
+            ],
+            by_class=[
+                ImportanceByClassRow(feature_class=str(cls), total_importance=float(total))
+                for cls, total in by_class.items()
+            ],
+        )
+
+    @router.get("/shap-summary", response_model=ShapSummaryResponse)
+    def shap_summary():
+        """Mean |SHAP| ranking for the logreg model family (artifacts/
+        analysis/shap_summary_logreg.csv) — reproduces shap_bar_logreg.png.
+        The SHAP beeswarm/waterfall figures are NOT reproducible from this
+        CSV (they need a per-instance SHAP value matrix, not exported —
+        see scripts/export_analysis_data.py's docstring, Decision 063) and
+        have no route here. Independent of _require_ready(), same
+        reasoning as the routes above."""
+        frame = _read_analysis_csv("shap_summary_logreg.csv")
+        if frame.empty:
+            return ShapSummaryResponse(features=[])
+        sorted_frame = frame.sort_values("mean_abs_shap", ascending=False)
+        return ShapSummaryResponse(features=[
+            ShapSummaryRow(
+                feature=str(r.feature), mean_abs_shap=float(r.mean_abs_shap),
+                feature_class=str(r.feature_class),
+            )
+            for r in sorted_frame.itertuples()
+        ])
 
     @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):

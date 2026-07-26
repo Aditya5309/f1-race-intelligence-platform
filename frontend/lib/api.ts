@@ -238,3 +238,50 @@ export interface StandingsResponse {
  */
 export const getStandings = (year: number) =>
   apiGet<StandingsResponse>(`/standings/${year}`);
+
+export interface ModelComparisonResponse {
+  columns: string[];
+  rows: Record<string, number | string | boolean | null>[];
+}
+
+/**
+ * GET /model-comparison, /feature-importance, /shap-summary (Decision 063,
+ * Frontend Overhaul Phase 4) — recorded analysis snapshots
+ * (artifacts/analysis/, exported by scripts/export_analysis_data.py),
+ * independent of model/features readiness. The remaining
+ * reports/phase4_analysis/ artifacts (SHAP beeswarm/waterfall, calibration,
+ * confusion matrix, ROC, precision-recall) have no route — see that
+ * script's docstring for why.
+ */
+export const getModelComparison = () => apiGet<ModelComparisonResponse>("/model-comparison");
+
+export interface FeatureImportanceRow {
+  feature: string;
+  importance: number;
+  feature_class: string;
+}
+
+export interface ImportanceByClassRow {
+  feature_class: string;
+  total_importance: number;
+}
+
+export interface FeatureImportanceResponse {
+  features: FeatureImportanceRow[];
+  by_class: ImportanceByClassRow[];
+}
+
+export const getFeatureImportance = () =>
+  apiGet<FeatureImportanceResponse>("/feature-importance");
+
+export interface ShapSummaryRow {
+  feature: string;
+  mean_abs_shap: number;
+  feature_class: string;
+}
+
+export interface ShapSummaryResponse {
+  features: ShapSummaryRow[];
+}
+
+export const getShapSummary = () => apiGet<ShapSummaryResponse>("/shap-summary");

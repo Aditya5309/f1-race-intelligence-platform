@@ -281,6 +281,93 @@ def test_standings_independent_of_degraded_model(standings_client):
     assert standings_client.get("/standings/2024").status_code == 200
 
 
+# ---------------------------------------------------------------------------
+# GET /model-comparison, /feature-importance, /shap-summary — recorded
+# analysis snapshots (Decision 063, Frontend Overhaul Phase 4). Reuses
+# standings_stack's degraded-model settings shape: a fresh Settings pointed
+# at a tmp analysis_data_dir, model intentionally NOT loaded, to prove these
+# three routes are independent of model/features readiness too.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def analysis_stack(tmp_path_factory):
+    root = tmp_path_factory.mktemp("analysis")
+    analysis_dir = root / "analysis"
+    analysis_dir.mkdir()
+
+    pd.DataFrame({
+        "model": ["logreg", "random_forest"],
+        "val_top1_accuracy": [0.6818, 0.6136],
+        "selected": ["Yes", "No"],
+    }).to_csv(analysis_dir / "model_comparison.csv", index=False)
+    pd.DataFrame({
+        "feature": ["grid_adjusted", "qualifying_position", "driver_wins_last_3"],
+        "importance": [0.75, 0.70, 0.20],
+        "feature_class": ["stable", "stable", "era_sensitive"],
+    }).to_csv(analysis_dir / "feature_importance_logreg.csv", index=False)
+    pd.DataFrame({
+        "feature": ["grid_adjusted", "qualifying_position"],
+        "mean_abs_shap": [0.60, 0.55],
+        "feature_class": ["stable", "stable"],
+    }).to_csv(analysis_dir / "shap_summary_logreg.csv", index=False)
+
+    settings = Settings(
+        serving_bundle_path=root / "no-such-bundle",
+        features_path=root / "missing.parquet",
+        analysis_data_dir=analysis_dir,
+    )
+    return settings
+
+
+@pytest.fixture(scope="module")
+def analysis_client(analysis_stack):
+    with TestClient(create_app(analysis_stack)) as c:
+        yield c
+
+
+def test_model_comparison_returns_columns_and_rows(analysis_client):
+    body = analysis_client.get("/model-comparison").json()
+    assert body["columns"] == ["model", "val_top1_accuracy", "selected"]
+    assert len(body["rows"]) == 2
+    assert body["rows"][0] == {"model": "logreg", "val_top1_accuracy": 0.6818, "selected": "Yes"}
+
+
+def test_model_comparison_missing_csv_degrades_to_empty(analysis_client, tmp_path):
+    settings = Settings(
+        serving_bundle_path=tmp_path / "no-such-bundle",
+        features_path=tmp_path / "missing.parquet",
+        analysis_data_dir=tmp_path / "no-such-dir",
+    )
+    with TestClient(create_app(settings)) as c:
+        resp = c.get("/model-comparison")
+        assert resp.status_code == 200
+        assert resp.json() == {"columns": [], "rows": []}
+
+
+def test_feature_importance_sorted_desc_and_grouped_by_class(analysis_client):
+    body = analysis_client.get("/feature-importance").json()
+    assert [f["feature"] for f in body["features"]] == [
+        "grid_adjusted", "qualifying_position", "driver_wins_last_3",
+    ]
+    assert body["by_class"] == [
+        {"feature_class": "stable", "total_importance": 1.45},
+        {"feature_class": "era_sensitive", "total_importance": 0.2},
+    ]
+
+
+def test_shap_summary_sorted_desc(analysis_client):
+    body = analysis_client.get("/shap-summary").json()
+    assert [f["feature"] for f in body["features"]] == ["grid_adjusted", "qualifying_position"]
+    assert body["features"][0]["mean_abs_shap"] == 0.6
+
+
+def test_analysis_routes_independent_of_degraded_model(analysis_client):
+    assert analysis_client.get("/health").json()["status"] == "degraded"
+    assert analysis_client.get("/model-comparison").status_code == 200
+    assert analysis_client.get("/feature-importance").status_code == 200
+    assert analysis_client.get("/shap-summary").status_code == 200
+
+
 def test_races_upcoming_404_when_every_race_has_a_result(serving_stack, tmp_path):
     settings, _ = serving_stack
     raw_dir = tmp_path / "raw"
