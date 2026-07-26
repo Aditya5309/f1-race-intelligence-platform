@@ -19,16 +19,20 @@ const STATS = [
   },
 ];
 
+/** Near-black hero treatment (mirrors RaceCenterHero / ModelStatusCard) —
+ * the roadmap's design mapping for Model Insights' headline metrics. */
 export function ValidationStats() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-4">
-        {STATS.map((s) => (
-          <div key={s.label} className="rounded-xl bg-white/40 p-4" title={s.help}>
-            <p className="tabular text-2xl font-semibold">{s.value}</p>
-            <p className="label-caps text-[10px] text-[var(--color-muted-text)]">{s.label}</p>
-          </div>
-        ))}
+      <div className="rounded-2xl bg-[var(--color-feature-card-bg)] p-6 text-[var(--color-text-on-dark)]">
+        <div className="grid gap-4 sm:grid-cols-4">
+          {STATS.map((s) => (
+            <div key={s.label} title={s.help}>
+              <p className="tabular text-2xl font-semibold">{s.value}</p>
+              <p className="label-caps text-[10px] text-[var(--color-muted-text)]">{s.label}</p>
+            </div>
+          ))}
+        </div>
       </div>
       <p className="text-sm text-[var(--color-muted-text)]">
         The serving model is a <strong>calibrated logistic regression</strong> chosen over

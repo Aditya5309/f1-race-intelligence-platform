@@ -6,6 +6,8 @@
  * src/. Keep in sync on reclassification.
  */
 
+import { color } from "./design-tokens";
+
 export const STABLE_FEATURES = [
   "qualifying_position",
   "qualifying_gap_to_pole_pct",
@@ -46,9 +48,12 @@ export const EXPERIMENTAL_FEATURES = [
   "constructor_circuit_wins",
 ];
 
-/** Same three semantic colors as app/views/insights.py's st.badge() calls. */
+/** Same three semantic colors as app/views/insights.py's st.badge() calls.
+ * "stable" reuses design-tokens.ts's color.liveGreen (same value, single
+ * source of truth); era_sensitive/experimental have no existing token
+ * (same class of domain-specific addition as constructor-colors.ts). */
 const FEATURE_CLASS_COLORS: Record<string, string> = {
-  stable: "#3FCB6B",
+  stable: color.liveGreen,
   era_sensitive: "#E08A3B",
   experimental: "#8B5CF6",
 };

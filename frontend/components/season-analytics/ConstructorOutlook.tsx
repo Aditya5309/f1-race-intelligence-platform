@@ -1,6 +1,6 @@
 import { constructorColor } from "@/lib/constructor-colors";
 import type { ConstructorOutlookRow } from "@/lib/season-aggregation";
-import { ProbabilityBar } from "../race-center/ProbabilityBar";
+import { ProbabilityBar } from "@/components/race-center/ProbabilityBar";
 
 export function ConstructorOutlook({ rows }: { rows: ConstructorOutlookRow[] }) {
   if (!rows.length) {
