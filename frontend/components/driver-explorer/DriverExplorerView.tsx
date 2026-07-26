@@ -11,6 +11,7 @@ import {
   type DriverStats,
   type RaceResultRow,
   type StandingsProgressionRow,
+  type StandingsResponse,
 } from "@/lib/api";
 import {
   driverLabels,
@@ -33,12 +34,15 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   const [raceResults, setRaceResults] = useState<RaceResultRow[]>([]);
   const [progression, setProgression] = useState<StandingsProgressionRow[]>([]);
   const [radar, setRadar] = useState<Record<string, number> | null>(null);
-  const [championshipLine, setChampionshipLine] = useState<string | null>(null);
+  const [standings, setStandings] = useState<StandingsResponse | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
 
-  // Scope-level fetch: which drivers exist in this scope.
+  // Scope-level fetch: which drivers exist in this scope, plus standings
+  // (independent of which driver is selected — fetched once per scope
+  // change, not once per driver switch, so switching drivers never
+  // re-fetches the whole season's standings table redundantly).
   useEffect(() => {
     let cancelled = false;
     const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
@@ -52,11 +56,22 @@ export function DriverExplorerView({ years }: { years: number[] }) {
           : (labels[0]?.driver_id ?? null),
       );
     });
+    if (scope != null) {
+      getStandings(scope).then((r) => !cancelled && setStandings(r));
+    } else {
+      Promise.resolve().then(() => !cancelled && setStandings(null));
+    }
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullCareer, year]);
+
+  const championshipLine = useMemo(() => {
+    if (!standings || driverId == null || scope == null) return null;
+    const mine = standings.drivers.find((d) => d.driver_id === driverId);
+    return mine ? `Championship P${mine.position} · ${mine.points.toFixed(0)} pts (${scope})` : null;
+  }, [standings, driverId, scope]);
 
   // Driver-specific fetch.
   useEffect(() => {
@@ -69,13 +84,6 @@ export function DriverExplorerView({ years }: { years: number[] }) {
     if (scope != null) {
       getDriverStandingsProgression(driverId, scope).then((r) => !cancelled && setProgression(r));
       getDriverRadar(driverId, scope).then((r) => !cancelled && setRadar(r));
-      getStandings(scope).then((r) => {
-        if (cancelled) return;
-        const mine = r.drivers.find((d) => d.driver_id === driverId);
-        setChampionshipLine(
-          mine ? `Championship P${mine.position} · ${mine.points.toFixed(0)} pts (${scope})` : null,
-        );
-      });
     } else {
       // Career scope: reset season-only state asynchronously (not a
       // synchronous setState-in-effect) — these fields are also
@@ -84,7 +92,6 @@ export function DriverExplorerView({ years }: { years: number[] }) {
         if (cancelled) return;
         setProgression([]);
         setRadar(null);
-        setChampionshipLine(null);
       });
     }
     return () => {

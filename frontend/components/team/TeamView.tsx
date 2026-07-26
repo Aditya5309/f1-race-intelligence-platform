@@ -11,6 +11,7 @@ import {
   type ConstructorCatalogEntry,
   type ConstructorStats,
   type RaceResultRow,
+  type StandingsResponse,
 } from "@/lib/api";
 import { getCareerPredictions, getSeasonPredictions, type SeasonPredictionRow } from "@/lib/season-aggregation";
 import { StatRow } from "@/components/StatRow";
@@ -27,7 +28,7 @@ export function TeamView({ years }: { years: number[] }) {
   const [stats, setStats] = useState<ConstructorStats | null>(null);
   const [raceResults, setRaceResults] = useState<RaceResultRow[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
-  const [championshipLine, setChampionshipLine] = useState<string | null>(null);
+  const [standings, setStandings] = useState<StandingsResponse | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
@@ -39,15 +40,30 @@ export function TeamView({ years }: { years: number[] }) {
     });
   }, []);
 
+  // Scope-level fetch: predictions frame + standings (independent of which
+  // constructor is selected — fetched once per scope change, not once per
+  // constructor switch, so switching teams never re-fetches the whole
+  // season's standings table redundantly).
   useEffect(() => {
     let cancelled = false;
     const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
     req.then((rows) => !cancelled && setFrame(rows));
+    if (scope != null) {
+      getStandings(scope).then((r) => !cancelled && setStandings(r));
+    } else {
+      Promise.resolve().then(() => !cancelled && setStandings(null));
+    }
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullCareer, year]);
+
+  const championshipLine = useMemo(() => {
+    if (!standings || constructorId == null || scope == null) return null;
+    const mine = standings.constructors.find((c) => c.constructor_id === constructorId);
+    return mine ? `Championship P${mine.position} · ${mine.points.toFixed(0)} pts (${scope})` : null;
+  }, [standings, constructorId, scope]);
 
   useEffect(() => {
     if (constructorId == null) return;
@@ -58,18 +74,10 @@ export function TeamView({ years }: { years: number[] }) {
     );
     if (scope != null) {
       getConstructorDrivers(constructorId, scope).then((r) => !cancelled && setDrivers(r));
-      getStandings(scope).then((r) => {
-        if (cancelled) return;
-        const mine = r.constructors.find((c) => c.constructor_id === constructorId);
-        setChampionshipLine(
-          mine ? `Championship P${mine.position} · ${mine.points.toFixed(0)} pts (${scope})` : null,
-        );
-      });
     } else {
       Promise.resolve().then(() => {
         if (cancelled) return;
         setDrivers([]);
-        setChampionshipLine(null);
       });
     }
     return () => {
