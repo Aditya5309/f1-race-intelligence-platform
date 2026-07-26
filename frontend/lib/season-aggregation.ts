@@ -37,6 +37,30 @@ export async function getSeasonPredictions(year: number): Promise<SeasonPredicti
   return perRace.flat();
 }
 
+/** Concatenates getSeasonPredictions() across every given season — the
+ * "full career" scope Driver Explorer/Team's toggle uses. Mirrors
+ * app/views/common.py::career_predictions_or_stop(). */
+export async function getCareerPredictions(years: number[]): Promise<SeasonPredictionRow[]> {
+  const perYear = await Promise.all(years.map((y) => getSeasonPredictions(y)));
+  return perYear.flat();
+}
+
+export interface DriverLabel {
+  driver_id: number;
+  label: string;
+}
+
+/** Distinct (driver_id, display label) pairs, label-sorted — the picker
+ * source for Driver Explorer/Compare Drivers. Mirrors both pages'
+ * _driver_labels() helper. */
+export function driverLabels(rows: SeasonPredictionRow[]): DriverLabel[] {
+  const byId = new Map<number, string>();
+  for (const r of rows) byId.set(r.driver_id, r.driver_name ?? String(r.driver_id));
+  return [...byId.entries()]
+    .map(([driver_id, label]) => ({ driver_id, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function mean(values: number[]): number {
   return values.reduce((a, b) => a + b, 0) / values.length;
 }

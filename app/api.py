@@ -67,6 +67,25 @@ Endpoints, all under /api/v1:
                                               calibration, confusion matrix, ROC,
                                               precision-recall) have no underlying tabular
                                               data anywhere in this repo's own pipeline.
+    GET  /api/v1/drivers/{id}/stats?year=             historical outcome stats (races/wins/
+                                              podiums/poles/points/avg_quali/avg_finish);
+                                              year omitted = career.
+    GET  /api/v1/drivers/{id}/race-results?year=      per-race grid/quali/finish rows.
+    GET  /api/v1/drivers/{id}/standings-progression?year=  round-by-round championship
+                                              points/position (year REQUIRED).
+    GET  /api/v1/drivers/{id}/radar?year=             Qualifying pace/Race pace/Consistency,
+                                              0-100 within-season (year REQUIRED); scores is
+                                              null (not an error) when data is insufficient.
+    GET  /api/v1/constructors                        every constructor in the catalog.
+    GET  /api/v1/constructors/{id}/stats?year=        mirrors /drivers/{id}/stats.
+    GET  /api/v1/constructors/{id}/race-results?year=  mirrors /drivers/{id}/race-results.
+    GET  /api/v1/constructors/{id}/drivers?year=      roster for one season (year REQUIRED).
+                                              All 8 entity-stats routes above (Decision 064,
+                                              Frontend Overhaul Phase 5, app/entity_stats.py)
+                                              read settings.data_dir directly, independent of
+                                              model/features readiness, and degrade to
+                                              zero/null/empty (never 404/503) when an entity
+                                              has no data in the requested scope.
     GET  /api/v1/predictions/{race_id}               per-race-normalized field predictions
     GET  /api/v1/predictions/{race_id}/simulate/{driver_id}
                                               Prediction Simulator: re-score
@@ -182,6 +201,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import entity_stats
 from app.config import API_V1_PREFIX, Settings
 from app.upcoming_prediction_service import (
     RaceAlreadyHasResult,
@@ -335,6 +355,97 @@ class ShapSummaryResponse(BaseModel):
     plots need a per-instance SHAP value matrix that isn't exported (see
     scripts/export_analysis_data.py's docstring, Decision 063)."""
     features: list[ShapSummaryRow]
+
+
+# --- Entity-stats route family (Frontend Overhaul Phase 5, Decision 064) ---
+# Driver Explorer / Compare Drivers / Team all block on this same missing
+# capability — designed once here rather than per-page. Every route below
+# is independent of _require_ready() (same reasoning as /standings/{year}
+# and the analysis routes: this is display metadata from settings.data_dir,
+# not a function of the served model) and degrades gracefully (zeros/nulls/
+# empty lists, never 404/503) when the underlying entity has no data in the
+# requested scope — see app/entity_stats.py for the full rationale.
+
+class DriverStatsResponse(BaseModel):
+    driver_id: int
+    year: int | None
+    races: int = 0
+    wins: int = 0
+    podiums: int = 0
+    poles: int | None = None
+    points: float = 0.0
+    avg_quali: float | None = None
+    avg_finish: float | None = None
+    avg_finish_classified: float | None = None
+    consistency_std: float | None = None
+
+
+class RaceResultRow(BaseModel):
+    race_id: int
+    year: int
+    round: int
+    quali_position: float | None = None
+    finish: float | None = None
+
+
+class DriverRaceResultsResponse(BaseModel):
+    driver_id: int
+    year: int | None
+    results: list[RaceResultRow]
+
+
+class StandingsProgressionRow(BaseModel):
+    round: int
+    points: float
+    position: int
+    wins: int
+
+
+class DriverStandingsProgressionResponse(BaseModel):
+    driver_id: int
+    year: int
+    progression: list[StandingsProgressionRow]
+
+
+class RadarScoresResponse(BaseModel):
+    """scores is None when this driver doesn't have enough races this
+    season for all three underlying stats, or the field itself is too
+    small to normalize against — not an error, a real, expected outcome."""
+    driver_id: int
+    year: int
+    scores: dict[str, float] | None = None
+
+
+class ConstructorCatalogEntry(BaseModel):
+    constructor_id: int
+    name: str
+    nationality: str | None = None
+
+
+class ConstructorCatalogResponse(BaseModel):
+    constructors: list[ConstructorCatalogEntry]
+
+
+class ConstructorStatsResponse(BaseModel):
+    constructor_id: int
+    year: int | None
+    races: int = 0
+    wins: int = 0
+    podiums: int = 0
+    points: float = 0.0
+    avg_quali: float | None = None
+
+
+class ConstructorRaceResultsResponse(BaseModel):
+    constructor_id: int
+    year: int | None
+    results: list[RaceResultRow]
+
+
+class ConstructorDriversResponse(BaseModel):
+    constructor_id: int
+    year: int
+    drivers: list[str]
 
 
 class DriverPrediction(BaseModel):
@@ -871,6 +982,104 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             for r in sorted_frame.itertuples()
         ])
+
+    def _race_result_rows(frame: pd.DataFrame) -> list[RaceResultRow]:
+        """driver_race_results()/constructor_race_results() -> RaceResultRow
+        list — shared by both entity grains, same column shape."""
+        if frame.empty:
+            return []
+        return [
+            RaceResultRow(
+                race_id=int(r.raceId), year=int(r.year), round=int(r.round),
+                quali_position=(float(r.quali_position)
+                                if hasattr(r, "quali_position") and pd.notna(r.quali_position)
+                                else None),
+                finish=(float(r.finish) if pd.notna(r.finish) else None),
+            )
+            for r in frame.itertuples()
+        ]
+
+    @router.get("/drivers/{driver_id}/stats", response_model=DriverStatsResponse)
+    def driver_stats(driver_id: int, year: int | None = None):
+        """Historical outcome stats (races/wins/podiums/poles/points/
+        avg_quali/avg_finish) for one driver — one season, or career when
+        year is omitted. Degrades to all-zero/null fields (200, never
+        404/503) when this driver has no data in the requested scope."""
+        stats = entity_stats.driver_season_stats(settings.data_dir, driver_id, year)
+        return DriverStatsResponse(driver_id=driver_id, year=year, **stats)
+
+    @router.get("/drivers/{driver_id}/race-results", response_model=DriverRaceResultsResponse)
+    def driver_race_results(driver_id: int, year: int | None = None):
+        """(year, round)-sorted per-race grid/quali/finish rows for one
+        driver — Driver Explorer's trend-chart source."""
+        frame = entity_stats.driver_race_results(settings.data_dir, driver_id, year)
+        return DriverRaceResultsResponse(
+            driver_id=driver_id, year=year, results=_race_result_rows(frame))
+
+    @router.get("/drivers/{driver_id}/standings-progression",
+             response_model=DriverStandingsProgressionResponse)
+    def driver_standings_progression(driver_id: int, year: int):
+        """Round-by-round championship points/position for one
+        driver-season — season-scoped only (a career-spanning points
+        progression doesn't mean anything, year is required)."""
+        frame = entity_stats.driver_standings_progression(settings.data_dir, driver_id, year)
+        progression = [
+            StandingsProgressionRow(
+                round=int(r.round), points=float(r.points),
+                position=int(r.position), wins=int(r.wins),
+            )
+            for r in frame.itertuples()
+        ] if not frame.empty else []
+        return DriverStandingsProgressionResponse(
+            driver_id=driver_id, year=year, progression=progression)
+
+    @router.get("/drivers/{driver_id}/radar", response_model=RadarScoresResponse)
+    def driver_radar(driver_id: int, year: int):
+        """Qualifying pace / Race pace / Consistency, 0-100, normalized
+        within this season's field only (not comparable across seasons —
+        see app/entity_stats.py::radar_scores). Season-scoped only, year
+        is required. scores is null (not an error) when this driver lacks
+        enough races this season, or the field is too small to normalize."""
+        scores = entity_stats.radar_scores(settings.data_dir, driver_id, year)
+        return RadarScoresResponse(driver_id=driver_id, year=year, scores=scores)
+
+    @router.get("/constructors", response_model=ConstructorCatalogResponse)
+    def constructors():
+        """Every constructor in the display-metadata catalog, name-sorted —
+        the Team page's picker source (independent of any season/scope)."""
+        frame = entity_stats.constructor_catalog(settings.data_dir)
+        return ConstructorCatalogResponse(constructors=[
+            ConstructorCatalogEntry(
+                constructor_id=int(r.constructorId), name=str(r.name),
+                nationality=(str(r.nationality) if pd.notna(r.nationality) else None),
+            )
+            for r in frame.itertuples()
+        ] if not frame.empty else [])
+
+    @router.get("/constructors/{constructor_id}/stats", response_model=ConstructorStatsResponse)
+    def constructor_stats(constructor_id: int, year: int | None = None):
+        """Historical outcome stats for one constructor — mirrors
+        /drivers/{id}/stats at constructor grain."""
+        stats = entity_stats.constructor_season_stats(settings.data_dir, constructor_id, year)
+        return ConstructorStatsResponse(constructor_id=constructor_id, year=year, **stats)
+
+    @router.get("/constructors/{constructor_id}/race-results",
+             response_model=ConstructorRaceResultsResponse)
+    def constructor_race_results(constructor_id: int, year: int | None = None):
+        """(year, round)-sorted per-race rows for one constructor: mean
+        qualifying position across both cars, best finish that round —
+        the Team page's trend-chart source."""
+        frame = entity_stats.constructor_race_results(settings.data_dir, constructor_id, year)
+        return ConstructorRaceResultsResponse(
+            constructor_id=constructor_id, year=year, results=_race_result_rows(frame))
+
+    @router.get("/constructors/{constructor_id}/drivers", response_model=ConstructorDriversResponse)
+    def constructor_drivers(constructor_id: int, year: int):
+        """Driver display names who raced for this constructor in this
+        season — season-scoped only, year is required (a roster is a
+        per-season concept)."""
+        names = entity_stats.constructor_current_drivers(settings.data_dir, constructor_id, year)
+        return ConstructorDriversResponse(constructor_id=constructor_id, year=year, drivers=names)
 
     @router.get("/predictions/{race_id}", response_model=PredictionResponse)
     def predictions(race_id: int, request: Request):

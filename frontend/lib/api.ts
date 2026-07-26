@@ -285,3 +285,91 @@ export interface ShapSummaryResponse {
 }
 
 export const getShapSummary = () => apiGet<ShapSummaryResponse>("/shap-summary");
+
+// ---------------------------------------------------------------------------
+// Entity-stats route family (Decision 064, Frontend Overhaul Phase 5) —
+// Driver Explorer / Compare Drivers / Team all share this. Every route
+// degrades to zero/null/empty fields (never 404/503) when an entity has no
+// data in the requested scope — not an error state to special-case.
+// ---------------------------------------------------------------------------
+
+export interface DriverStats {
+  driver_id: number;
+  year: number | null;
+  races: number;
+  wins: number;
+  podiums: number;
+  poles: number | null;
+  points: number;
+  avg_quali: number | null;
+  avg_finish: number | null;
+  avg_finish_classified: number | null;
+  consistency_std: number | null;
+}
+
+export const getDriverStats = (driverId: number, year?: number) =>
+  apiGet<DriverStats>(`/drivers/${driverId}/stats${year ? `?year=${year}` : ""}`);
+
+export interface RaceResultRow {
+  race_id: number;
+  year: number;
+  round: number;
+  quali_position: number | null;
+  finish: number | null;
+}
+
+export const getDriverRaceResults = (driverId: number, year?: number) =>
+  apiGet<{ driver_id: number; year: number | null; results: RaceResultRow[] }>(
+    `/drivers/${driverId}/race-results${year ? `?year=${year}` : ""}`,
+  ).then((r) => r.results);
+
+export interface StandingsProgressionRow {
+  round: number;
+  points: number;
+  position: number;
+  wins: number;
+}
+
+export const getDriverStandingsProgression = (driverId: number, year: number) =>
+  apiGet<{ driver_id: number; year: number; progression: StandingsProgressionRow[] }>(
+    `/drivers/${driverId}/standings-progression?year=${year}`,
+  ).then((r) => r.progression);
+
+export const getDriverRadar = (driverId: number, year: number) =>
+  apiGet<{ driver_id: number; year: number; scores: Record<string, number> | null }>(
+    `/drivers/${driverId}/radar?year=${year}`,
+  ).then((r) => r.scores);
+
+export interface ConstructorCatalogEntry {
+  constructor_id: number;
+  name: string;
+  nationality: string | null;
+}
+
+export const getConstructors = () =>
+  apiGet<{ constructors: ConstructorCatalogEntry[] }>("/constructors").then(
+    (r) => r.constructors,
+  );
+
+export interface ConstructorStats {
+  constructor_id: number;
+  year: number | null;
+  races: number;
+  wins: number;
+  podiums: number;
+  points: number;
+  avg_quali: number | null;
+}
+
+export const getConstructorStats = (constructorId: number, year?: number) =>
+  apiGet<ConstructorStats>(`/constructors/${constructorId}/stats${year ? `?year=${year}` : ""}`);
+
+export const getConstructorRaceResults = (constructorId: number, year?: number) =>
+  apiGet<{ constructor_id: number; year: number | null; results: RaceResultRow[] }>(
+    `/constructors/${constructorId}/race-results${year ? `?year=${year}` : ""}`,
+  ).then((r) => r.results);
+
+export const getConstructorDrivers = (constructorId: number, year: number) =>
+  apiGet<{ constructor_id: number; year: number; drivers: string[] }>(
+    `/constructors/${constructorId}/drivers?year=${year}`,
+  ).then((r) => r.drivers);

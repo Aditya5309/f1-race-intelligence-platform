@@ -1,10 +1,10 @@
 import { NavShell } from "@/components/NavShell";
+import { StatRow } from "@/components/StatRow";
 import { AccuracyChart } from "@/components/season-analytics/AccuracyChart";
 import { ConstructorOutlook } from "@/components/season-analytics/ConstructorOutlook";
 import { MostPredictedWinners } from "@/components/season-analytics/MostPredictedWinners";
 import { RisingFading } from "@/components/season-analytics/RisingFading";
 import { StandingsPanel } from "@/components/season-analytics/StandingsPanel";
-import { StatRow } from "@/components/season-analytics/StatRow";
 import { SurpriseCards } from "@/components/season-analytics/SurpriseCards";
 import { WinShareHistogram } from "@/components/season-analytics/WinShareHistogram";
 import { YearPicker } from "@/components/season-analytics/YearPicker";

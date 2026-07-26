@@ -368,6 +368,131 @@ def test_analysis_routes_independent_of_degraded_model(analysis_client):
     assert analysis_client.get("/shap-summary").status_code == 200
 
 
+# ---------------------------------------------------------------------------
+# GET /drivers/{id}/*, /constructors, /constructors/{id}/* — the entity-stats
+# route family (Decision 064, Frontend Overhaul Phase 5). Reuses the same
+# degraded-model settings shape as standings_stack/analysis_stack.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def entity_stack(tmp_path_factory):
+    root = tmp_path_factory.mktemp("entity")
+    data_dir = root / "display"
+    data_dir.mkdir()
+
+    pd.DataFrame({
+        "raceId": [1, 2, 3, 4],
+        "year": [2023, 2023, 2024, 2024],
+        "round": [1, 2, 1, 2],
+    }).to_csv(data_dir / "races.csv", index=False)
+    pd.DataFrame({
+        "driverId": [1, 2], "forename": ["Max", "Lewis"], "surname": ["Verstappen", "Hamilton"],
+    }).to_csv(data_dir / "drivers.csv", index=False)
+    pd.DataFrame({
+        "constructorId": [1, 2], "name": ["Red Bull", "Mercedes"],
+        "nationality": ["Austrian", "German"],
+    }).to_csv(data_dir / "constructors.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 1, 2, 2],
+        "driverId": [1, 2, 1, 2],
+        "constructorId": [1, 2, 1, 2],
+        "position": ["1", "2", "2", "1"],
+        "positionOrder": [1, 2, 2, 1],
+        "points": [25, 18, 18, 25],
+    }).to_csv(data_dir / "results.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 1, 2, 2], "driverId": [1, 2, 1, 2], "constructorId": [1, 2, 1, 2],
+        "position": [1, 2, 2, 1],
+    }).to_csv(data_dir / "qualifying.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 2], "driverId": [1, 1], "points": [25, 43],
+        "position": [1, 1], "wins": [1, 1],
+    }).to_csv(data_dir / "driver_standings.csv", index=False)
+    pd.DataFrame({
+        "raceId": [1, 2], "constructorId": [1, 1], "points": [25, 43],
+        "position": [1, 1], "wins": [1, 1],
+    }).to_csv(data_dir / "constructor_standings.csv", index=False)
+
+    settings = Settings(
+        serving_bundle_path=root / "no-such-bundle",
+        features_path=root / "missing.parquet",
+        data_dir=data_dir,
+    )
+    return settings
+
+
+@pytest.fixture(scope="module")
+def entity_client(entity_stack):
+    with TestClient(create_app(entity_stack)) as c:
+        yield c
+
+
+def test_driver_stats_season_scope(entity_client):
+    body = entity_client.get("/drivers/1/stats", params={"year": 2023}).json()
+    # consistency_std is null: only 2 classified races this season, below
+    # the CONSISTENCY_MIN_RACES=3 floor (same reason radar scores null below).
+    assert body == {
+        "driver_id": 1, "year": 2023, "races": 2, "wins": 1, "podiums": 2,
+        "poles": 1, "points": 43.0, "avg_quali": 1.5, "avg_finish": 1.5,
+        "avg_finish_classified": 1.5, "consistency_std": None,
+    }
+
+
+def test_driver_stats_unknown_driver_degrades_to_zeros(entity_client):
+    body = entity_client.get("/drivers/999/stats", params={"year": 2023}).json()
+    assert body["races"] == 0
+    assert body["points"] == 0.0
+    assert body["avg_quali"] is None
+
+
+def test_driver_race_results(entity_client):
+    body = entity_client.get("/drivers/1/race-results", params={"year": 2023}).json()
+    assert [r["round"] for r in body["results"]] == [1, 2]
+    assert [r["finish"] for r in body["results"]] == [1.0, 2.0]
+
+
+def test_driver_standings_progression_requires_year(entity_client):
+    assert entity_client.get("/drivers/1/standings-progression").status_code == 422
+    body = entity_client.get(
+        "/drivers/1/standings-progression", params={"year": 2023}).json()
+    assert [p["points"] for p in body["progression"]] == [25.0, 43.0]
+
+
+def test_driver_radar_requires_year_and_can_be_null(entity_client):
+    assert entity_client.get("/drivers/1/radar").status_code == 422
+    body = entity_client.get("/drivers/1/radar", params={"year": 2023}).json()
+    assert body["scores"] is None  # only 2 races this season, below the min-races floor
+
+
+def test_constructors_catalog_sorted_by_name(entity_client):
+    body = entity_client.get("/constructors").json()
+    assert [c["name"] for c in body["constructors"]] == ["Mercedes", "Red Bull"]
+
+
+def test_constructor_stats(entity_client):
+    body = entity_client.get("/constructors/1/stats", params={"year": 2023}).json()
+    assert body["races"] == 2
+    assert body["points"] == 43.0
+
+
+def test_constructor_race_results(entity_client):
+    body = entity_client.get(
+        "/constructors/1/race-results", params={"year": 2023}).json()
+    assert [r["round"] for r in body["results"]] == [1, 2]
+
+
+def test_constructor_drivers_requires_year(entity_client):
+    assert entity_client.get("/constructors/1/drivers").status_code == 422
+    body = entity_client.get("/constructors/1/drivers", params={"year": 2023}).json()
+    assert body["drivers"] == ["Max Verstappen"]
+
+
+def test_entity_stats_routes_independent_of_degraded_model(entity_client):
+    assert entity_client.get("/health").json()["status"] == "degraded"
+    assert entity_client.get("/drivers/1/stats", params={"year": 2023}).status_code == 200
+    assert entity_client.get("/constructors").status_code == 200
+
+
 def test_races_upcoming_404_when_every_race_has_a_result(serving_stack, tmp_path):
     settings, _ = serving_stack
     raw_dir = tmp_path / "raw"
