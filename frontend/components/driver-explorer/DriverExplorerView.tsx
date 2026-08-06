@@ -36,7 +36,8 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   const [progression, setProgression] = useState<StandingsProgressionRow[]>([]);
   const [radar, setRadar] = useState<Record<string, number> | null>(null);
   const [standings, setStandings] = useState<StandingsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  const [driverError, setDriverError] = useState<string | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
@@ -44,14 +45,17 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   // Scope-level fetch: which drivers exist in this scope, plus standings
   // (independent of which driver is selected — fetched once per scope
   // change, not once per driver switch, so switching drivers never
-  // re-fetches the whole season's standings table redundantly).
+  // re-fetches the whole season's standings table redundantly). Its own
+  // error state is separate from the driver-level effect's — each effect
+  // only clears the error it owns, so a real failure here can't be silently
+  // wiped out just because the user switched drivers.
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setScopeError(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
-      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+      setScopeError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
     const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
@@ -84,15 +88,16 @@ export function DriverExplorerView({ years }: { years: number[] }) {
     return mine ? `Championship P${mine.position} · ${mine.points.toFixed(0)} pts (${scope})` : null;
   }, [standings, driverId, scope]);
 
-  // Driver-specific fetch.
+  // Driver-specific fetch. Own error state, separate from the scope-level
+  // effect above (see that effect's comment).
   useEffect(() => {
     if (driverId == null) return;
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setDriverError(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
-      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+      setDriverError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
     getDriverStats(driverId, scope ?? undefined).then((r) => !cancelled && setStats(r)).catch(reportError);
@@ -171,7 +176,8 @@ export function DriverExplorerView({ years }: { years: number[] }) {
         </select>
       </div>
 
-      {error && <FetchErrorMessage message={`Couldn't load driver data: ${error}`} />}
+      {scopeError && <FetchErrorMessage message={`Couldn't load season data: ${scopeError}`} />}
+      {driverError && <FetchErrorMessage message={`Couldn't load driver data: ${driverError}`} />}
 
       {driverId != null && (
         <>

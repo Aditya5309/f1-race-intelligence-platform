@@ -30,14 +30,19 @@ export function TeamView({ years }: { years: number[] }) {
   const [raceResults, setRaceResults] = useState<RaceResultRow[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
   const [standings, setStandings] = useState<StandingsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  const [constructorError, setConstructorError] = useState<string | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
 
+  // Each of this component's 3 effects owns its own error state — only
+  // clears the error it set itself, so a real failure in one effect can't
+  // be silently wiped out just because an unrelated effect re-ran.
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setCatalogError(null));
     getConstructors()
       .then((c) => {
         if (cancelled) return;
@@ -45,7 +50,7 @@ export function TeamView({ years }: { years: number[] }) {
         setConstructorId((current) => current ?? c[0]?.constructor_id ?? null);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setCatalogError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
@@ -58,11 +63,11 @@ export function TeamView({ years }: { years: number[] }) {
   // season's standings table redundantly).
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setScopeError(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
-      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+      setScopeError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
     const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
@@ -87,11 +92,11 @@ export function TeamView({ years }: { years: number[] }) {
   useEffect(() => {
     if (constructorId == null) return;
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setConstructorError(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
-      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+      setConstructorError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
     getConstructorStats(constructorId, scope ?? undefined)
@@ -162,7 +167,11 @@ export function TeamView({ years }: { years: number[] }) {
         </select>
       </div>
 
-      {error && <FetchErrorMessage message={`Couldn't load team data: ${error}`} />}
+      {catalogError && <FetchErrorMessage message={`Couldn't load team list: ${catalogError}`} />}
+      {scopeError && <FetchErrorMessage message={`Couldn't load season data: ${scopeError}`} />}
+      {constructorError && (
+        <FetchErrorMessage message={`Couldn't load team data: ${constructorError}`} />
+      )}
 
       {constructorId != null && (
         <>

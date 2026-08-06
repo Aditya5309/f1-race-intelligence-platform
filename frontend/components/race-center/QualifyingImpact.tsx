@@ -40,7 +40,6 @@ export function QualifyingImpact({ raceId }: { raceId: number }) {
   }, [raceId]);
 
   if (baselineUnavailable) return null;
-  if (error) return <FetchErrorMessage message={`Couldn't load qualifying impact: ${error}`} />;
 
   return (
     <div>
@@ -50,6 +49,8 @@ export function QualifyingImpact({ raceId }: { raceId: number }) {
       <p className="mt-1 text-xs text-[var(--color-muted-text)]">
         Full model vs. a pole-only heuristic — how much of the pick is really just qualifying.
       </p>
+
+      {error && <FetchErrorMessage message={`Couldn't load qualifying impact: ${error}`} />}
 
       {data && (
         <div className="mt-4 grid gap-6 sm:grid-cols-2">

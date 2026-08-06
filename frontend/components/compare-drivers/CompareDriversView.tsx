@@ -66,11 +66,15 @@ export function CompareDriversView({ years }: { years: number[] }) {
   const [statsB, setStatsB] = useState<DriverStats | null>(null);
   const [radarA, setRadarA] = useState<Record<string, number> | null>(null);
   const [radarB, setRadarB] = useState<Record<string, number> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [seasonError, setSeasonError] = useState<string | null>(null);
+  const [driversError, setDriversError] = useState<string | null>(null);
 
+  // Each of this component's 2 effects owns its own error state — only
+  // clears the error it set itself, so a real failure in one effect can't
+  // be silently wiped out just because the other effect re-ran.
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setSeasonError(null));
     getSeasonPredictions(year)
       .then((r) => {
         if (cancelled) return;
@@ -82,7 +86,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
         setRaceId(races[0] ?? null);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setSeasonError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
@@ -91,11 +95,11 @@ export function CompareDriversView({ years }: { years: number[] }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => !cancelled && setError(null));
+    Promise.resolve().then(() => !cancelled && setDriversError(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
-      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+      setDriversError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
     if (driverA != null) {
@@ -152,7 +156,10 @@ export function CompareDriversView({ years }: { years: number[] }) {
         </select>
       </div>
 
-      {error && <FetchErrorMessage message={`Couldn't load comparison data: ${error}`} />}
+      {seasonError && <FetchErrorMessage message={`Couldn't load season data: ${seasonError}`} />}
+      {driversError && (
+        <FetchErrorMessage message={`Couldn't load comparison data: ${driversError}`} />
+      )}
 
       {labels.length < 2 ? (
         <p className="text-sm text-[var(--color-muted-text)]">
