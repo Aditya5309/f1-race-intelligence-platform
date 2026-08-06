@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { FetchErrorMessage } from "@/components/FetchErrorMessage";
 import { constructorColor } from "@/lib/constructor-colors";
 import {
   getDriverRaceResults,
@@ -35,6 +36,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   const [progression, setProgression] = useState<StandingsProgressionRow[]>([]);
   const [radar, setRadar] = useState<Record<string, number> | null>(null);
   const [standings, setStandings] = useState<StandingsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
@@ -45,19 +47,28 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   // re-fetches the whole season's standings table redundantly).
   useEffect(() => {
     let cancelled = false;
-    const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
-    req.then((rows) => {
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
       if (cancelled) return;
-      setScopeRows(rows);
-      const labels = driverLabels(rows);
-      setDriverId((current) =>
-        current != null && labels.some((l) => l.driver_id === current)
-          ? current
-          : (labels[0]?.driver_id ?? null),
-      );
-    });
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
+    const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
+    req
+      .then((rows) => {
+        if (cancelled) return;
+        setScopeRows(rows);
+        const labels = driverLabels(rows);
+        setDriverId((current) =>
+          current != null && labels.some((l) => l.driver_id === current)
+            ? current
+            : (labels[0]?.driver_id ?? null),
+        );
+      })
+      .catch(reportError);
     if (scope != null) {
-      getStandings(scope).then((r) => !cancelled && setStandings(r));
+      getStandings(scope).then((r) => !cancelled && setStandings(r)).catch(reportError);
     } else {
       Promise.resolve().then(() => !cancelled && setStandings(null));
     }
@@ -77,13 +88,22 @@ export function DriverExplorerView({ years }: { years: number[] }) {
   useEffect(() => {
     if (driverId == null) return;
     let cancelled = false;
-    getDriverStats(driverId, scope ?? undefined).then((r) => !cancelled && setStats(r));
-    getDriverRaceResults(driverId, scope ?? undefined).then(
-      (r) => !cancelled && setRaceResults(r),
-    );
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
+    getDriverStats(driverId, scope ?? undefined).then((r) => !cancelled && setStats(r)).catch(reportError);
+    getDriverRaceResults(driverId, scope ?? undefined)
+      .then((r) => !cancelled && setRaceResults(r))
+      .catch(reportError);
     if (scope != null) {
-      getDriverStandingsProgression(driverId, scope).then((r) => !cancelled && setProgression(r));
-      getDriverRadar(driverId, scope).then((r) => !cancelled && setRadar(r));
+      getDriverStandingsProgression(driverId, scope)
+        .then((r) => !cancelled && setProgression(r))
+        .catch(reportError);
+      getDriverRadar(driverId, scope).then((r) => !cancelled && setRadar(r)).catch(reportError);
     } else {
       // Career scope: reset season-only state asynchronously (not a
       // synchronous setState-in-effect) — these fields are also
@@ -150,6 +170,8 @@ export function DriverExplorerView({ years }: { years: number[] }) {
           ))}
         </select>
       </div>
+
+      {error && <FetchErrorMessage message={`Couldn't load driver data: ${error}`} />}
 
       {driverId != null && (
         <>

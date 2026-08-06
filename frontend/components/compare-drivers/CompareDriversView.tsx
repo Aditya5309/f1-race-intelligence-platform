@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { FetchErrorMessage } from "@/components/FetchErrorMessage";
 import { constructorColor } from "@/lib/constructor-colors";
 import { getDriverRadar, getDriverStats, type DriverStats } from "@/lib/api";
 import { driverLabels, getSeasonPredictions, type SeasonPredictionRow } from "@/lib/season-aggregation";
@@ -65,18 +66,24 @@ export function CompareDriversView({ years }: { years: number[] }) {
   const [statsB, setStatsB] = useState<DriverStats | null>(null);
   const [radarA, setRadarA] = useState<Record<string, number> | null>(null);
   const [radarB, setRadarB] = useState<Record<string, number> | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getSeasonPredictions(year).then((r) => {
-      if (cancelled) return;
-      setRows(r);
-      const labels = driverLabels(r);
-      setDriverA(labels[0]?.driver_id ?? null);
-      setDriverB(labels[1]?.driver_id ?? null);
-      const races = [...new Set(r.map((row) => row.race_id))];
-      setRaceId(races[0] ?? null);
-    });
+    Promise.resolve().then(() => !cancelled && setError(null));
+    getSeasonPredictions(year)
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r);
+        const labels = driverLabels(r);
+        setDriverA(labels[0]?.driver_id ?? null);
+        setDriverB(labels[1]?.driver_id ?? null);
+        const races = [...new Set(r.map((row) => row.race_id))];
+        setRaceId(races[0] ?? null);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
     return () => {
       cancelled = true;
     };
@@ -84,13 +91,20 @@ export function CompareDriversView({ years }: { years: number[] }) {
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
     if (driverA != null) {
-      getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r));
-      getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r));
+      getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r)).catch(reportError);
+      getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r)).catch(reportError);
     }
     if (driverB != null) {
-      getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r));
-      getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r));
+      getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r)).catch(reportError);
+      getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r)).catch(reportError);
     }
     return () => {
       cancelled = true;
@@ -137,6 +151,8 @@ export function CompareDriversView({ years }: { years: number[] }) {
           ))}
         </select>
       </div>
+
+      {error && <FetchErrorMessage message={`Couldn't load comparison data: ${error}`} />}
 
       {labels.length < 2 ? (
         <p className="text-sm text-[var(--color-muted-text)]">

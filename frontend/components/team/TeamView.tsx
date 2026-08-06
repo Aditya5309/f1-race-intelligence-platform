@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { FetchErrorMessage } from "@/components/FetchErrorMessage";
 import { constructorColor } from "@/lib/constructor-colors";
 import {
   getConstructorDrivers,
@@ -29,15 +30,26 @@ export function TeamView({ years }: { years: number[] }) {
   const [raceResults, setRaceResults] = useState<RaceResultRow[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
   const [standings, setStandings] = useState<StandingsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
 
   useEffect(() => {
-    getConstructors().then((c) => {
-      setCatalog(c);
-      setConstructorId((current) => current ?? c[0]?.constructor_id ?? null);
-    });
+    let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setError(null));
+    getConstructors()
+      .then((c) => {
+        if (cancelled) return;
+        setCatalog(c);
+        setConstructorId((current) => current ?? c[0]?.constructor_id ?? null);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Scope-level fetch: predictions frame + standings (independent of which
@@ -46,10 +58,17 @@ export function TeamView({ years }: { years: number[] }) {
   // season's standings table redundantly).
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
     const req = fullCareer ? getCareerPredictions(years) : getSeasonPredictions(year ?? years[0]);
-    req.then((rows) => !cancelled && setFrame(rows));
+    req.then((rows) => !cancelled && setFrame(rows)).catch(reportError);
     if (scope != null) {
-      getStandings(scope).then((r) => !cancelled && setStandings(r));
+      getStandings(scope).then((r) => !cancelled && setStandings(r)).catch(reportError);
     } else {
       Promise.resolve().then(() => !cancelled && setStandings(null));
     }
@@ -68,12 +87,21 @@ export function TeamView({ years }: { years: number[] }) {
   useEffect(() => {
     if (constructorId == null) return;
     let cancelled = false;
-    getConstructorStats(constructorId, scope ?? undefined).then((r) => !cancelled && setStats(r));
-    getConstructorRaceResults(constructorId, scope ?? undefined).then(
-      (r) => !cancelled && setRaceResults(r),
-    );
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
+    getConstructorStats(constructorId, scope ?? undefined)
+      .then((r) => !cancelled && setStats(r))
+      .catch(reportError);
+    getConstructorRaceResults(constructorId, scope ?? undefined)
+      .then((r) => !cancelled && setRaceResults(r))
+      .catch(reportError);
     if (scope != null) {
-      getConstructorDrivers(constructorId, scope).then((r) => !cancelled && setDrivers(r));
+      getConstructorDrivers(constructorId, scope).then((r) => !cancelled && setDrivers(r)).catch(reportError);
     } else {
       Promise.resolve().then(() => {
         if (cancelled) return;
@@ -133,6 +161,8 @@ export function TeamView({ years }: { years: number[] }) {
           ))}
         </select>
       </div>
+
+      {error && <FetchErrorMessage message={`Couldn't load team data: ${error}`} />}
 
       {constructorId != null && (
         <>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FetchErrorMessage } from "@/components/FetchErrorMessage";
 import { RankedBar } from "@/components/RankedBar";
 import { StatRow } from "@/components/StatRow";
 import {
@@ -19,11 +20,23 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
   const [layout, setLayout] = useState<CircuitLayout | null>(null);
   const [stats, setStats] = useState<CircuitStats | null>(null);
   const [winnersOpen, setWinnersOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getCircuitLayout(circuitId).then((r) => !cancelled && setLayout(r));
-    getCircuitStats(circuitId).then((r) => !cancelled && setStats(r));
+    Promise.resolve().then(() => !cancelled && setError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
+    getCircuitLayout(circuitId)
+      .then((r) => !cancelled && setLayout(r))
+      .catch(reportError);
+    getCircuitStats(circuitId)
+      .then((r) => !cancelled && setStats(r))
+      .catch(reportError);
     Promise.resolve().then(() => !cancelled && setWinnersOpen(false));
     return () => {
       cancelled = true;
@@ -48,6 +61,8 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
           </option>
         ))}
       </select>
+
+      {error && <FetchErrorMessage message={`Couldn't load circuit data: ${error}`} />}
 
       {circuit && (
         <>
