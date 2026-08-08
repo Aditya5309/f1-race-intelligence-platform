@@ -47,7 +47,6 @@ export function TeamView({ years }: { years: number[] }) {
       .then((c) => {
         if (cancelled) return;
         setCatalog(c);
-        setConstructorId((current) => current ?? c[0]?.constructor_id ?? null);
       })
       .catch((err) => {
         if (!cancelled) setCatalogError(err instanceof Error ? err.message : String(err));
@@ -82,6 +81,35 @@ export function TeamView({ years }: { years: number[] }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullCareer, year]);
+
+  // Derives the default constructor from catalog + frame together, not
+  // either fetch's own effect — catalog (constructor_id) and frame
+  // (constructor_name, scope-dependent) load independently with no
+  // guaranteed order, so this re-runs whenever either changes and
+  // self-corrects regardless of which resolves first. An explicit user
+  // selection (via the dropdown) always wins if it still has data in the
+  // current scope.
+  useEffect(() => {
+    if (catalog.length === 0) return;
+    let cancelled = false;
+    const namesInScope = new Set(
+      frame.map((r) => r.constructor_name).filter((n): n is string => n != null),
+    );
+    const validInScope = catalog
+      .filter((c) => namesInScope.has(c.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setConstructorId((current) =>
+        current != null && validInScope.some((c) => c.constructor_id === current)
+          ? current
+          : (validInScope[0]?.constructor_id ?? catalog[0]?.constructor_id ?? null),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, frame]);
 
   const championshipLine = useMemo(() => {
     if (!standings || constructorId == null || scope == null) return null;
