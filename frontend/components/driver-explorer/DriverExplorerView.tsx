@@ -154,6 +154,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
           <select
             value={year ?? years[years.length - 1]}
             onChange={(e) => setYear(Number(e.target.value))}
+            aria-label="Select season"
             className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
           >
             {[...years].reverse().map((y) => (
@@ -166,6 +167,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
         <select
           value={driverId ?? ""}
           onChange={(e) => setDriverId(Number(e.target.value))}
+          aria-label="Select driver"
           className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
         >
           {labels.map((l) => (

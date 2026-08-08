@@ -145,6 +145,7 @@ export function TeamView({ years }: { years: number[] }) {
           <select
             value={year ?? years[years.length - 1]}
             onChange={(e) => setYear(Number(e.target.value))}
+            aria-label="Select season"
             className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
           >
             {[...years].reverse().map((y) => (
@@ -157,6 +158,7 @@ export function TeamView({ years }: { years: number[] }) {
         <select
           value={constructorId ?? ""}
           onChange={(e) => setConstructorId(Number(e.target.value))}
+          aria-label="Select team"
           className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
         >
           {catalog.map((c) => (

@@ -146,6 +146,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
         <select
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
+          aria-label="Select season"
           className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
         >
           {years.map((y) => (
@@ -171,6 +172,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <select
               value={driverA ?? ""}
               onChange={(e) => setDriverA(Number(e.target.value))}
+              aria-label="Select first driver"
               className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
             >
               {labels.map((l) => (
@@ -182,6 +184,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <select
               value={driverB ?? ""}
               onChange={(e) => setDriverB(Number(e.target.value))}
+              aria-label="Select second driver"
               className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
             >
               {labels.map((l) => (
@@ -210,6 +213,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
                 <select
                   value={raceId ?? ""}
                   onChange={(e) => setRaceId(Number(e.target.value))}
+                  aria-label="Select race"
                   className="mt-3 rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
                 >
                   {races.map((r) => (

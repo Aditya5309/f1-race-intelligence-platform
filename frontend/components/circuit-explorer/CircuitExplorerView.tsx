@@ -53,6 +53,7 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
       <select
         value={circuitId}
         onChange={(e) => setCircuitId(Number(e.target.value))}
+        aria-label="Select circuit"
         className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
       >
         {catalog.map((c) => (
