@@ -8,6 +8,7 @@ import {
   type RaceSummary,
   type UpcomingRace,
 } from "@/lib/api";
+import { SkeletonHero, SkeletonList, SkeletonTable } from "@/components/skeleton";
 import { RacePicker } from "./RacePicker";
 import { RaceCenterHero } from "./RaceCenterHero";
 import { PodiumRow } from "./PodiumRow";
@@ -32,11 +33,13 @@ export function RaceCenterView({
   const [raceId, setRaceId] = useState(initialRaceId);
   const [data, setData] = useState<RaceCenterPrediction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const isUpcoming = upcoming != null && raceId === upcoming.race_id;
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setIsLoading(true));
 
     const req = isUpcoming
       ? predictUpcoming(upcoming!.year, upcoming!.round).then((r) => ({
@@ -79,7 +82,8 @@ export function RaceCenterView({
         // Stale data from the previous race is left in place rather than
         // cleared — an interim "old content" beat, not a broken page.
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      });
+      })
+      .finally(() => !cancelled && setIsLoading(false));
 
     return () => {
       cancelled = true;
@@ -100,34 +104,42 @@ export function RaceCenterView({
         <p className="text-sm text-[var(--color-accent-red)]">Couldn&apos;t load this race: {error}</p>
       )}
 
-      {data && (
+      {isLoading ? (
         <>
-          <RaceCenterHero data={data} />
-          <PodiumRow predictions={data.predictions} winnerId={data.actual_winner_driver_id} />
-
-          <div>
-            <p className="label-caps text-xs text-[var(--color-muted-text)]">Top contenders</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {data.predictions.slice(0, 5).map((driver, i) => (
-                <ContenderCard key={driver.driver_id} driver={driver} index={i} />
-              ))}
-            </div>
-          </div>
-
-          <FullFieldTable predictions={data.predictions} winnerId={data.actual_winner_driver_id} />
-
-          {!data.isUpcoming && <HistoricalReplay data={data} />}
-          {!data.isUpcoming && <QualifyingImpact raceId={data.race_id} />}
-          {!data.isUpcoming && (
-            <GridSimulator raceId={data.race_id} predictions={data.predictions} />
-          )}
-          {data.isUpcoming && (
-            <p className="text-xs text-[var(--color-muted-text)]">
-              Qualifying Impact and the Grid Simulator need a completed race to compare
-              against — check back after this one runs.
-            </p>
-          )}
+          <SkeletonHero variant="feature" label="Loading race prediction…" />
+          <SkeletonList variant="grid" items={3} label="Loading predicted podium…" />
+          <SkeletonTable rows={10} columns={4} hasHeader={false} label="Loading full field…" />
         </>
+      ) : (
+        data && (
+          <>
+            <RaceCenterHero data={data} />
+            <PodiumRow predictions={data.predictions} winnerId={data.actual_winner_driver_id} />
+
+            <div>
+              <p className="label-caps text-xs text-[var(--color-muted-text)]">Top contenders</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {data.predictions.slice(0, 5).map((driver, i) => (
+                  <ContenderCard key={driver.driver_id} driver={driver} index={i} />
+                ))}
+              </div>
+            </div>
+
+            <FullFieldTable predictions={data.predictions} winnerId={data.actual_winner_driver_id} />
+
+            {!data.isUpcoming && <HistoricalReplay data={data} />}
+            {!data.isUpcoming && <QualifyingImpact raceId={data.race_id} />}
+            {!data.isUpcoming && (
+              <GridSimulator raceId={data.race_id} predictions={data.predictions} />
+            )}
+            {data.isUpcoming && (
+              <p className="text-xs text-[var(--color-muted-text)]">
+                Qualifying Impact and the Grid Simulator need a completed race to compare
+                against — check back after this one runs.
+              </p>
+            )}
+          </>
+        )
       )}
     </div>
   );

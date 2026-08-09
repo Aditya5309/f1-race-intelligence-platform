@@ -6,6 +6,7 @@ import { constructorColor } from "@/lib/constructor-colors";
 import { getDriverRadar, getDriverStats, type DriverStats } from "@/lib/api";
 import { driverLabels, getSeasonPredictions, type SeasonPredictionRow } from "@/lib/season-aggregation";
 import { EntityRadarChart, type RadarSeries } from "@/components/entity-stats/EntityRadarChart";
+import { Skeleton, SkeletonChart, SkeletonEntityProfile } from "@/components/skeleton";
 
 function DriverStatColumn({
   label,
@@ -68,6 +69,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
   const [radarB, setRadarB] = useState<Record<string, number> | null>(null);
   const [seasonError, setSeasonError] = useState<string | null>(null);
   const [driversError, setDriversError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Each of this component's 2 effects owns its own error state — only
   // clears the error it set itself, so a real failure in one effect can't
@@ -95,6 +97,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setIsLoading(true));
     Promise.resolve().then(() => !cancelled && setDriversError(null));
 
     function reportError(err: unknown) {
@@ -102,14 +105,20 @@ export function CompareDriversView({ years }: { years: number[] }) {
       setDriversError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
+    const pending: Promise<unknown>[] = [];
     if (driverA != null) {
-      getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r)).catch(reportError);
-      getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r)).catch(reportError);
+      pending.push(
+        getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r)).catch(reportError),
+        getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r)).catch(reportError),
+      );
     }
     if (driverB != null) {
-      getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r)).catch(reportError);
-      getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r)).catch(reportError);
+      pending.push(
+        getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r)).catch(reportError),
+        getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r)).catch(reportError),
+      );
     }
+    Promise.allSettled(pending).then(() => !cancelled && setIsLoading(false));
     return () => {
       cancelled = true;
     };
@@ -199,6 +208,40 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <p className="text-sm text-[var(--color-accent-red)]">
               Pick two different drivers to compare.
             </p>
+          ) : isLoading ? (
+            <>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <SkeletonEntityProfile label="Loading first driver…" />
+                <SkeletonEntityProfile label="Loading second driver…" />
+              </div>
+
+              <section>
+                <p className="label-caps text-xs text-[var(--color-muted-text)]">
+                  Predicted win share for a race this season
+                </p>
+                <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                  {[0, 1].map((i) => (
+                    <div
+                      key={i}
+                      role="status"
+                      aria-live="polite"
+                      className="rounded-xl bg-white/40 p-4"
+                    >
+                      <span className="sr-only">Loading win share…</span>
+                      <Skeleton className="h-4 w-1/2" />
+                      <Skeleton className="mt-2 h-7 w-1/3" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <p className="label-caps text-xs text-[var(--color-muted-text)]">Season profile</p>
+                <div className="mt-3">
+                  <SkeletonChart height="h-72" variant="radar" label="Loading season profile…" />
+                </div>
+              </section>
+            </>
           ) : (
             <>
               <div className="grid gap-6 sm:grid-cols-2">

@@ -18,6 +18,7 @@ import { getCareerPredictions, getSeasonPredictions, type SeasonPredictionRow } 
 import { StatRow } from "@/components/StatRow";
 import { EntityProfileCard } from "@/components/entity-stats/EntityProfileCard";
 import { TrendLineChart } from "@/components/entity-stats/TrendLineChart";
+import { SkeletonEntityProfile, SkeletonStatRow, SkeletonTrendChart } from "@/components/skeleton";
 
 export function TeamView({ years }: { years: number[] }) {
   const [catalog, setCatalog] = useState<ConstructorCatalogEntry[]>([]);
@@ -33,6 +34,7 @@ export function TeamView({ years }: { years: number[] }) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [constructorError, setConstructorError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const scope = fullCareer ? null : year;
   const scopeLabel = fullCareer ? `${years[0]}–${years[years.length - 1]}` : String(year);
@@ -118,8 +120,14 @@ export function TeamView({ years }: { years: number[] }) {
   }, [standings, constructorId, scope]);
 
   useEffect(() => {
-    if (constructorId == null) return;
     let cancelled = false;
+    if (constructorId == null) {
+      Promise.resolve().then(() => !cancelled && setIsLoading(false));
+      return () => {
+        cancelled = true;
+      };
+    }
+    Promise.resolve().then(() => !cancelled && setIsLoading(true));
     Promise.resolve().then(() => !cancelled && setConstructorError(null));
 
     function reportError(err: unknown) {
@@ -127,20 +135,22 @@ export function TeamView({ years }: { years: number[] }) {
       setConstructorError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
     }
 
-    getConstructorStats(constructorId, scope ?? undefined)
+    const statsReq = getConstructorStats(constructorId, scope ?? undefined)
       .then((r) => !cancelled && setStats(r))
       .catch(reportError);
-    getConstructorRaceResults(constructorId, scope ?? undefined)
+    const raceResultsReq = getConstructorRaceResults(constructorId, scope ?? undefined)
       .then((r) => !cancelled && setRaceResults(r))
       .catch(reportError);
-    if (scope != null) {
-      getConstructorDrivers(constructorId, scope).then((r) => !cancelled && setDrivers(r)).catch(reportError);
-    } else {
-      Promise.resolve().then(() => {
-        if (cancelled) return;
-        setDrivers([]);
-      });
-    }
+    const driversReq =
+      scope != null
+        ? getConstructorDrivers(constructorId, scope).then((r) => !cancelled && setDrivers(r)).catch(reportError)
+        : Promise.resolve().then(() => {
+            if (cancelled) return;
+            setDrivers([]);
+          });
+    Promise.allSettled([statsReq, raceResultsReq, driversReq]).then(
+      () => !cancelled && setIsLoading(false),
+    );
     return () => {
       cancelled = true;
     };
@@ -203,74 +213,90 @@ export function TeamView({ years }: { years: number[] }) {
         <FetchErrorMessage message={`Couldn't load team data: ${constructorError}`} />
       )}
 
-      {constructorId != null && (
-        <>
-          <EntityProfileCard
-            color={teamColor}
-            name={teamName}
-            subtitle={`${nationality} · ${scopeLabel}${drivers.length ? ` · ${drivers.join(", ")}` : ""}`}
-            championshipLine={championshipLine}
-          />
-
-          {stats && stats.races > 0 ? (
-            <StatRow
-              columns={5}
-              stats={[
-                { label: "Races", value: String(stats.races) },
-                { label: "Wins", value: String(stats.wins) },
-                { label: "Podiums", value: String(stats.podiums) },
-                { label: "Points", value: stats.points.toFixed(0) },
-                {
-                  label: "Avg qualifying",
-                  value: stats.avg_quali != null ? `P${stats.avg_quali.toFixed(1)}` : "—",
-                },
-              ]}
+      {constructorId != null &&
+        (isLoading ? (
+          <>
+            <SkeletonEntityProfile label="Loading team profile…" />
+            <SkeletonStatRow columns={5} label="Loading team stats…" />
+            <section>
+              <p className="label-caps text-xs text-[var(--color-muted-text)]">Trends</p>
+              <div className="mt-3 grid gap-6 sm:grid-cols-2">
+                <SkeletonTrendChart label="Loading qualifying trend…" />
+                <SkeletonTrendChart label="Loading finishing trend…" />
+              </div>
+            </section>
+          </>
+        ) : (
+          <>
+            <EntityProfileCard
+              color={teamColor}
+              name={teamName}
+              subtitle={`${nationality} · ${scopeLabel}${drivers.length ? ` · ${drivers.join(", ")}` : ""}`}
+              championshipLine={championshipLine}
             />
-          ) : (
-            <p className="text-sm text-[var(--color-muted-text)]">
-              No historical stats for this team in this scope.
-            </p>
-          )}
 
-          {teamFrame.length > 0 && (
-            <p className="text-sm text-[var(--color-muted-text)]">
-              🎯 The model picked a {teamName} driver as its #1 favorite in {picks.length} race(s)
-              this scope
-              {decided > 0
-                ? `; that pick won ${hits} of ${decided} decided race(s) (${((hits / decided) * 100).toFixed(0)}%).`
-                : picks.length > 0
-                  ? "; no results decided yet."
-                  : "."}
-            </p>
-          )}
+            {stats && stats.races > 0 ? (
+              <StatRow
+                columns={5}
+                stats={[
+                  { label: "Races", value: String(stats.races) },
+                  { label: "Wins", value: String(stats.wins) },
+                  { label: "Podiums", value: String(stats.podiums) },
+                  { label: "Points", value: stats.points.toFixed(0) },
+                  {
+                    label: "Avg qualifying",
+                    value: stats.avg_quali != null ? `P${stats.avg_quali.toFixed(1)}` : "—",
+                  },
+                ]}
+              />
+            ) : (
+              <p className="text-sm text-[var(--color-muted-text)]">
+                No historical stats for this team in this scope.
+              </p>
+            )}
 
-          <section>
-            <p className="label-caps text-xs text-[var(--color-muted-text)]">Trends</p>
-            <div className="mt-3 grid gap-6 sm:grid-cols-2">
-              <TrendLineChart
-                data={raceResults
-                  .filter((r) => r.quali_position != null)
-                  .map((r) => ({ race: `${r.year} R${r.round}`, quali_position: r.quali_position }))}
-                xKey="race"
-                yKey="quali_position"
-                color={teamColor}
-                invertY
-                emptyMessage="No qualifying history in this scope."
-              />
-              <TrendLineChart
-                data={raceResults
-                  .filter((r) => r.finish != null)
-                  .map((r) => ({ race: `${r.year} R${r.round}`, finish: r.finish }))}
-                xKey="race"
-                yKey="finish"
-                color={teamColor}
-                invertY
-                emptyMessage="No finishing history in this scope."
-              />
-            </div>
-          </section>
-        </>
-      )}
+            {teamFrame.length > 0 && (
+              <p className="text-sm text-[var(--color-muted-text)]">
+                🎯 The model picked a {teamName} driver as its #1 favorite in {picks.length}{" "}
+                race(s) this scope
+                {decided > 0
+                  ? `; that pick won ${hits} of ${decided} decided race(s) (${((hits / decided) * 100).toFixed(0)}%).`
+                  : picks.length > 0
+                    ? "; no results decided yet."
+                    : "."}
+              </p>
+            )}
+
+            <section>
+              <p className="label-caps text-xs text-[var(--color-muted-text)]">Trends</p>
+              <div className="mt-3 grid gap-6 sm:grid-cols-2">
+                <TrendLineChart
+                  data={raceResults
+                    .filter((r) => r.quali_position != null)
+                    .map((r) => ({
+                      race: `${r.year} R${r.round}`,
+                      quali_position: r.quali_position,
+                    }))}
+                  xKey="race"
+                  yKey="quali_position"
+                  color={teamColor}
+                  invertY
+                  emptyMessage="No qualifying history in this scope."
+                />
+                <TrendLineChart
+                  data={raceResults
+                    .filter((r) => r.finish != null)
+                    .map((r) => ({ race: `${r.year} R${r.round}`, finish: r.finish }))}
+                  xKey="race"
+                  yKey="finish"
+                  color={teamColor}
+                  invertY
+                  emptyMessage="No finishing history in this scope."
+                />
+              </div>
+            </section>
+          </>
+        ))}
     </div>
   );
 }
