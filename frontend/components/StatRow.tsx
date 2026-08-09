@@ -5,7 +5,7 @@
  * interpolate an arbitrary `columns` value into a class string at build
  * time, so every value actually used in this codebase needs its own
  * literal entry here. */
-const COLUMN_CLASSES: Record<3 | 4 | 5 | 6, string> = {
+export const COLUMN_CLASSES: Record<3 | 4 | 5 | 6, string> = {
   3: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-3",
   4: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4",
   5: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5",

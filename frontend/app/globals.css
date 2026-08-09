@@ -53,3 +53,49 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* Skeleton loading system (.ai/frontend_stabilization_roadmap.md §1) — a
+ * shared shimmer for content on the cream page background, a `-dark`
+ * variant for near-black feature-card contexts. Static fallback (no
+ * gradient sweep, flat fill) is the default; the animated sweep only
+ * applies when the user hasn't requested reduced motion. */
+.skeleton-shimmer,
+.skeleton-shimmer-dark {
+  background-color: var(--color-hairline);
+}
+.skeleton-shimmer-dark {
+  background-color: var(--color-hairline-on-dark);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes skeleton-shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+  .skeleton-shimmer {
+    background-color: transparent;
+    background-image: linear-gradient(
+      90deg,
+      var(--color-hairline) 25%,
+      color-mix(in srgb, var(--color-hairline) 60%, white) 50%,
+      var(--color-hairline) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  .skeleton-shimmer-dark {
+    background-color: transparent;
+    background-image: linear-gradient(
+      90deg,
+      var(--color-hairline-on-dark) 25%,
+      color-mix(in srgb, var(--color-hairline-on-dark) 60%, white) 50%,
+      var(--color-hairline-on-dark) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+}
