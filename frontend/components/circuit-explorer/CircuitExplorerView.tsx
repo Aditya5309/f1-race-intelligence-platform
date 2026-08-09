@@ -15,8 +15,18 @@ import { TrackOutline } from "./TrackOutline";
 
 const OTHER_COLOR = "#4C78A8";
 
+// "Most relevant circuit" heuristic: most races held historically (not most
+// recently used), with name as an explicit tie-break rather than relying on
+// the catalog's incidental order.
+function defaultCircuitId(catalog: CircuitCatalogEntry[]): number {
+  const ranked = [...catalog].sort(
+    (a, b) => b.races_held - a.races_held || a.name.localeCompare(b.name),
+  );
+  return ranked[0]?.circuit_id;
+}
+
 export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[] }) {
-  const [circuitId, setCircuitId] = useState<number>(catalog[0]?.circuit_id);
+  const [circuitId, setCircuitId] = useState<number>(() => defaultCircuitId(catalog));
   const [layout, setLayout] = useState<CircuitLayout | null>(null);
   const [stats, setStats] = useState<CircuitStats | null>(null);
   const [winnersOpen, setWinnersOpen] = useState(false);
