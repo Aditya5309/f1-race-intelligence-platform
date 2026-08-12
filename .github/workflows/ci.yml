@@ -72,9 +72,19 @@ jobs:
       # verification pass, not bundled into "add scanning").
       # continue-on-error keeps this VISIBLE (a failed, non-blocking step
       # in the UI) rather than silently swallowed.
+      # --skip-editable excludes this project's own editable install
+      # (f1-race-winner-prediction, via `pip install -e .`) from the scan.
+      # Without it, pip-audit cannot resolve a local editable package against
+      # PyPI and reports "Dependency not found on PyPI and could not be
+      # audited" — an expected, harmless case, but one that reads in the logs
+      # like the scan itself failed, burying whatever real vulnerability
+      # finding triggered the step's actual non-zero exit (verified against
+      # pip-audit's own source: exit 1 fires only when vuln_count > 0, never
+      # from this skip alone — but the two were indistinguishable in the log
+      # output before this flag).
       - name: Dependency vulnerability scan (pip-audit)
         continue-on-error: true
-        run: python -m pip_audit
+        run: python -m pip_audit --skip-editable
 
       # Full suite. data/ and mlflow.db are gitignored and do
       # not exist on this runner, so the handful of real-data smoke tests

@@ -37,6 +37,18 @@ long-term-support branch.
   served path (image/plotting and multipart-parsing libraries pulled in by
   the dashboard and API frameworks) are a tracked, open item — see the
   Roadmap in README.md.
+- **starlette CVEs** (PYSEC-2026-161/248/249/2280/2281) and **cryptography
+  CVEs** (PYSEC-2026-3552/3553/3554, GHSA-537c-gmf6-5ccf) — both blocked on
+  an mlflow version upgrade (`mlflow-skinny` pins `starlette<1`; `mlflow`
+  pins `cryptography<47`, and every available fix version for both CVE
+  chains falls above those caps). This isn't three independent dependency
+  debts, it's one blocked dependency: resolving the mlflow pin would clear
+  both CVE chains at once. Actual work item is to evaluate an mlflow
+  version bump, which needs its own separate verification pass given how
+  central mlflow is to the training/serving pipeline — not a drive-by
+  dependency bump. **setuptools** (PYSEC-2026-3447) is freely upgradable
+  but build-time-only (never part of the runtime/served path), left to
+  Dependabot's normal cadence.
 - **Automated dependency updates** (Dependabot) opens weekly pull requests
   for Python, GitHub Actions, and Docker base-image updates. None are
   auto-merged; every one runs the full CI suite and is reviewed like any
