@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { motion as motionTokens } from "@/lib/design-tokens";
+import { FadeIn } from "@/components/motion";
 import type { HealthResponse } from "@/lib/api";
 
 export function ModelStatusCard({ health }: { health: HealthResponse | null }) {
@@ -9,12 +8,7 @@ export function ModelStatusCard({ health }: { health: HealthResponse | null }) {
   const model = health?.model;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={motionTokens.cardEnter}
-      className="rounded-2xl bg-[var(--color-feature-card-bg)] p-6 text-[var(--color-text-on-dark)]"
-    >
+    <FadeIn className="rounded-2xl bg-[var(--color-feature-card-bg)] p-6 text-[var(--color-text-on-dark)]">
       <div className="flex items-center gap-2">
         <span
           className="h-2 w-2 rounded-full"
@@ -39,6 +33,6 @@ export function ModelStatusCard({ health }: { health: HealthResponse | null }) {
           {health?.detail ?? "No model status available."}
         </p>
       )}
-    </motion.div>
+    </FadeIn>
   );
 }

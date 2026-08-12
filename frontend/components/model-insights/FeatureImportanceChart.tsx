@@ -1,6 +1,7 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useChartReveal } from "@/components/motion";
 import { featureClassColor } from "@/lib/feature-classes";
 import type { FeatureImportanceRow, ImportanceByClassRow } from "@/lib/api";
 
@@ -16,6 +17,7 @@ export function FeatureImportanceChart({
   features: FeatureImportanceRow[];
   byClass: ImportanceByClassRow[];
 }) {
+  const chartReveal = useChartReveal();
   if (!features.length) {
     return (
       <p className="text-sm text-[var(--color-muted-text)]">
@@ -39,7 +41,7 @@ export function FeatureImportanceChart({
               <XAxis type="number" tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="feature" width={180} tick={{ fontSize: 10 }} />
               <Tooltip />
-              <Bar dataKey="importance" radius={[0, 3, 3, 0]}>
+              <Bar dataKey="importance" radius={[0, 3, 3, 0]} {...chartReveal}>
                 {top20.map((row) => (
                   <Cell key={row.feature} fill={featureClassColor(row.feature_class)} />
                 ))}
@@ -57,7 +59,7 @@ export function FeatureImportanceChart({
               <XAxis type="number" tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="feature_class" width={90} tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Bar dataKey="total_importance" radius={[0, 3, 3, 0]}>
+              <Bar dataKey="total_importance" radius={[0, 3, 3, 0]} {...chartReveal}>
                 {byClass.map((row) => (
                   <Cell key={row.feature_class} fill={featureClassColor(row.feature_class)} />
                 ))}

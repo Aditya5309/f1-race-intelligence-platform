@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Bodoni_Moda, Oswald, JetBrains_Mono } from "next/font/google";
+import { MotionConfig } from "framer-motion";
 import "./globals.css";
 
 // Didone-style display serif — headlines, italic for emphasized words.
@@ -40,7 +41,7 @@ export default function RootLayout({
       className={`${display.variable} ${label.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--color-page-bg)] text-[var(--color-text)]">
-        {children}
+        <MotionConfig reducedMotion="user">{children}</MotionConfig>
       </body>
     </html>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { FadeIn } from "@/components/motion";
 import { motion as motionTokens } from "@/lib/design-tokens";
 import { constructorColor } from "@/lib/constructor-colors";
 import type { DriverPrediction } from "@/lib/api";
@@ -21,13 +21,13 @@ export function DriverRow({
   isWinner: boolean;
 }) {
   return (
-    <motion.li
-      initial={{ opacity: 0, x: -8 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{
-        ...motionTokens.numberTick,
-        delay: index * motionTokens.staggerStep,
-      }}
+    <FadeIn
+      as="li"
+      x={-8}
+      y={0}
+      duration={motionTokens.numberTick.duration}
+      ease={motionTokens.numberTick.ease}
+      delay={index * motionTokens.staggerStep}
       className="flex items-center gap-4 py-3 pl-3"
       style={{ borderLeft: `4px solid ${constructorColor(driver.constructor_name)}` }}
     >
@@ -53,6 +53,6 @@ export function DriverRow({
         </p>
       </div>
       <span className="tabular text-sm">{(driver.win_probability * 100).toFixed(1)}%</span>
-    </motion.li>
+    </FadeIn>
   );
 }

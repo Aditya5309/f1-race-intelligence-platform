@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { motion as motionTokens } from "@/lib/design-tokens";
+import { StaggerContainer, StaggerItem } from "@/components/motion";
 import { constructorColor } from "@/lib/constructor-colors";
 import type { DriverPrediction } from "@/lib/api";
 
@@ -18,13 +17,11 @@ export function PodiumRow({
   return (
     <div>
       <p className="label-caps text-xs text-[var(--color-muted-text)]">Predicted podium</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <StaggerContainer className="mt-3 grid gap-3 sm:grid-cols-3">
         {podium.map((driver, i) => (
-          <motion.div
+          <StaggerItem
             key={driver.driver_id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...motionTokens.cardEnter, delay: i * motionTokens.staggerStep }}
+            y={10}
             className="rounded-xl bg-white/40 p-4"
             style={{ borderLeft: `4px solid ${constructorColor(driver.constructor_name)}` }}
           >
@@ -43,9 +40,9 @@ export function PodiumRow({
                 Actual winner
               </span>
             )}
-          </motion.div>
+          </StaggerItem>
         ))}
-      </div>
+      </StaggerContainer>
     </div>
   );
 }

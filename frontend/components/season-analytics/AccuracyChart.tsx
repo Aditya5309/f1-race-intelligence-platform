@@ -1,11 +1,13 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useChartReveal } from "@/components/motion";
 import type { AccuracyPoint } from "@/lib/season-aggregation";
 
 /** First real Recharts usage in this frontend (installed Phase 1 for
  * exactly this kind of need — no static PNG, no screenshot). */
 export function AccuracyChart({ data }: { data: AccuracyPoint[] }) {
+  const chartReveal = useChartReveal();
   if (!data.length) {
     return (
       <p className="text-sm text-[var(--color-muted-text)]">
@@ -26,7 +28,7 @@ export function AccuracyChart({ data }: { data: AccuracyPoint[] }) {
               <XAxis dataKey="round" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 1]} ticks={[0, 1]} tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Bar dataKey="hit" fill="var(--color-accent-blue)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="hit" fill="var(--color-accent-blue)" radius={[3, 3, 0, 0]} {...chartReveal} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -40,7 +42,14 @@ export function AccuracyChart({ data }: { data: AccuracyPoint[] }) {
               <XAxis dataKey="round" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} />
               <Tooltip formatter={(v) => `${(Number(v) * 100).toFixed(0)}%`} />
-              <Line type="monotone" dataKey="cumulative" stroke="var(--color-accent-red)" dot={false} strokeWidth={2} />
+              <Line
+                type="monotone"
+                dataKey="cumulative"
+                stroke="var(--color-accent-red)"
+                dot={false}
+                strokeWidth={2}
+                {...chartReveal}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
