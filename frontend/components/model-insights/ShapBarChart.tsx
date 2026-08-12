@@ -1,6 +1,7 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useChartReveal } from "@/components/motion";
 import { featureClassColor } from "@/lib/feature-classes";
 import type { ShapSummaryRow } from "@/lib/api";
 
@@ -8,6 +9,7 @@ import type { ShapSummaryRow } from "@/lib/api";
  * beeswarm/waterfall SHAP figures have no route (Decision 063) — see
  * scripts/export_analysis_data.py. */
 export function ShapBarChart({ features }: { features: ShapSummaryRow[] }) {
+  const chartReveal = useChartReveal();
   if (!features.length) {
     return (
       <p className="text-sm text-[var(--color-muted-text)]">
@@ -24,7 +26,7 @@ export function ShapBarChart({ features }: { features: ShapSummaryRow[] }) {
           <XAxis type="number" tick={{ fontSize: 11 }} />
           <YAxis type="category" dataKey="feature" width={180} tick={{ fontSize: 10 }} />
           <Tooltip />
-          <Bar dataKey="mean_abs_shap" radius={[0, 3, 3, 0]}>
+          <Bar dataKey="mean_abs_shap" radius={[0, 3, 3, 0]} {...chartReveal}>
             {top20.map((row) => (
               <Cell key={row.feature} fill={featureClassColor(row.feature_class)} />
             ))}

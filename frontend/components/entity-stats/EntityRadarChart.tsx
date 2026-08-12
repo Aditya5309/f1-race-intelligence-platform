@@ -1,6 +1,7 @@
 "use client";
 
 import { PolarAngleAxis, PolarGrid, Radar, RadarChart, ResponsiveContainer } from "recharts";
+import { useChartReveal } from "@/components/motion";
 
 export interface RadarSeries {
   label: string;
@@ -15,6 +16,7 @@ export interface RadarSeries {
  * comparable across seasons, callers must say so in the UI themselves.
  */
 export function EntityRadarChart({ series }: { series: RadarSeries[] }) {
+  const chartReveal = useChartReveal();
   if (!series.length) return null;
   const axes = Object.keys(series[0].scores);
   const data = axes.map((axis) => {
@@ -36,6 +38,7 @@ export function EntityRadarChart({ series }: { series: RadarSeries[] }) {
               stroke={s.color}
               fill={s.color}
               fillOpacity={0.25}
+              {...chartReveal}
             />
           ))}
         </RadarChart>

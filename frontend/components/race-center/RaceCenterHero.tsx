@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { motion as motionTokens } from "@/lib/design-tokens";
+import { FadeIn } from "@/components/motion";
 import { confidenceTier } from "@/lib/confidence";
 import type { RaceCenterPrediction } from "./types";
 
@@ -30,12 +29,7 @@ export function RaceCenterHero({ data }: { data: RaceCenterPrediction }) {
   const { label, stars } = confidenceTier(top?.win_probability ?? 0);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={motionTokens.cardEnter}
-      className="relative overflow-hidden rounded-2xl bg-[var(--color-feature-card-bg)] p-8 text-[var(--color-text-on-dark)]"
-    >
+    <FadeIn className="relative overflow-hidden rounded-2xl bg-[var(--color-feature-card-bg)] p-8 text-[var(--color-text-on-dark)]">
       <CheckeredCorner />
       <p className="label-caps text-xs text-[var(--color-muted-text)]">
         Round {data.round} · {data.year} {data.isUpcoming && "· Up next"}
@@ -76,6 +70,6 @@ export function RaceCenterHero({ data }: { data: RaceCenterPrediction }) {
           {data.model_top1_hit ? "✅ The model called it." : "❌ The model missed the winner."}
         </p>
       )}
-    </motion.div>
+    </FadeIn>
   );
 }

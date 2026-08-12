@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { FadeIn } from "@/components/motion";
 import { motion as motionTokens } from "@/lib/design-tokens";
 import { constructorColor } from "@/lib/constructor-colors";
 import { teamCode } from "@/lib/team-codes";
@@ -10,10 +10,9 @@ import type { DriverPrediction } from "@/lib/api";
 export function ContenderCard({ driver, index }: { driver: DriverPrediction; index: number }) {
   const color = constructorColor(driver.constructor_name);
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ ...motionTokens.cardEnter, delay: index * motionTokens.staggerStep }}
+    <FadeIn
+      y={10}
+      delay={index * motionTokens.staggerStep}
       className="rounded-xl bg-white/40 p-4"
       style={{ borderLeft: `4px solid ${color}` }}
     >
@@ -46,6 +45,6 @@ export function ContenderCard({ driver, index }: { driver: DriverPrediction; ind
           delay={index * motionTokens.staggerStep}
         />
       </div>
-    </motion.div>
+    </FadeIn>
   );
 }

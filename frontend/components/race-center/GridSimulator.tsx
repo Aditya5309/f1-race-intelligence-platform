@@ -58,6 +58,7 @@ export function GridSimulator({
         <select
           value={driverId}
           onChange={(e) => setDriverId(Number(e.target.value))}
+          aria-label="Select driver"
           className="rounded border border-[var(--color-hairline)] bg-transparent px-2 py-1 text-sm"
         >
           {predictions.map((p) => (
@@ -75,6 +76,7 @@ export function GridSimulator({
             value={gridPosition}
             disabled={pitLane}
             onChange={(e) => setGridPosition(Number(e.target.value))}
+            aria-label="Grid position"
           />
           <span className="tabular w-16">
             {pitLane ? "Pit lane" : `P${gridPosition}`}

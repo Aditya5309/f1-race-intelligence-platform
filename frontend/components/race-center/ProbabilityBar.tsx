@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { motion as motionTokens } from "@/lib/design-tokens";
+import { GrowBar } from "@/components/motion";
 
 /**
  * Horizontal progress-bar fill for win probability — the Pit Wall's
@@ -21,13 +20,7 @@ export function ProbabilityBar({
   const pct = Math.min(Math.max(probability, 0), 1) * 100;
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-hairline)]">
-      <motion.div
-        className="h-full rounded-full"
-        style={{ backgroundColor: color }}
-        initial={{ width: 0 }}
-        animate={{ width: `${pct}%` }}
-        transition={{ ...motionTokens.numberTick, delay }}
-      />
+      <GrowBar percent={pct} color={color} delay={delay} className="h-full rounded-full" />
     </div>
   );
 }

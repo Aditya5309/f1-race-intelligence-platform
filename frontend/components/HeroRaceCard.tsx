@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { motion as motionTokens } from "@/lib/design-tokens";
+import { FadeIn } from "@/components/motion";
 import type { RaceSummary, UpcomingRace } from "@/lib/api";
 
 type Props =
@@ -11,11 +10,7 @@ type Props =
 
 export function HeroRaceCard(props: Props) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={motionTokens.cardEnter}
-    >
+    <FadeIn y={16}>
       {props.kind === "upcoming" && (
         <>
           <p className="label-caps text-xs text-[var(--color-muted-text)]">
@@ -54,6 +49,6 @@ export function HeroRaceCard(props: Props) {
           No races available
         </h1>
       )}
-    </motion.div>
+    </FadeIn>
   );
 }

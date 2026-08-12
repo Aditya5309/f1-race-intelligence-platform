@@ -58,6 +58,7 @@ export function RacePicker({
           const first = entries.find((entry) => entry.year === year);
           if (first) onSelect(first.race_id);
         }}
+        aria-label="Select season"
         className="rounded border border-[var(--color-hairline)] bg-transparent px-2 py-1 text-sm"
       >
         {years.map((y) => (
@@ -70,6 +71,7 @@ export function RacePicker({
       <select
         value={selectedRaceId}
         onChange={(e) => onSelect(Number(e.target.value))}
+        aria-label="Select round"
         className="rounded border border-[var(--color-hairline)] bg-transparent px-2 py-1 text-sm"
       >
         {yearEntries.map((e) => (

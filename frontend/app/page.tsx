@@ -44,6 +44,16 @@ export default async function Home() {
 
         {prediction && (
           <section>
+            {upcoming && (
+              <div className="mb-3">
+                <p className="label-caps text-xs text-[var(--color-muted-text)]">
+                  Latest scored race
+                </p>
+                <p className="text-sm">
+                  Round {latestRace!.round}, {latestRace!.year}
+                </p>
+              </div>
+            )}
             <PredictionList prediction={prediction} />
           </section>
         )}

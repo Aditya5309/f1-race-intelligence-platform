@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { GrowBar } from "@/components/motion";
 import { motion as motionTokens } from "@/lib/design-tokens";
 
 /**
@@ -29,12 +29,11 @@ export function RankedBar({
     <div className="flex items-center gap-3">
       <p className="w-28 shrink-0 truncate text-sm sm:w-36">{label}</p>
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--color-hairline)]">
-        <motion.div
+        <GrowBar
+          percent={pct}
+          color={color}
+          delay={index * motionTokens.staggerStep}
           className="h-full rounded-full"
-          style={{ backgroundColor: color }}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ ...motionTokens.numberTick, delay: index * motionTokens.staggerStep }}
         />
       </div>
       <p className="tabular w-16 shrink-0 text-right text-xs text-[var(--color-muted-text)]">

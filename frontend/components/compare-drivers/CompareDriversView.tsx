@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { FetchErrorMessage } from "@/components/FetchErrorMessage";
 import { constructorColor } from "@/lib/constructor-colors";
 import { getDriverRadar, getDriverStats, type DriverStats } from "@/lib/api";
 import { driverLabels, getSeasonPredictions, type SeasonPredictionRow } from "@/lib/season-aggregation";
 import { EntityRadarChart, type RadarSeries } from "@/components/entity-stats/EntityRadarChart";
+import { Skeleton, SkeletonChart, SkeletonEntityProfile } from "@/components/skeleton";
 
 function DriverStatColumn({
   label,
@@ -65,18 +67,29 @@ export function CompareDriversView({ years }: { years: number[] }) {
   const [statsB, setStatsB] = useState<DriverStats | null>(null);
   const [radarA, setRadarA] = useState<Record<string, number> | null>(null);
   const [radarB, setRadarB] = useState<Record<string, number> | null>(null);
+  const [seasonError, setSeasonError] = useState<string | null>(null);
+  const [driversError, setDriversError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // Each of this component's 2 effects owns its own error state — only
+  // clears the error it set itself, so a real failure in one effect can't
+  // be silently wiped out just because the other effect re-ran.
   useEffect(() => {
     let cancelled = false;
-    getSeasonPredictions(year).then((r) => {
-      if (cancelled) return;
-      setRows(r);
-      const labels = driverLabels(r);
-      setDriverA(labels[0]?.driver_id ?? null);
-      setDriverB(labels[1]?.driver_id ?? null);
-      const races = [...new Set(r.map((row) => row.race_id))];
-      setRaceId(races[0] ?? null);
-    });
+    Promise.resolve().then(() => !cancelled && setSeasonError(null));
+    getSeasonPredictions(year)
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r);
+        const labels = driverLabels(r);
+        setDriverA(labels[0]?.driver_id ?? null);
+        setDriverB(labels[1]?.driver_id ?? null);
+        const races = [...new Set(r.map((row) => row.race_id))];
+        setRaceId(races[0] ?? null);
+      })
+      .catch((err) => {
+        if (!cancelled) setSeasonError(err instanceof Error ? err.message : String(err));
+      });
     return () => {
       cancelled = true;
     };
@@ -84,14 +97,28 @@ export function CompareDriversView({ years }: { years: number[] }) {
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve().then(() => !cancelled && setIsLoading(true));
+    Promise.resolve().then(() => !cancelled && setDriversError(null));
+
+    function reportError(err: unknown) {
+      if (cancelled) return;
+      setDriversError((prev) => prev ?? (err instanceof Error ? err.message : String(err)));
+    }
+
+    const pending: Promise<unknown>[] = [];
     if (driverA != null) {
-      getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r));
-      getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r));
+      pending.push(
+        getDriverStats(driverA, year).then((r) => !cancelled && setStatsA(r)).catch(reportError),
+        getDriverRadar(driverA, year).then((r) => !cancelled && setRadarA(r)).catch(reportError),
+      );
     }
     if (driverB != null) {
-      getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r));
-      getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r));
+      pending.push(
+        getDriverStats(driverB, year).then((r) => !cancelled && setStatsB(r)).catch(reportError),
+        getDriverRadar(driverB, year).then((r) => !cancelled && setRadarB(r)).catch(reportError),
+      );
     }
+    Promise.allSettled(pending).then(() => !cancelled && setIsLoading(false));
     return () => {
       cancelled = true;
     };
@@ -128,6 +155,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
         <select
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
+          aria-label="Select season"
           className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
         >
           {years.map((y) => (
@@ -137,6 +165,11 @@ export function CompareDriversView({ years }: { years: number[] }) {
           ))}
         </select>
       </div>
+
+      {seasonError && <FetchErrorMessage message={`Couldn't load season data: ${seasonError}`} />}
+      {driversError && (
+        <FetchErrorMessage message={`Couldn't load comparison data: ${driversError}`} />
+      )}
 
       {labels.length < 2 ? (
         <p className="text-sm text-[var(--color-muted-text)]">
@@ -148,6 +181,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <select
               value={driverA ?? ""}
               onChange={(e) => setDriverA(Number(e.target.value))}
+              aria-label="Select first driver"
               className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
             >
               {labels.map((l) => (
@@ -159,6 +193,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <select
               value={driverB ?? ""}
               onChange={(e) => setDriverB(Number(e.target.value))}
+              aria-label="Select second driver"
               className="rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
             >
               {labels.map((l) => (
@@ -173,6 +208,40 @@ export function CompareDriversView({ years }: { years: number[] }) {
             <p className="text-sm text-[var(--color-accent-red)]">
               Pick two different drivers to compare.
             </p>
+          ) : isLoading ? (
+            <>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <SkeletonEntityProfile label="Loading first driver…" />
+                <SkeletonEntityProfile label="Loading second driver…" />
+              </div>
+
+              <section>
+                <p className="label-caps text-xs text-[var(--color-muted-text)]">
+                  Predicted win share for a race this season
+                </p>
+                <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                  {[0, 1].map((i) => (
+                    <div
+                      key={i}
+                      role="status"
+                      aria-live="polite"
+                      className="rounded-xl bg-white/40 p-4"
+                    >
+                      <span className="sr-only">Loading win share…</span>
+                      <Skeleton className="h-4 w-1/2" />
+                      <Skeleton className="mt-2 h-7 w-1/3" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <p className="label-caps text-xs text-[var(--color-muted-text)]">Season profile</p>
+                <div className="mt-3">
+                  <SkeletonChart height="h-72" variant="radar" label="Loading season profile…" />
+                </div>
+              </section>
+            </>
           ) : (
             <>
               <div className="grid gap-6 sm:grid-cols-2">
@@ -187,6 +256,7 @@ export function CompareDriversView({ years }: { years: number[] }) {
                 <select
                   value={raceId ?? ""}
                   onChange={(e) => setRaceId(Number(e.target.value))}
+                  aria-label="Select race"
                   className="mt-3 rounded border border-[var(--color-hairline)] bg-transparent px-3 py-1.5 text-sm"
                 >
                   {races.map((r) => (
