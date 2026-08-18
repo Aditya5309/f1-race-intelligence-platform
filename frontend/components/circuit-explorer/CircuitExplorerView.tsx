@@ -115,9 +115,11 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
                   </p>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--color-muted-text)]">
-                  Track outline not available for this circuit.
-                </p>
+                <div className="flex h-72 items-center justify-center rounded-xl bg-white/40 p-4">
+                  <p className="text-sm text-[var(--color-muted-text)]">
+                    Track outline not available for this circuit.
+                  </p>
+                </div>
               )}
 
               {!stats || stats.races_held === 0 ? (
