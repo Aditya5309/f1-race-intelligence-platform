@@ -104,7 +104,7 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
             </>
           ) : (
             <>
-              {layout?.coordinates && (
+              {layout?.coordinates ? (
                 <div>
                   <div className="h-72 rounded-xl bg-white/40 p-4">
                     <TrackOutline coordinates={layout.coordinates} color={OTHER_COLOR} />
@@ -114,6 +114,10 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
                     <code>scripts/backfill_circuit_layouts.py</code>.
                   </p>
                 </div>
+              ) : (
+                <p className="text-sm text-[var(--color-muted-text)]">
+                  Track outline not available for this circuit.
+                </p>
               )}
 
               {!stats || stats.races_held === 0 ? (
