@@ -129,6 +129,13 @@ export function TeamView({ years }: { years: number[] }) {
     }
     Promise.resolve().then(() => !cancelled && setIsLoading(true));
     Promise.resolve().then(() => !cancelled && setConstructorError(null));
+    // Clear the previous constructor's fetch-derived state so a failed
+    // fetch can't leave stale data rendered under the new constructor's
+    // heading (the heading itself comes from `catalog`, which is always in
+    // sync with `constructorId`).
+    Promise.resolve().then(() => !cancelled && setStats(null));
+    Promise.resolve().then(() => !cancelled && setRaceResults([]));
+    Promise.resolve().then(() => !cancelled && setDrivers([]));
 
     function reportError(err: unknown) {
       if (cancelled) return;

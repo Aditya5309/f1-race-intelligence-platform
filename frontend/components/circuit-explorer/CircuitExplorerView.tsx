@@ -38,6 +38,11 @@ export function CircuitExplorerView({ catalog }: { catalog: CircuitCatalogEntry[
     let cancelled = false;
     Promise.resolve().then(() => !cancelled && setIsLoading(true));
     Promise.resolve().then(() => !cancelled && setError(null));
+    // Clear the previous entity's fetch-derived state so a failed fetch
+    // can't leave stale data rendered under the new entity's heading (the
+    // heading itself comes from `catalog`, which is always in sync).
+    Promise.resolve().then(() => !cancelled && setStats(null));
+    Promise.resolve().then(() => !cancelled && setLayout(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;

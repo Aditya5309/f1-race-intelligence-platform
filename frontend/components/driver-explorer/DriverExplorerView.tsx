@@ -108,6 +108,14 @@ export function DriverExplorerView({ years }: { years: number[] }) {
     }
     Promise.resolve().then(() => !cancelled && setIsLoading(true));
     Promise.resolve().then(() => !cancelled && setDriverError(null));
+    // Clear the previous driver's fetch-derived state so a failed fetch
+    // can't leave stale data rendered under the new driver's heading (the
+    // heading itself comes from `labels`/`driverRows`, which are always in
+    // sync with `driverId` via `scopeRows`).
+    Promise.resolve().then(() => !cancelled && setStats(null));
+    Promise.resolve().then(() => !cancelled && setRaceResults([]));
+    Promise.resolve().then(() => !cancelled && setProgression([]));
+    Promise.resolve().then(() => !cancelled && setRadar(null));
 
     function reportError(err: unknown) {
       if (cancelled) return;
