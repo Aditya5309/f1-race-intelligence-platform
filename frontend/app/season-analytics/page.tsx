@@ -61,6 +61,11 @@ export default async function SeasonAnalyticsPage({
         <p className="mt-1 text-sm text-[var(--color-muted-text)]">
           How the {year} season is unfolding, round by round.
         </p>
+        {year < 2010 && (
+          <p className="mt-1 text-xs text-[var(--color-muted-text)]">
+            {`⚠ ${year} is outside the model's validated era (trained and tested on 2010–2024 data) — treat these predictions with extra caution.`}
+          </p>
+        )}
       </div>
       <YearPicker years={years} selected={year} />
     </div>
