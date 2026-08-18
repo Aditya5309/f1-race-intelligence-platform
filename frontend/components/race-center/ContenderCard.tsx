@@ -3,12 +3,14 @@
 import { FadeIn } from "@/components/motion";
 import { motion as motionTokens } from "@/lib/design-tokens";
 import { constructorColor } from "@/lib/constructor-colors";
+import { accessibleBadgeTextColor } from "@/lib/accessible-badge-color";
 import { teamCode } from "@/lib/team-codes";
 import { ProbabilityBar } from "./ProbabilityBar";
 import type { DriverPrediction } from "@/lib/api";
 
 export function ContenderCard({ driver, index }: { driver: DriverPrediction; index: number }) {
   const color = constructorColor(driver.constructor_name);
+  const badgeTextColor = accessibleBadgeTextColor(color);
   return (
     <FadeIn
       y={10}
@@ -27,7 +29,7 @@ export function ContenderCard({ driver, index }: { driver: DriverPrediction; ind
         </div>
         <span
           className="label-caps shrink-0 rounded-full px-2 py-0.5 text-[10px] ring-1 ring-inset ring-black/15"
-          style={{ backgroundColor: `${color}22`, color }}
+          style={{ backgroundColor: `${color}22`, color: badgeTextColor }}
         >
           {teamCode(driver.constructor_name)}
         </span>

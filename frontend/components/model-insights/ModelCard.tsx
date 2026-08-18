@@ -14,11 +14,11 @@ export function ModelCard({ model }: { model: ModelInfo }) {
         ].map((s) => (
           <div key={s.label}>
             <p className="tabular text-lg font-semibold">{s.value}</p>
-            <p className="label-caps text-[10px] text-[var(--color-muted-text)]">{s.label}</p>
+            <p className="label-caps text-[10px] text-[var(--color-muted-text-on-dark)]">{s.label}</p>
           </div>
         ))}
       </div>
-      <p className="mt-4 text-xs text-[var(--color-muted-text)]">
+      <p className="mt-4 text-xs text-[var(--color-muted-text-on-dark)]">
         Run id: <span className="tabular">{model.run_id}</span>
       </p>
     </div>

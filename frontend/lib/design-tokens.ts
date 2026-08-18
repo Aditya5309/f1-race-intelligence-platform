@@ -16,10 +16,16 @@ export const color = {
   featureCardBackground: "#0A0A0A",
   text: "#111111",
   textOnDark: "#F5F1E8",
-  mutedText: "#8A8272", // warm gray, not cool gray
-  accentRed: "#E23A2E", // italic emphasis words, live/urgent status
-  accentBlue: "#3B6FE0", // CTAs, small highlight lines — sparing use only
-  liveGreen: "#3FCB6B", // small live-status indicator dot only
+  // Task C8 (2026-08-18): darkened from #8A8272 for 4.5:1 on the page bg /
+  // white/40 cards. mutedTextOnDark keeps the original value — it already
+  // passes at 5.2:1 on featureCardBackground, and this darker shade would
+  // fail there, so the two contexts need separate values.
+  mutedText: "#6F685B", // warm gray, not cool gray
+  mutedTextOnDark: "#8A8272", // pre-C8 mutedText value, kept for near-black cards
+  accentRed: "#C9271C", // italic emphasis words, live/urgent status (darkened, Task C8)
+  accentBlue: "#2760DD", // CTAs, small highlight lines — sparing use only (darkened, Task C8)
+  liveGreen: "#3FCB6B", // small live-status indicator dot only — NOT text-safe, see accentGreen
+  accentGreen: "#20773C", // Task C8: text-safe green (e.g. positive deltas) — liveGreen fails as text
   hairline: "#D9D2C2", // list-row dividers on the cream background
   hairlineOnDark: "#2A2A2A",
 } as const;

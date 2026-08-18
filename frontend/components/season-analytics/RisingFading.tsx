@@ -24,7 +24,7 @@ export function RisingFading({ trend }: { trend: DriverTrendRow[] }) {
             <span className="text-sm">{r.label}</span>
             <span className="tabular text-sm">
               {r.recent_avg.toFixed(1)} avg rank{" "}
-              <span className="text-[var(--color-live-green)]">{r.delta.toFixed(1)}</span>
+              <span className="text-[var(--color-accent-green)]">{r.delta.toFixed(1)}</span>
             </span>
           </div>
         ))}

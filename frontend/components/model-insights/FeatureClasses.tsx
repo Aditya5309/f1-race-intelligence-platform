@@ -1,6 +1,8 @@
 import { ERA_SENSITIVE_FEATURES, EXPERIMENTAL_FEATURES, STABLE_FEATURES, featureClassColor } from "@/lib/feature-classes";
+import { accessibleBadgeTextColor } from "@/lib/accessible-badge-color";
 
 function Column({ title, features, color }: { title: string; features: string[]; color: string }) {
+  const textColor = accessibleBadgeTextColor(color);
   return (
     <div>
       <p className="text-sm font-medium">
@@ -11,7 +13,7 @@ function Column({ title, features, color }: { title: string; features: string[];
           <span
             key={f}
             className="rounded-full px-2 py-0.5 text-[10px] ring-1 ring-inset ring-black/15"
-            style={{ backgroundColor: `${color}22`, color }}
+            style={{ backgroundColor: `${color}22`, color: textColor }}
           >
             {f}
           </span>

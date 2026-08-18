@@ -29,7 +29,7 @@ export function ValidationStats() {
           {STATS.map((s) => (
             <div key={s.label} title={s.help}>
               <p className="tabular text-2xl font-semibold">{s.value}</p>
-              <p className="label-caps text-[10px] text-[var(--color-muted-text)]">{s.label}</p>
+              <p className="label-caps text-[10px] text-[var(--color-muted-text-on-dark)]">{s.label}</p>
             </div>
           ))}
         </div>

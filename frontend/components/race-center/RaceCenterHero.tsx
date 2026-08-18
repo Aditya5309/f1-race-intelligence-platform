@@ -31,7 +31,7 @@ export function RaceCenterHero({ data }: { data: RaceCenterPrediction }) {
   return (
     <FadeIn className="relative overflow-hidden rounded-2xl bg-[var(--color-feature-card-bg)] p-8 text-[var(--color-text-on-dark)]">
       <CheckeredCorner />
-      <p className="label-caps text-xs text-[var(--color-muted-text)]">
+      <p className="label-caps text-xs text-[var(--color-muted-text-on-dark)]">
         Round {data.round} · {data.year} {data.isUpcoming && "· Up next"}
       </p>
       <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold sm:text-4xl">
@@ -41,7 +41,7 @@ export function RaceCenterHero({ data }: { data: RaceCenterPrediction }) {
         </em>
       </h1>
       {top?.constructor_name && (
-        <p className="mt-1 text-sm text-[var(--color-muted-text)]">{top.constructor_name}</p>
+        <p className="mt-1 text-sm text-[var(--color-muted-text-on-dark)]">{top.constructor_name}</p>
       )}
 
       <div className="mt-6 flex items-end gap-6">
@@ -50,23 +50,23 @@ export function RaceCenterHero({ data }: { data: RaceCenterPrediction }) {
           <span className="text-2xl">%</span>
         </span>
         <div className="pb-1">
-          <p className="label-caps text-xs text-[var(--color-muted-text)]">Win share</p>
+          <p className="label-caps text-xs text-[var(--color-muted-text-on-dark)]">Win share</p>
           <p className="mt-1 text-sm">
             <span aria-hidden>{"★".repeat(stars) + "☆".repeat(5 - stars)}</span>{" "}
-            <span className="text-[var(--color-muted-text)]">{label}</span>
+            <span className="text-[var(--color-muted-text-on-dark)]">{label}</span>
           </p>
         </div>
       </div>
 
       {data.isUpcoming && data.materialization_status && (
-        <p className="mt-4 text-xs text-[var(--color-muted-text)]">
+        <p className="mt-4 text-xs text-[var(--color-muted-text-on-dark)]">
           {data.materialization_status === "pre_qualifying"
             ? "⚠ Provisional — qualifying not yet complete for this race."
             : "🔮 Pre-race prediction — the grid is set, this race hasn't run yet."}
         </p>
       )}
       {!data.isUpcoming && data.model_top1_hit !== null && (
-        <p className="mt-4 text-xs text-[var(--color-muted-text)]">
+        <p className="mt-4 text-xs text-[var(--color-muted-text-on-dark)]">
           {data.model_top1_hit ? "✅ The model called it." : "❌ The model missed the winner."}
         </p>
       )}

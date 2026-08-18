@@ -11,10 +11,28 @@
   --color-feature-card-bg: #0a0a0a;
   --color-text: #111111;
   --color-text-on-dark: #f5f1e8;
-  --color-muted-text: #8a8272;
-  --color-accent-red: #e23a2e;
-  --color-accent-blue: #3b6fe0;
+  /* Task C8 (2026-08-18): darkened from #8a8272 to reach 4.5:1 on the page
+   * background / bg-white/40 cards (was 3.17/3.40). #8a8272 itself is kept
+   * below as --color-muted-text-on-dark — it already passes at 5.2:1 on
+   * --color-feature-card-bg, and this darker value would drop that to
+   * ~3.6:1, so the two contexts need separate values, not one token. */
+  --color-muted-text: #6f685b;
+  --color-muted-text-on-dark: #8a8272;
+  /* Task C8: darkened from #e23a2e to reach 4.5:1 on the page background
+   * (was 3.59:1). Verified this still clears 3:1 for the existing large
+   * italic-emphasis usages on both the page bg and --color-feature-card-bg
+   * (no separate on-dark value needed here, unlike muted-text above). */
+  --color-accent-red: #c9271c;
+  /* Task C8: darkened from #3b6fe0 to reach 4.5:1 on the page background
+   * (was 3.86:1). No on-dark usage of this token exists, so one value. */
+  --color-accent-blue: #2760dd;
   --color-live-green: #3fcb6b;
+  /* Task C8 (new token): --color-live-green is documented/intended for the
+   * small live-status indicator dot only (design-tokens.ts) and fails
+   * 4.5:1 as text (1.75:1) — rather than retuning the dot's color, this is
+   * a separate, text-safe green for the one place that was using
+   * live-green as text (Season Analytics' "Rising" delta). */
+  --color-accent-green: #20773c;
   --color-hairline: #d9d2c2;
   --color-hairline-on-dark: #2a2a2a;
 }
@@ -25,9 +43,11 @@
   --color-text: var(--color-text);
   --color-text-on-dark: var(--color-text-on-dark);
   --color-muted-text: var(--color-muted-text);
+  --color-muted-text-on-dark: var(--color-muted-text-on-dark);
   --color-accent-red: var(--color-accent-red);
   --color-accent-blue: var(--color-accent-blue);
   --color-live-green: var(--color-live-green);
+  --color-accent-green: var(--color-accent-green);
   --color-hairline: var(--color-hairline);
   --color-hairline-on-dark: var(--color-hairline-on-dark);
 
