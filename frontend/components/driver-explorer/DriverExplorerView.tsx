@@ -289,6 +289,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
               <p className="label-caps text-xs text-[var(--color-muted-text)]">Trends</p>
               <div className="mt-3 grid gap-6 sm:grid-cols-2">
                 <TrendLineChart
+                  title="Qualifying trend"
                   data={raceResults
                     .filter((r) => r.quali_position != null)
                     .map((r) => ({
@@ -302,6 +303,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
                   emptyMessage="No qualifying history in this scope."
                 />
                 <TrendLineChart
+                  title="Finishing trend"
                   data={raceResults
                     .filter((r) => r.finish != null)
                     .map((r) => ({ race: `${r.year} R${r.round}`, finish: r.finish }))}
@@ -315,6 +317,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
               <div className="mt-6 grid gap-6 sm:grid-cols-2">
                 {scope != null ? (
                   <TrendLineChart
+                    title={`Championship points · ${scope}`}
                     data={progression.map((p) => ({ round: `R${p.round}`, points: p.points }))}
                     xKey="round"
                     yKey="points"
@@ -328,6 +331,7 @@ export function DriverExplorerView({ years }: { years: number[] }) {
                   </p>
                 )}
                 <TrendLineChart
+                  title="Win share through the season"
                   data={driverRows.map((r) => ({
                     race: `${r.year} R${r.round}`,
                     win_probability: r.win_probability,

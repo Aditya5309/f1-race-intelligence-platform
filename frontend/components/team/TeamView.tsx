@@ -278,6 +278,7 @@ export function TeamView({ years }: { years: number[] }) {
               <p className="label-caps text-xs text-[var(--color-muted-text)]">Trends</p>
               <div className="mt-3 grid gap-6 sm:grid-cols-2">
                 <TrendLineChart
+                  title="Qualifying trend (avg. both cars)"
                   data={raceResults
                     .filter((r) => r.quali_position != null)
                     .map((r) => ({
@@ -291,6 +292,7 @@ export function TeamView({ years }: { years: number[] }) {
                   emptyMessage="No qualifying history in this scope."
                 />
                 <TrendLineChart
+                  title="Best finish per race"
                   data={raceResults
                     .filter((r) => r.finish != null)
                     .map((r) => ({ race: `${r.year} R${r.round}`, finish: r.finish }))}

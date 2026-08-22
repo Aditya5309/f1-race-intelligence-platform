@@ -16,6 +16,7 @@ export function TrendLineChart({
   color,
   invertY = false,
   emptyMessage,
+  title,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -23,29 +24,35 @@ export function TrendLineChart({
   color: string;
   invertY?: boolean;
   emptyMessage: string;
+  title?: string;
 }) {
   const chartReveal = useChartReveal();
   if (!data.length) {
     return <p className="text-sm text-[var(--color-muted-text)]">{emptyMessage}</p>;
   }
   return (
-    <div className="h-52">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data}>
-          <CartesianGrid stroke="var(--color-hairline)" vertical={false} />
-          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
-          <YAxis reversed={invertY} tick={{ fontSize: 11 }} />
-          <Tooltip />
-          <Line
-            type="monotone"
-            dataKey={yKey}
-            stroke={color}
-            dot={{ r: 3 }}
-            strokeWidth={2}
-            {...chartReveal}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+    <div>
+      {title && (
+        <p className="label-caps mb-1 text-[10px] text-[var(--color-muted-text)]">{title}</p>
+      )}
+      <div className="h-52">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid stroke="var(--color-hairline)" vertical={false} />
+            <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
+            <YAxis reversed={invertY} tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Line
+              type="monotone"
+              dataKey={yKey}
+              stroke={color}
+              dot={{ r: 3 }}
+              strokeWidth={2}
+              {...chartReveal}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
