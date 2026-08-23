@@ -10,7 +10,22 @@ import type { DriverPrediction } from "@/lib/api";
  * (the Phase 1 fix for pale team colors like Haas gray washing out on the
  * cream page), tabular win probability. Shared by Home's PredictionList
  * and Race Center's FullFieldTable — do not fork this markup per caller.
+ *
+ * `viewport` (frontend-animation-visibility-audit.md P0 fix): both lists
+ * can run to 20+ rows, so unlike a short card grid, most of a long list
+ * mounts below the fold — without this, those rows finished their FadeIn
+ * before the user ever scrolled to them. Each row's own IntersectionObserver
+ * fires independently as it individually scrolls into view. The stagger
+ * `delay` below is capped (not removed) for the same reason: it was tuned
+ * for rows that all mount at once (a "wave" down the initially-visible
+ * batch); left uncapped under per-row viewport-triggering, a deep-list row
+ * revealed by scrolling would wait an extra `index * staggerStep` (over a
+ * second, by row 20+) *after* the user already scrolled it into view —
+ * capping keeps the wave for the visible batch without that compounding,
+ * disconnected-feeling lag for rows revealed later by scrolling.
  */
+const MAX_STAGGER_INDEX = 6;
+
 export function DriverRow({
   driver,
   index,
@@ -27,7 +42,8 @@ export function DriverRow({
       y={0}
       duration={motionTokens.numberTick.duration}
       ease={motionTokens.numberTick.ease}
-      delay={index * motionTokens.staggerStep}
+      delay={Math.min(index, MAX_STAGGER_INDEX) * motionTokens.staggerStep}
+      viewport
       className="flex items-center gap-4 py-3 pl-3"
       style={{ borderLeft: `4px solid ${constructorColor(driver.constructor_name)}` }}
     >

@@ -12,15 +12,23 @@ export function ProbabilityBar({
   probability,
   color,
   delay = 0,
+  viewport = false,
 }: {
   probability: number;
   color: string;
   delay?: number;
+  viewport?: boolean;
 }) {
   const pct = Math.min(Math.max(probability, 0), 1) * 100;
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-hairline)]">
-      <GrowBar percent={pct} color={color} delay={delay} className="h-full rounded-full" />
+      <GrowBar
+        percent={pct}
+        color={color}
+        delay={delay}
+        viewport={viewport}
+        className="h-full rounded-full"
+      />
     </div>
   );
 }

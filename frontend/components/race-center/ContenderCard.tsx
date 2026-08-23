@@ -8,6 +8,15 @@ import { teamCode } from "@/lib/team-codes";
 import { ProbabilityBar } from "./ProbabilityBar";
 import type { DriverPrediction } from "@/lib/api";
 
+/**
+ * `viewport` (frontend-animation-visibility-audit.md P0 fix): this grid's
+ * cards sit below RaceCenterHero + PodiumRow, confirmed below the fold on
+ * initial load. The nested ProbabilityBar/GrowBar needs `viewport` passed
+ * through too, independently of this card's own FadeIn — a parent's
+ * `whileInView` only gates its own animated values, not a child's separate
+ * `animate` call, so without this the bar would still grow to full width
+ * off-screen the instant the (still node-invisible) card mounts.
+ */
 export function ContenderCard({ driver, index }: { driver: DriverPrediction; index: number }) {
   const color = constructorColor(driver.constructor_name);
   const badgeTextColor = accessibleBadgeTextColor(color);
@@ -15,6 +24,7 @@ export function ContenderCard({ driver, index }: { driver: DriverPrediction; ind
     <FadeIn
       y={10}
       delay={index * motionTokens.staggerStep}
+      viewport
       className="rounded-xl bg-white/40 p-4"
       style={{ borderLeft: `4px solid ${color}` }}
     >
@@ -45,6 +55,7 @@ export function ContenderCard({ driver, index }: { driver: DriverPrediction; ind
           probability={driver.win_probability}
           color={color}
           delay={index * motionTokens.staggerStep}
+          viewport
         />
       </div>
     </FadeIn>

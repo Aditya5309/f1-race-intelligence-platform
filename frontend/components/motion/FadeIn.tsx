@@ -10,6 +10,16 @@ import { motion as motionTokens } from "@/lib/design-tokens";
  * card-entrance convention (HeroRaceCard/ModelStatusCard/RaceCenterHero);
  * override x/y/duration/ease for call sites that used a different offset
  * or timing token (e.g. DriverRow's x-offset + numberTick timing).
+ *
+ * `viewport` (default false — mount-triggered, unchanged) opts into
+ * viewport-triggered entrance instead: `animate` becomes `whileInView`, so
+ * the element stays at its `initial` state until it scrolls into view,
+ * then plays the same transition once (see
+ * frontend-animation-visibility-audit.md — apply only to call sites with a
+ * confirmed below-the-fold finding, not speculatively). Reduced motion is
+ * unaffected either way — it's handled entirely by app/layout.tsx's
+ * `MotionConfig`, which suppresses the transition itself, not whether/when
+ * it's triggered.
  */
 export function FadeIn({
   children,
@@ -19,6 +29,7 @@ export function FadeIn({
   delay = 0,
   duration = motionTokens.cardEnter.duration,
   ease = motionTokens.cardEnter.ease,
+  viewport = false,
   className,
   style,
 }: {
@@ -29,14 +40,18 @@ export function FadeIn({
   delay?: number;
   duration?: number;
   ease?: (typeof motionTokens.cardEnter)["ease"] | (typeof motionTokens.numberTick)["ease"];
+  viewport?: boolean;
   className?: string;
   style?: CSSProperties;
 }) {
   const MotionTag = as === "li" ? motion.li : motion.div;
+  const trigger = viewport
+    ? { whileInView: { opacity: 1, x: 0, y: 0 }, viewport: { once: true, amount: 0.2 } }
+    : { animate: { opacity: 1, x: 0, y: 0 } };
   return (
     <MotionTag
       initial={{ opacity: 0, x, y }}
-      animate={{ opacity: 1, x: 0, y: 0 }}
+      {...trigger}
       transition={{ duration, ease, delay }}
       className={className}
       style={style}
