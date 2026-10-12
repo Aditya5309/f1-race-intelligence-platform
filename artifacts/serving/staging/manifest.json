@@ -2,8 +2,8 @@
   "name": "f1-winner",
   "version": "1",
   "alias": "Staging",
-  "run_id": "cca147c6acce4f56bfc9b0aed6678c75",
-  "trained_at": "2026-08-03T09:41:48+00:00",
+  "run_id": "9a77ca01ea8c437f8cdf0f11f0b9e715",
+  "trained_at": "2026-10-12T14:27:42+00:00",
   "calibration": "isotonic-oof",
   "model_class": "CalibratedModel",
   "metrics": {
@@ -21,5 +21,5 @@
   },
   "baseline_bootstrapped": false,
   "bundle_format_version": 1,
-  "exported_at": "2026-08-03T09:42:01+00:00"
+  "exported_at": "2026-10-12T14:27:55+00:00"
 }
