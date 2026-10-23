@@ -20,9 +20,10 @@ export function RacePicker({
   selectedRaceId: number;
   onSelect: (raceId: number) => void;
 }) {
+  const upcomingIsRedundant = upcoming != null && races.some((r) => r.race_id === upcoming.race_id);
   const entries: PickerEntry[] = [
     ...races.map((r) => ({ ...r, isUpcoming: false })),
-    ...(upcoming
+    ...(upcoming && !upcomingIsRedundant
       ? [{ race_id: upcoming.race_id, year: upcoming.year, round: upcoming.round, isUpcoming: true }]
       : []),
   ].sort((a, b) => a.year - b.year || a.round - b.round);

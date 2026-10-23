@@ -1,8 +1,18 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app), serving as the primary frontend for the F1 Race Winner Prediction project. It reads all data from the FastAPI backend in the repo root (`app/api.py`) — it has no database or data files of its own.
 
 ## Getting Started
 
-First, run the development server:
+**1. Start the backend with CORS enabled for this frontend's origin.** The API defaults to *denying all* cross-origin browser requests (a deliberate security default, Decision 044) — without this, every client-side fetch on this frontend fails with a generic `Failed to fetch` error, even though the API itself is running fine (confirm with `curl`, which isn't subject to CORS, to tell the two apart). From the repo root:
+
+```bash
+F1_CORS_ALLOW_ORIGINS=http://localhost:3000 python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
+```
+
+`scripts/dev.py` / `make dev` do **not** set this — that launcher starts the separate Streamlit dashboard (`app/dashboard.py`), not this Next.js app, and Streamlit's server-side HTTP client is never subject to browser CORS in the first place. Starting the backend via `make dev` first and this frontend second will reproduce the `Failed to fetch` failure.
+
+**2. Confirm `frontend/.env.local` exists** (copy it if not) with `NEXT_PUBLIC_API_URL=http://localhost:8000` — see that file's own comment for the matching origin the backend needs to allow.
+
+**3. Run the frontend's development server:**
 
 ```bash
 npm run dev

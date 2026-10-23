@@ -35,7 +35,15 @@ export function RaceCenterView({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const isUpcoming = upcoming != null && raceId === upcoming.race_id;
+  // A race matching `upcoming.race_id` is only genuinely upcoming if it
+  // isn't already in `races` (fresher features.parquet vs. upcoming's
+  // possibly-stale master_dataset.parquet) -- mirrors RacePicker's own
+  // dedup precedence: a completed race always wins over a stale
+  // "upcoming" label for the same race_id.
+  const isUpcoming =
+    upcoming != null &&
+    raceId === upcoming.race_id &&
+    !races.some((r) => r.race_id === upcoming.race_id);
 
   useEffect(() => {
     let cancelled = false;
