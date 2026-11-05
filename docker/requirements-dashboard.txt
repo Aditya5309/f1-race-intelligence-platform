@@ -9,7 +9,7 @@
 # Pins are copied by hand from pyproject.toml's `dependencies` array
 # (the single source of truth) — keep these two in sync whenever
 # pyproject.toml's pins change.
-pandas~=2.3.3
+pandas>=2.3.3,<3.1.0
 streamlit>=1.57,<1.60
 httpx~=0.28.1
 plotly>=6.7,<6.10
