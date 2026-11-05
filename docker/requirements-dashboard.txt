@@ -13,4 +13,4 @@ pandas~=2.3.3
 streamlit>=1.57,<1.60
 httpx~=0.28.1
 plotly>=6.7,<6.10
-pydantic-settings~=2.14.2
+pydantic-settings>=2.14.2,<2.16.0
