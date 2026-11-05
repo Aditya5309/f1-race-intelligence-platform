@@ -19,7 +19,7 @@
 # also sidesteps the same site-packages path-resolution trap Dockerfile.api
 # documents for app/config.py's `_ARTIFACTS_ROOT`.
 
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -33,7 +33,7 @@ COPY docker/requirements-dashboard.txt /tmp/requirements-dashboard.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-dashboard.txt
 
 # --- runtime -----------------------------------------------------------
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
